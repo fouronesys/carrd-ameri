@@ -112,6 +112,9 @@
       '<label class="wm-label">Tu nombre y apellido <span class="wm-req">*</span>',
       '  <input type="text" class="wm-input" id="wm-cliente" placeholder="Escribe tu nombre y apellido" autocomplete="name">',
       '</label>',
+      '<label class="wm-label">WhatsApp o red social para entregarte la evidencia <span class="wm-req">*</span>',
+      '  <input type="text" class="wm-input" id="wm-contacto" placeholder="Ej: WhatsApp +57 300 123 4567 o @tu_usuario" autocomplete="tel">',
+      '</label>',
       '<div class="wm-fieldset">',
       '  <div class="wm-fieldset-tit">Datos de la persona a trabajar</div>',
       '  <div class="wm-fieldset-sub">Pueden ser tuyos o de otra persona. Si no tienes los datos, sube una foto de la persona.</div>',
@@ -150,6 +153,7 @@
     var btnPagar = document.getElementById('wm-btn-pagar');
     var errorBox = document.getElementById('wm-error');
     var inpCliente = document.getElementById('wm-cliente');
+    var inpContacto = document.getElementById('wm-contacto');
     var inpObjNombre = document.getElementById('wm-obj-nombre');
     var inpObjFecha = document.getElementById('wm-obj-fecha');
     var inpObjFoto = document.getElementById('wm-obj-foto');
@@ -166,8 +170,9 @@
 
     function datosCompletos() {
       var cliente = inpCliente.value.trim();
+      var contacto = inpContacto.value.trim();
       var tienePersona = inpObjNombre.value.trim() || inpObjFecha.value || (inpObjFoto.files && inpObjFoto.files.length);
-      return checkbox.checked && cliente && tienePersona;
+      return checkbox.checked && cliente && contacto && tienePersona;
     }
 
     function actualizarBoton() {
@@ -176,7 +181,7 @@
     }
 
     checkbox.addEventListener('change', actualizarBoton);
-    [inpCliente, inpObjNombre, inpObjFecha, inpObjFoto, inpInfo].forEach(function (el) {
+    [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpInfo].forEach(function (el) {
       el.addEventListener('input', actualizarBoton);
       el.addEventListener('change', actualizarBoton);
     });
@@ -190,6 +195,8 @@
       if (btnPagar.disabled) return;
       var cliente = inpCliente.value.trim();
       if (!cliente) { mostrarError('Escribe tu nombre y apellido.'); return; }
+      var contacto = inpContacto.value.trim();
+      if (!contacto) { mostrarError('Escribe tu WhatsApp o red social para entregarte la evidencia.'); return; }
       var foto = inpObjFoto.files && inpObjFoto.files[0];
       if (!inpObjNombre.value.trim() && !inpObjFecha.value && !foto) {
         mostrarError('Proporciona los datos de la persona o sube una foto.');
@@ -202,6 +209,7 @@
 
       var fd = new FormData();
       fd.append('cliente_nombre', cliente);
+      fd.append('contacto', contacto);
       fd.append('objetivo_nombre', inpObjNombre.value.trim());
       fd.append('objetivo_fecha_nac', inpObjFecha.value);
       fd.append('info_extra', inpInfo.value.trim());

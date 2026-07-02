@@ -115,6 +115,9 @@ app.post('/api/booking', function (req, res) {
       const clienteNombre = (b.cliente_nombre || '').toString().trim();
       if (!clienteNombre) return res.status(400).json({ error: 'Escribe tu nombre y apellido.' });
 
+      const contacto = (b.contacto || '').toString().trim();
+      if (!contacto) return res.status(400).json({ error: 'Escribe tu WhatsApp o red social para entregarte la evidencia.' });
+
       const precio = parseInt(b.precio_cop, 10);
       if (!precio || precio < 1000) return res.status(400).json({ error: 'El precio no es válido.' });
       if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(precio)) {
@@ -135,6 +138,7 @@ app.post('/api/booking', function (req, res) {
         precio_cop: precio,
         precio_texto: (b.precio_texto || ('$' + precio + ' COP')).toString().slice(0, 60),
         cliente_nombre: clienteNombre.slice(0, 160),
+        contacto: contacto.slice(0, 200),
         objetivo_nombre: objNombre.slice(0, 200),
         objetivo_fecha_nac: objFecha.slice(0, 40),
         objetivo_foto: req.file ? req.file.filename : '',
