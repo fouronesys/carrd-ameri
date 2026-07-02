@@ -29,8 +29,11 @@
     { nombre: 'Mercado Pago', detalle: 'opacelia (Celeste Villalba)' },
     { nombre: 'Yape', detalle: '964 806 000 (Andrea)' },
     { nombre: 'Banco Popular RD', detalle: 'Ahorros: 844480111 · Cédula: 40215343837' },
-    { nombre: 'También', detalle: 'Astropay, Paypal, Western Union y Remitly' }
+    { nombre: 'También', detalle: 'Western Union y Remitly' }
   ];
+
+  var URL_ASTROPAY = 'https://onetouch.astropay.com/payment?external_reference_id=D90q4hqQNtroahncdgks9jBSIKMwxV89';
+  var CORREO_PAYPAL = 'galvisestefania038@gmail.com';
 
   function extraerPrecioCOP(texto) {
     var match = texto.match(REGEX_COP);
@@ -110,6 +113,11 @@
       '#wompi-modal .wm-transfer-only{display:none;}',
       '#wompi-modal.modo-transfer .wm-transfer-only{display:block;}',
       '#wompi-modal.modo-transfer .wm-wompi-only{display:none;}',
+      '#wompi-modal .wm-pagos{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;}',
+      '#wompi-modal .wm-pago-btn{display:block;width:100%;padding:11px;background:rgba(125,55,84,0.28);color:#fff;font-family:"Poppins",sans-serif;font-size:12.5px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border:1px solid #C2A7B7;border-radius:48px;text-align:center;text-decoration:none;transition:transform 0.125s ease,background 0.2s;}',
+      '#wompi-modal .wm-pago-btn:hover{transform:translateY(-1px);background:rgba(125,55,84,0.5);}',
+      '#wompi-modal .wm-pago-cap{font-size:11px;color:#e0c0cf;text-align:center;margin-top:-2px;line-height:1.4;}',
+      '#wompi-modal .wm-pago-cap b{color:#fff;}',
       '.p{position:relative;}'
     ].join('');
     document.head.appendChild(estilos);
@@ -165,6 +173,11 @@
       '  <div class="wm-metodos">',
       '    <div class="wm-metodos-tit">Realiza el pago a cualquiera de estos métodos:</div>',
       '    ' + metodosItems,
+      '  </div>',
+      '  <div class="wm-pagos">',
+      '    <a class="wm-pago-btn" href="' + URL_ASTROPAY + '" target="_blank" rel="noopener">Pagar por AstroPay ↗</a>',
+      '    <a class="wm-pago-btn" href="https://www.paypal.com/myaccount/transfer/homepage/pay" target="_blank" rel="noopener">Pagar por PayPal ↗</a>',
+      '    <div class="wm-pago-cap">Envía tu pago de PayPal a: <b>' + CORREO_PAYPAL + '</b></div>',
       '  </div>',
       '  <label class="wm-label">Sube el comprobante de tu pago <span class="wm-req">*</span>',
       '    <input type="file" class="wm-input wm-file" id="wm-comprobante" accept="image/*">',
