@@ -46,7 +46,7 @@ function conComisionWompi(baseCop) {
 }
 
 // --- Tasa del dólar (TRM oficial Colombia) + sobretasa fija por dólar para pagos en USD. ---
-const USD_SOBRETASA = 600;
+const USD_SOBRETASA = 200;
 const TRM_FILE = path.join(db.DATA_DIR, 'trm.json');
 let TRM = { valor: 0, actualizado: 0 };
 try {
