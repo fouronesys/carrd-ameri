@@ -285,6 +285,16 @@
       return Math.max(estado.pctFecha || 0, estado.pctCodigo || 0);
     }
 
+    // USD solo informativo: refleja el descuento y/o el adelanto igual que el COP.
+    function usdConDescuento(pct, incluyeAdelanto) {
+      var n = parseFloat(String(estado.precioUSD || '').replace(',', '.'));
+      if (isNaN(n)) return '';
+      n = n * (1 - (Number(pct) || 0) / 100);
+      if (incluyeAdelanto) n += parseFloat(ADELANTO_USD);
+      var r = Math.round(n * 100) / 100;
+      return Number.isInteger(r) ? String(r) : r.toFixed(2);
+    }
+
     function actualizarPrecio() {
       if (estado.adelanto === 'solo') {
         estado.precioFinal = ADELANTO_COP;
@@ -296,13 +306,16 @@
       if (estado.esHechizo && pct > 0) {
         var fin = aplicarDescuentoCliente(estado.base, pct) + extra;
         estado.precioFinal = fin;
+        var usdFin = usdConDescuento(pct, estado.incluyeAdelanto);
         precioEl.innerHTML = '<span class="wm-precio-tachado">' + estado.precioTexto + '</span> $' +
-          fin.toLocaleString('es-CO') + ' COP <span class="wm-precio-off">-' + pct + '%' +
-          (extra ? ' + adelanto' : '') + '</span>';
+          fin.toLocaleString('es-CO') + ' COP' + (usdFin ? ' · ' + usdFin + ' USD' : '') +
+          ' <span class="wm-precio-off">-' + pct + '%' + (extra ? ' + adelanto' : '') + '</span>';
       } else if (extra) {
         estado.precioFinal = estado.precioCOP + extra;
+        var usdAde = usdConDescuento(0, true);
         precioEl.innerHTML = '$' + estado.precioFinal.toLocaleString('es-CO') +
-          ' COP <span class="wm-precio-off">+ adelanto</span>';
+          ' COP' + (usdAde ? ' · ' + usdAde + ' USD' : '') +
+          ' <span class="wm-precio-off">+ adelanto</span>';
       } else {
         estado.precioFinal = estado.precioCOP;
         precioEl.textContent = estado.precioTexto;

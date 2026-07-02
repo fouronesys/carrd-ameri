@@ -349,6 +349,15 @@ app.post('/api/booking', function (req, res) {
       const codigoEnviado = (b.codigo || '').toString().trim();
       const info = claveEnviada ? calcularDescuentoHechizo(claveEnviada, codigoEnviado, base) : null;
 
+      // El USD es solo informativo (Wompi cobra en COP); se recalcula en paralelo
+      // al COP para que el descuento y el adelanto también se reflejen en dólares.
+      let usdNum = parseFloat((b.precio_usd || '').toString().replace(',', '.'));
+      let precioUsd = (b.precio_usd || '').toString().slice(0, 20);
+      const fmtUsd = (n) => {
+        const r = Math.round(n * 100) / 100;
+        return Number.isInteger(r) ? String(r) : r.toFixed(2);
+      };
+
       let precio = base;
       let precioTexto;
       let precioOriginal = 0;
@@ -360,6 +369,10 @@ app.post('/api/booking', function (req, res) {
         descuentoPct = info.pct;
         codigoAplicado = info.codigoAplicado;
         precioTexto = '$' + precio.toLocaleString('es-CO') + ' COP (-' + info.pct + '%)';
+        if (!isNaN(usdNum)) {
+          usdNum = usdNum * (1 - info.pct / 100);
+          precioTexto += ' · ' + fmtUsd(usdNum) + ' USD';
+        }
       } else {
         precioTexto = (b.precio_texto || ('$' + precio + ' COP')).toString().slice(0, 80);
       }
@@ -377,7 +390,12 @@ app.post('/api/booking', function (req, res) {
         adelanto = 'incluido';
         precioTexto = '$' + precio.toLocaleString('es-CO') + ' COP' +
           (descuentoPct ? ' (-' + descuentoPct + '% + adelanto)' : ' (incluye adelanto)');
+        if (!isNaN(usdNum)) {
+          usdNum += parseFloat(ADELANTO_USD);
+          precioTexto += ' · ' + fmtUsd(usdNum) + ' USD';
+        }
       }
+      if (!isNaN(usdNum)) precioUsd = fmtUsd(usdNum);
 
       const objNombre = (b.objetivo_nombre || '').toString().trim();
       const objFecha = (b.objetivo_fecha_nac || '').toString().trim();
@@ -395,8 +413,8 @@ app.post('/api/booking', function (req, res) {
         ref: ref,
         producto: (b.producto || '').toString().slice(0, 200),
         precio_cop: precio,
-        precio_usd: (b.precio_usd || '').toString().slice(0, 20),
-        precio_texto: precioTexto.toString().slice(0, 80),
+        precio_usd: precioUsd,
+        precio_texto: precioTexto.toString().slice(0, 100),
         precio_original: precioOriginal || '',
         descuento_pct: descuentoPct || '',
         codigo_promo: codigoAplicado || '',
