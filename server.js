@@ -19,6 +19,11 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ASSISTANT_PASSWORD = process.env.ASSISTANT_PASSWORD || '';
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
 
+// Adelanto (urgencia): recargo fijo para entrega en un máximo de 2 días.
+// Debe coincidir con el valor mostrado en el catálogo y en assets/wompi.js.
+const ADELANTO_COP = 28000;
+const ADELANTO_USD = '10';
+
 // Precios válidos: se extraen del catálogo (index.html) para evitar montos manipulados.
 function cargarPreciosValidos() {
   try {
@@ -289,6 +294,45 @@ app.post('/api/booking', function (req, res) {
       const clienteNombre = (b.cliente_nombre || '').toString().trim();
       if (!clienteNombre) return res.status(400).json({ error: 'Escribe tu nombre y apellido.' });
 
+      const esTransferencia = (b.metodo || '').toString().trim() === 'transferencia';
+
+      // --- Pago de adelanto (urgencia) suelto: formulario corto ---
+      // Solo se piden el nombre del cliente y el/los trabajos para los que se paga.
+      if ((b.adelanto || '').toString().trim() === 'solo') {
+        const trabajos = (b.info_extra || '').toString().trim();
+        if (!trabajos) return res.status(400).json({ error: 'Escribe para cuál(es) trabajo(s) es el adelanto.' });
+        if (esTransferencia && !comprobanteFile) {
+          return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
+        }
+        const refA = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
+        const registroA = {
+          ref: refA,
+          producto: 'Adelanto (urgencia)',
+          precio_cop: ADELANTO_COP,
+          precio_usd: ADELANTO_USD,
+          precio_texto: '$' + ADELANTO_COP.toLocaleString('es-CO') + ' COP · ' + ADELANTO_USD + ' USD',
+          precio_original: '',
+          descuento_pct: '',
+          codigo_promo: '',
+          metodo: esTransferencia ? 'transferencia' : 'wompi',
+          cliente_nombre: clienteNombre.slice(0, 160),
+          contacto: '',
+          objetivo_nombre: '',
+          objetivo_fecha_nac: '',
+          objetivo_foto: '',
+          comprobante: comprobanteFile ? comprobanteFile.filename : '',
+          info_extra: trabajos.slice(0, 2000),
+          adelanto: 'solo',
+          estado: esTransferencia ? 'pendiente_verificacion' : 'pendiente_pago',
+          wompi_tx: '',
+          correo_enviado: false,
+          creado_en: new Date().toISOString(),
+          pagado_en: '',
+        };
+        db.crearAgendamiento(registroA);
+        return res.json({ ok: true, ref: refA, precio_cop: ADELANTO_COP, precio_texto: registroA.precio_texto });
+      }
+
       const contacto = (b.contacto || '').toString().trim();
       if (!contacto) return res.status(400).json({ error: 'Escribe tu WhatsApp o red social para entregarte la evidencia.' });
 
@@ -320,6 +364,21 @@ app.post('/api/booking', function (req, res) {
         precioTexto = (b.precio_texto || ('$' + precio + ' COP')).toString().slice(0, 80);
       }
 
+      // Adelanto (urgencia) añadido a un hechizo: recargo fijo sobre el total.
+      // Solo aplica a hechizos reales del catálogo (info != null exige que la
+      // clave y el precio base coincidan con un hechizo existente). Si llega la
+      // marca sin un hechizo válido, se rechaza para no aceptar datos manipulados.
+      let adelanto = '';
+      if ((b.incluye_adelanto || '').toString().trim() === '1') {
+        if (!info) {
+          return res.status(400).json({ error: 'El adelanto solo está disponible para los hechizos.' });
+        }
+        precio += ADELANTO_COP;
+        adelanto = 'incluido';
+        precioTexto = '$' + precio.toLocaleString('es-CO') + ' COP' +
+          (descuentoPct ? ' (-' + descuentoPct + '% + adelanto)' : ' (incluye adelanto)');
+      }
+
       const objNombre = (b.objetivo_nombre || '').toString().trim();
       const objFecha = (b.objetivo_fecha_nac || '').toString().trim();
       const tieneFoto = !!fotoFile;
@@ -327,7 +386,6 @@ app.post('/api/booking', function (req, res) {
         return res.status(400).json({ error: 'Proporciona el nombre o la fecha de nacimiento de la persona, o sube una foto.' });
       }
 
-      const esTransferencia = (b.metodo || '').toString().trim() === 'transferencia';
       if (esTransferencia && !comprobanteFile) {
         return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
       }
@@ -350,6 +408,7 @@ app.post('/api/booking', function (req, res) {
         objetivo_foto: fotoFile ? fotoFile.filename : '',
         comprobante: comprobanteFile ? comprobanteFile.filename : '',
         info_extra: (b.info_extra || '').toString().trim().slice(0, 2000),
+        adelanto: adelanto,
         estado: esTransferencia ? 'pendiente_verificacion' : 'pendiente_pago',
         wompi_tx: '',
         correo_enviado: false,

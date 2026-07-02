@@ -35,6 +35,12 @@
   var URL_ASTROPAY = 'https://onetouch.astropay.com/payment?external_reference_id=D90q4hqQNtroahncdgks9jBSIKMwxV89';
   var CORREO_PAYPAL = 'galvisestefania038@gmail.com';
 
+  // Adelanto (urgencia): mismo valor que la "urgencia" del catálogo. Debe
+  // coincidir con ADELANTO_COP/ADELANTO_USD en server.js.
+  var ADELANTO_COP = 28000;
+  var ADELANTO_USD = '10';
+  var ADELANTO_TEXTO = '$28.000 COP · 10 USD';
+
   function extraerPrecioCOP(texto) {
     var match = texto.match(REGEX_COP);
     if (match) {
@@ -188,10 +194,13 @@
       '<label class="wm-label">Tu nombre y apellido <span class="wm-req">*</span>',
       '  <input type="text" class="wm-input" id="wm-cliente" placeholder="Escribe tu nombre y apellido" autocomplete="name">',
       '</label>',
-      '<label class="wm-label">WhatsApp o red social para entregarte la evidencia <span class="wm-req">*</span>',
+      '<label class="wm-label wm-adelanto-solo-only" id="wm-adelanto-trabajos-wrap" style="display:none">¿Para cuál(es) trabajo(s) es este adelanto? <span class="wm-req">*</span>',
+      '  <textarea class="wm-input wm-textarea" id="wm-adelanto-trabajos" placeholder="Escribe el nombre del trabajo o hechizo para el que pagas el adelanto..."></textarea>',
+      '</label>',
+      '<label class="wm-label wm-normal-only">WhatsApp o red social para entregarte la evidencia <span class="wm-req">*</span>',
       '  <input type="text" class="wm-input" id="wm-contacto" placeholder="Ej: WhatsApp +57 300 123 4567 o @tu_usuario" autocomplete="tel">',
       '</label>',
-      '<div class="wm-fieldset">',
+      '<div class="wm-fieldset wm-normal-only">',
       '  <div class="wm-fieldset-tit">Datos de la persona a trabajar</div>',
       '  <div class="wm-fieldset-sub">Pueden ser tuyos o de otra persona. Si no tienes los datos, sube una foto de la persona.</div>',
       '  <label class="wm-label">Nombre y apellidos',
@@ -204,9 +213,15 @@
       '    <input type="file" class="wm-input wm-file" id="wm-obj-foto" accept="image/*">',
       '  </label>',
       '</div>',
-      '<label class="wm-label">Otra información que desees proporcionar',
+      '<label class="wm-label wm-normal-only">Otra información que desees proporcionar',
       '  <textarea class="wm-input wm-textarea" id="wm-info" placeholder="Escribe aquí cualquier detalle adicional..."></textarea>',
       '</label>',
+      '<div class="wm-adelanto-add wm-normal-only" id="wm-adelanto-add" style="display:none">',
+      '  <label class="wm-check-wrap">',
+      '    <input type="checkbox" id="wm-adelanto-check">',
+      '    <span>⚡ <strong>Añadir adelanto (urgencia)</strong>: entrega en un máximo de 2 días. Recargo de <strong>$28.000 COP / $10 USD</strong>.</span>',
+      '  </label>',
+      '</div>',
       '<div class="wm-transfer-only">',
       '  <hr class="wm-divider">',
       '  <div class="wm-metodos">',
@@ -242,6 +257,7 @@
     var estado = {
       precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi',
       esHechizo: false, clave: '', base: 0, pctFecha: 0, pctCodigo: 0, codigo: '', precioFinal: 0,
+      adelanto: '', incluyeAdelanto: false,
     };
 
     var checkbox = document.getElementById('wm-acepto');
@@ -259,18 +275,34 @@
     var inpCodigo = document.getElementById('wm-codigo');
     var btnCodigo = document.getElementById('wm-codigo-btn');
     var codigoMsg = document.getElementById('wm-codigo-msg');
+    var adelantoAddWrap = document.getElementById('wm-adelanto-add');
+    var adelantoCheck = document.getElementById('wm-adelanto-check');
+    var adelantoTrabajosWrap = document.getElementById('wm-adelanto-trabajos-wrap');
+    var inpAdelantoTrabajos = document.getElementById('wm-adelanto-trabajos');
+    var normalOnlyEls = Array.prototype.slice.call(modal.querySelectorAll('.wm-normal-only'));
 
     function pctActual() {
       return Math.max(estado.pctFecha || 0, estado.pctCodigo || 0);
     }
 
     function actualizarPrecio() {
+      if (estado.adelanto === 'solo') {
+        estado.precioFinal = ADELANTO_COP;
+        precioEl.textContent = ADELANTO_TEXTO;
+        return;
+      }
+      var extra = estado.incluyeAdelanto ? ADELANTO_COP : 0;
       var pct = pctActual();
       if (estado.esHechizo && pct > 0) {
-        var fin = aplicarDescuentoCliente(estado.base, pct);
+        var fin = aplicarDescuentoCliente(estado.base, pct) + extra;
         estado.precioFinal = fin;
         precioEl.innerHTML = '<span class="wm-precio-tachado">' + estado.precioTexto + '</span> $' +
-          fin.toLocaleString('es-CO') + ' COP <span class="wm-precio-off">-' + pct + '%</span>';
+          fin.toLocaleString('es-CO') + ' COP <span class="wm-precio-off">-' + pct + '%' +
+          (extra ? ' + adelanto' : '') + '</span>';
+      } else if (extra) {
+        estado.precioFinal = estado.precioCOP + extra;
+        precioEl.innerHTML = '$' + estado.precioFinal.toLocaleString('es-CO') +
+          ' COP <span class="wm-precio-off">+ adelanto</span>';
       } else {
         estado.precioFinal = estado.precioCOP;
         precioEl.textContent = estado.precioTexto;
@@ -335,10 +367,14 @@
 
     function datosCompletos() {
       var cliente = inpCliente.value.trim();
+      var comprobanteOk = estado.modo !== 'transferencia' || (inpComprobante.files && inpComprobante.files.length);
+      if (!checkbox.checked || !cliente || !comprobanteOk) return false;
+      if (estado.adelanto === 'solo') {
+        return !!inpAdelantoTrabajos.value.trim();
+      }
       var contacto = inpContacto.value.trim();
       var tienePersona = inpObjNombre.value.trim() || inpObjFecha.value || (inpObjFoto.files && inpObjFoto.files.length);
-      var comprobanteOk = estado.modo !== 'transferencia' || (inpComprobante.files && inpComprobante.files.length);
-      return checkbox.checked && cliente && contacto && tienePersona && comprobanteOk;
+      return !!(contacto && tienePersona);
     }
 
     function actualizarBoton() {
@@ -347,9 +383,15 @@
     }
 
     checkbox.addEventListener('change', actualizarBoton);
-    [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpComprobante, inpInfo].forEach(function (el) {
+    [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpComprobante, inpInfo, inpAdelantoTrabajos].forEach(function (el) {
       el.addEventListener('input', actualizarBoton);
       el.addEventListener('change', actualizarBoton);
+    });
+
+    adelantoCheck.addEventListener('change', function () {
+      estado.incluyeAdelanto = adelantoCheck.checked;
+      actualizarPrecio();
+      actualizarBoton();
     });
 
     document.getElementById('wm-cerrar').addEventListener('click', cerrarModal);
@@ -361,12 +403,23 @@
       if (btnPagar.disabled) return;
       var cliente = inpCliente.value.trim();
       if (!cliente) { mostrarError('Escribe tu nombre y apellido.'); return; }
-      var contacto = inpContacto.value.trim();
-      if (!contacto) { mostrarError('Escribe tu WhatsApp o red social para entregarte la evidencia.'); return; }
-      var foto = inpObjFoto.files && inpObjFoto.files[0];
-      if (!inpObjNombre.value.trim() && !inpObjFecha.value && !foto) {
-        mostrarError('Proporciona los datos de la persona o sube una foto.');
-        return;
+
+      var esAdelantoSolo = estado.adelanto === 'solo';
+      var contacto = '';
+      var foto = null;
+      if (esAdelantoSolo) {
+        if (!inpAdelantoTrabajos.value.trim()) {
+          mostrarError('Escribe para cuál(es) trabajo(s) es el adelanto.');
+          return;
+        }
+      } else {
+        contacto = inpContacto.value.trim();
+        if (!contacto) { mostrarError('Escribe tu WhatsApp o red social para entregarte la evidencia.'); return; }
+        foto = inpObjFoto.files && inpObjFoto.files[0];
+        if (!inpObjNombre.value.trim() && !inpObjFecha.value && !foto) {
+          mostrarError('Proporciona los datos de la persona o sube una foto.');
+          return;
+        }
       }
       var esTransfer = estado.modo === 'transferencia';
       var comprobante = inpComprobante.files && inpComprobante.files[0];
@@ -381,21 +434,31 @@
 
       var fd = new FormData();
       fd.append('cliente_nombre', cliente);
-      fd.append('contacto', contacto);
-      fd.append('objetivo_nombre', inpObjNombre.value.trim());
-      fd.append('objetivo_fecha_nac', inpObjFecha.value);
-      fd.append('info_extra', inpInfo.value.trim());
-      fd.append('producto', estado.nombre);
-      fd.append('precio_cop', String(estado.precioCOP));
-      fd.append('precio_texto', estado.precioTexto);
-      fd.append('precio_usd', estado.precioUSD || '');
       fd.append('metodo', esTransfer ? 'transferencia' : 'wompi');
-      if (estado.esHechizo && estado.clave) {
-        fd.append('es_hechizo', '1');
-        fd.append('hechizo_clave', estado.clave);
-        if (estado.codigo) fd.append('codigo', estado.codigo);
+      if (esAdelantoSolo) {
+        fd.append('adelanto', 'solo');
+        fd.append('producto', 'Adelanto (urgencia)');
+        fd.append('precio_cop', String(ADELANTO_COP));
+        fd.append('precio_texto', ADELANTO_TEXTO);
+        fd.append('precio_usd', ADELANTO_USD);
+        fd.append('info_extra', inpAdelantoTrabajos.value.trim());
+      } else {
+        fd.append('contacto', contacto);
+        fd.append('objetivo_nombre', inpObjNombre.value.trim());
+        fd.append('objetivo_fecha_nac', inpObjFecha.value);
+        fd.append('info_extra', inpInfo.value.trim());
+        fd.append('producto', estado.nombre);
+        fd.append('precio_cop', String(estado.precioCOP));
+        fd.append('precio_texto', estado.precioTexto);
+        fd.append('precio_usd', estado.precioUSD || '');
+        if (estado.esHechizo && estado.clave) {
+          fd.append('es_hechizo', '1');
+          fd.append('hechizo_clave', estado.clave);
+          if (estado.codigo) fd.append('codigo', estado.codigo);
+        }
+        if (estado.incluyeAdelanto) fd.append('incluye_adelanto', '1');
+        if (foto) fd.append('objetivo_foto', foto);
       }
-      if (foto) fd.append('objetivo_foto', foto);
       if (comprobante) fd.append('comprobante', comprobante);
 
       fetch('/api/booking', { method: 'POST', body: fd })
@@ -440,13 +503,16 @@
       limpiarError();
     }
 
-    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo, hechizoInfo) {
+    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo, hechizoInfo, esAdelantoSolo) {
+      var solo = !!esAdelantoSolo;
+      estado.adelanto = solo ? 'solo' : '';
+      estado.incluyeAdelanto = false;
       estado.precioCOP = precioCOP;
       estado.precioUSD = precioUSD || '';
       estado.nombre = nombre;
       estado.precioTexto = precioTexto;
       estado.modo = modo === 'transferencia' ? 'transferencia' : 'wompi';
-      estado.esHechizo = !!(hechizoInfo && hechizoInfo.clave);
+      estado.esHechizo = !solo && !!(hechizoInfo && hechizoInfo.clave);
       estado.clave = estado.esHechizo ? hechizoInfo.clave : '';
       estado.base = precioCOP;
       estado.pctFecha = estado.esHechizo ? (Number(hechizoInfo.pctFecha) || 0) : 0;
@@ -454,7 +520,12 @@
       estado.codigo = '';
       modal.classList.toggle('modo-transfer', estado.modo === 'transferencia');
       document.getElementById('wm-nombre-producto').textContent = nombre;
+      normalOnlyEls.forEach(function (el) { el.style.display = solo ? 'none' : ''; });
+      adelantoTrabajosWrap.style.display = solo ? 'block' : 'none';
+      adelantoAddWrap.style.display = (!solo && estado.esHechizo) ? 'block' : 'none';
       promoWrap.style.display = estado.esHechizo ? 'block' : 'none';
+      adelantoCheck.checked = false;
+      inpAdelantoTrabajos.value = '';
       inpCodigo.value = '';
       mostrarMsgCodigo('', '');
       actualizarPrecio();
@@ -525,8 +596,22 @@
     });
   }
 
+  function wireBotonesAdelanto(abrirModal) {
+    var bw = document.getElementById('wm-adelanto-wompi');
+    if (bw) bw.addEventListener('click', function (e) {
+      e.preventDefault();
+      abrirModal('Adelanto (urgencia)', ADELANTO_COP, ADELANTO_TEXTO, ADELANTO_USD, 'wompi', null, true);
+    });
+    var bt = document.getElementById('wm-adelanto-transfer');
+    if (bt) bt.addEventListener('click', function (e) {
+      e.preventDefault();
+      abrirModal('Adelanto (urgencia)', ADELANTO_COP, ADELANTO_TEXTO, ADELANTO_USD, 'transferencia', null, true);
+    });
+  }
+
   function init() {
     var abrirModal = crearModal();
+    wireBotonesAdelanto(abrirModal);
     // Carga las promociones por fecha activas antes de dibujar botones/precios.
     try {
       fetch('/api/promociones')
