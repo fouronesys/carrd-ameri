@@ -326,10 +326,10 @@
       }
     }
 
-    // Al elegir USD el cobro es por PayPal/AstroPay (Wompi solo cobra pesos):
-    // se muestra el bloque de pago manual y se oculta el botón de Wompi.
+    // Manual = transferencia (se sube comprobante). En dólares por transferencia
+    // se paga por PayPal/AstroPay; en dólares por Wompi se cobra en pesos.
     function esManual() {
-      return estado.modo === 'transferencia' || estado.moneda === 'usd';
+      return estado.modo === 'transferencia';
     }
     function aplicarModoPago() {
       modal.classList.toggle('modo-transfer', esManual());
@@ -352,7 +352,8 @@
       return Math.max(estado.pctFecha || 0, estado.pctCodigo || 0);
     }
 
-    // USD solo informativo: refleja el descuento y/o el adelanto igual que el COP.
+    // USD: refleja el descuento y/o el adelanto igual que el COP. Es el monto
+    // cobrado si se paga en dólares por transferencia (PayPal/AstroPay).
     function usdConDescuento(pct, incluyeAdelanto) {
       var n = parseFloat(String(estado.precioUSD || '').replace(',', '.'));
       if (isNaN(n)) return '';
@@ -368,14 +369,20 @@
       return usdConDescuento(estado.esHechizo ? pctActual() : 0, estado.incluyeAdelanto);
     }
 
-    // Muestra el total a pagar. En dólares se muestra solo el monto en USD (sin
-    // conversión ni tasa); en pesos, el total en COP con la comisión de Wompi.
+    // Muestra el total a pagar. En dólares por transferencia se muestra solo el
+    // monto en USD; en dólares por Wompi no se muestra la conversión (la muestra
+    // Wompi en su checkout); en pesos, el total en COP con la comisión de Wompi.
     function refrescarTotal() {
       if (!totalEl) return;
       if (estado.moneda === 'usd') {
-        var usd = servicioUsdActual();
-        totalEl.innerHTML = 'Total a pagar: ' + (usd || '—') + ' USD' +
-          '<small>se paga por PayPal o AstroPay</small>';
+        if (esManual()) {
+          var usd = servicioUsdActual();
+          totalEl.innerHTML = 'Total a pagar: ' + (usd || '—') + ' USD' +
+            '<small>se paga por PayPal o AstroPay</small>';
+        } else {
+          totalEl.innerHTML = 'El total se mostrará en el checkout de Wompi' +
+            '<small>el pago se realiza en pesos (COP)</small>';
+        }
         return;
       }
       var esWompi = estado.modo === 'wompi';

@@ -342,9 +342,11 @@ app.post('/api/booking', function (req, res) {
 
       const esTransferencia = (b.metodo || '').toString().trim() === 'transferencia';
       const moneda = (b.moneda || 'cop').toString().toLowerCase() === 'usd' ? 'usd' : 'cop';
-      // El pago en dólares nunca pasa por Wompi (solo cobra COP): se paga por
-      // PayPal/AstroPay y se verifica manualmente, igual que una transferencia.
-      const esManual = esTransferencia || moneda === 'usd';
+      // Manual = transferencia (se verifica el comprobante a mano). El pago en
+      // dólares por transferencia se cobra por PayPal/AstroPay; en dólares por
+      // Wompi se cobra el precio en pesos del catálogo (Wompi solo cobra COP).
+      const esManual = esTransferencia;
+      const usdManual = moneda === 'usd' && esManual;
 
       // Falla en seguro: sin el secreto de integridad, Wompi rechazaría el pago.
       // Evitamos crear un agendamiento y redirigir a un checkout que dará error.
@@ -362,8 +364,8 @@ app.post('/api/booking', function (req, res) {
           return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
         }
         let totalCopA, precioTextoA;
-        if (moneda === 'usd') {
-          // Pago en dólares: por PayPal/AstroPay, sin conversión ni comisión.
+        if (usdManual) {
+          // Pago en dólares por transferencia: PayPal/AstroPay, sin conversión.
           totalCopA = 0;
           precioTextoA = '$' + ADELANTO_USD + ' USD';
         } else {
@@ -419,8 +421,9 @@ app.post('/api/booking', function (req, res) {
       const codigoEnviado = (b.codigo || '').toString().trim();
       const info = claveEnviada ? calcularDescuentoHechizo(claveEnviada, codigoEnviado, base) : null;
 
-      // El USD es solo informativo (Wompi cobra en COP); se recalcula en paralelo
-      // al COP para que el descuento y el adelanto también se reflejen en dólares.
+      // El precio en USD se recalcula en paralelo al COP para reflejar el descuento
+      // y el adelanto. Es el monto cobrado si se paga en dólares por transferencia
+      // (PayPal/AstroPay); en pesos o por Wompi es solo informativo.
       let usdNum = parseFloat((b.precio_usd || '').toString().replace(',', '.'));
       const usdBase = usdNum; // valor base en USD (antes de descuento/adelanto)
       let precioUsd = (b.precio_usd || '').toString().slice(0, 20);
@@ -479,7 +482,7 @@ app.post('/api/booking', function (req, res) {
         return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
       }
 
-      if (moneda === 'usd') {
+      if (usdManual) {
         if (isNaN(usdBase)) {
           return res.status(400).json({ error: 'Este servicio no tiene precio en dólares. Paga en pesos (COP).' });
         }
@@ -489,8 +492,8 @@ app.post('/api/booking', function (req, res) {
         }
       }
       let totalCop, precioTextoFinal;
-      if (moneda === 'usd') {
-        // Pago en dólares: por PayPal/AstroPay, sin conversión ni comisión.
+      if (usdManual) {
+        // Pago en dólares por transferencia: PayPal/AstroPay, sin conversión.
         totalCop = 0;
         precioTextoFinal = '$' + precioUsd + ' USD';
       } else {
