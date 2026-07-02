@@ -1,16 +1,36 @@
 (function () {
   var WOMPI_PUBLIC_KEY = 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
 
-  // Intenta obtener la llave pública desde el servidor (fuente única: variable de entorno).
+  // Tasa del dólar (TRM + sobretasa) y comisión de Wompi; llegan desde /api/config.
+  // El monto real siempre lo calcula el servidor; esto es solo para mostrar un estimado.
+  var TRM_VALOR = 0;
+  var USD_SOBRETASA = 600;
+  var COM = { pct: 0.0265, fijo: 700, iva: 0.19 };
+
+  // Intenta obtener la llave pública y la tasa desde el servidor (fuente única).
   try {
     fetch('/api/config')
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (cfg) { if (cfg && cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = cfg.wompiPublicKey; })
+      .then(function (cfg) {
+        if (!cfg) return;
+        if (cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = cfg.wompiPublicKey;
+        if (cfg.trm > 0) TRM_VALOR = cfg.trm;
+        if (cfg.usdSobretasa >= 0) USD_SOBRETASA = cfg.usdSobretasa;
+        if (cfg.comision) COM = cfg.comision;
+        if (typeof aplicarDisponibilidadUsd === 'function') aplicarDisponibilidadUsd();
+      })
       .catch(function () {});
   } catch (e) {}
 
+  // Bruto a cobrar para que el negocio reciba el neto tras la comisión de Wompi.
+  function conComisionWompi(baseCop) {
+    var factor = 1 - COM.pct * (1 + COM.iva);
+    var fijo = COM.fijo * (1 + COM.iva);
+    return Math.ceil((baseCop + fijo) / factor);
+  }
+
   var ACLARACIONES_RESUMEN = [
-    'Los precios <strong>no incluyen comisión</strong> de la pasarela de pago.',
+    'Al pagar por Wompi, el total <strong>incluye la comisión</strong> de la pasarela de pago.',
     'El trabajo se agenda únicamente cuando el pago esté <strong>totalmente cancelado</strong>.',
     '<strong>No se realizan reembolsos</strong> después de haber realizado el pago.',
     'Si deseas el hechizo con urgencia (mismo día o en dos días siguientes), se aplica un recargo de <strong>$10 USD / $28.000 COP</strong>.',
@@ -154,6 +174,11 @@
       '#wompi-modal .wm-pago-btn:hover{transform:translateY(-1px);background:rgba(125,55,84,0.5);}',
       '#wompi-modal .wm-pago-cap{font-size:11px;color:#e0c0cf;text-align:center;margin-top:-2px;line-height:1.4;}',
       '#wompi-modal .wm-pago-cap b{color:#fff;}',
+      '#wompi-modal .wm-moneda{display:flex;align-items:center;flex-wrap:wrap;gap:10px;justify-content:center;margin:10px 0 4px;font-size:12.5px;color:#f0d9e4;}',
+      '#wompi-modal .wm-moneda-lbl{font-weight:700;}',
+      '#wompi-modal .wm-moneda-opt{display:inline-flex;align-items:center;gap:5px;cursor:pointer;}',
+      '#wompi-modal .wm-total{text-align:center;font-family:"Poppins",sans-serif;font-size:14px;font-weight:700;color:#fff;margin:2px 0 6px;min-height:18px;}',
+      '#wompi-modal .wm-total small{display:block;font-weight:400;font-size:11px;color:#e0c0cf;margin-top:2px;}',
       '.p{position:relative;}'
     ].join('');
     document.head.appendChild(estilos);
@@ -180,6 +205,12 @@
       '<h3><span>♡</span> Confirmar pago <span>♡</span></h3>',
       '<div class="wm-producto" id="wm-nombre-producto"></div>',
       '<div class="wm-precio" id="wm-precio-producto"></div>',
+      '<div class="wm-moneda" id="wm-moneda-wrap">',
+      '  <span class="wm-moneda-lbl">Pagar en:</span>',
+      '  <label class="wm-moneda-opt"><input type="radio" name="wm-moneda" value="cop" checked> Pesos (COP)</label>',
+      '  <label class="wm-moneda-opt" id="wm-moneda-usd-wrap"><input type="radio" name="wm-moneda" value="usd"> Dólares (USD)</label>',
+      '</div>',
+      '<div class="wm-total" id="wm-total"></div>',
       '<div class="wm-promo" id="wm-promo" style="display:none">',
       '  <label class="wm-label">¿Tienes un código promocional?',
       '    <span style="display:flex;gap:8px;margin-top:6px;">',
@@ -257,7 +288,7 @@
     var estado = {
       precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi',
       esHechizo: false, clave: '', base: 0, pctFecha: 0, pctCodigo: 0, codigo: '', precioFinal: 0,
-      adelanto: '', incluyeAdelanto: false,
+      adelanto: '', incluyeAdelanto: false, moneda: 'cop',
     };
 
     var checkbox = document.getElementById('wm-acepto');
@@ -280,6 +311,28 @@
     var adelantoTrabajosWrap = document.getElementById('wm-adelanto-trabajos-wrap');
     var inpAdelantoTrabajos = document.getElementById('wm-adelanto-trabajos');
     var normalOnlyEls = Array.prototype.slice.call(modal.querySelectorAll('.wm-normal-only'));
+    var totalEl = document.getElementById('wm-total');
+    var monedaWrap = document.getElementById('wm-moneda-wrap');
+    var monedaUsdWrap = document.getElementById('wm-moneda-usd-wrap');
+    var monedaRadios = Array.prototype.slice.call(modal.querySelectorAll('input[name="wm-moneda"]'));
+
+    // Oculta la opción de USD si aún no hay tasa del dólar disponible.
+    function aplicarDisponibilidadUsd() {
+      if (!monedaUsdWrap) return;
+      var hayTasa = TRM_VALOR > 0;
+      monedaUsdWrap.style.display = hayTasa ? '' : 'none';
+      if (!hayTasa && estado.moneda === 'usd') {
+        estado.moneda = 'cop';
+        monedaRadios.forEach(function (r) { r.checked = r.value === 'cop'; });
+        if (typeof actualizarPrecio === 'function') actualizarPrecio();
+      }
+    }
+
+    monedaRadios.forEach(function (r) {
+      r.addEventListener('change', function () {
+        if (r.checked) { estado.moneda = r.value === 'usd' ? 'usd' : 'cop'; actualizarPrecio(); }
+      });
+    });
 
     function pctActual() {
       return Math.max(estado.pctFecha || 0, estado.pctCodigo || 0);
@@ -295,10 +348,34 @@
       return Number.isInteger(r) ? String(r) : r.toFixed(2);
     }
 
+    // Valor del servicio en USD según el estado actual (descuento/adelanto).
+    function servicioUsdActual() {
+      if (estado.adelanto === 'solo') return ADELANTO_USD;
+      return usdConDescuento(estado.esHechizo ? pctActual() : 0, estado.incluyeAdelanto);
+    }
+
+    // Muestra el total realmente cobrado (conversión USD y/o comisión de Wompi).
+    function refrescarTotal() {
+      if (!totalEl) return;
+      var esUsd = estado.moneda === 'usd' && TRM_VALOR > 0;
+      var usdVal = parseFloat(String(servicioUsdActual()).replace(',', '.'));
+      var tasa = TRM_VALOR + USD_SOBRETASA;
+      var cargoBase = estado.precioFinal;
+      if (esUsd && !isNaN(usdVal)) cargoBase = Math.round(usdVal * tasa);
+      var esWompi = estado.modo === 'wompi';
+      var total = esWompi ? conComisionWompi(cargoBase) : cargoBase;
+      var notas = [];
+      if (esUsd && !isNaN(usdVal)) notas.push('USD ' + servicioUsdActual() + ' a $' + Math.round(tasa).toLocaleString('es-CO') + '/USD');
+      if (esWompi) notas.push('incluye comisión Wompi');
+      totalEl.innerHTML = 'Total a pagar: $' + total.toLocaleString('es-CO') + ' COP' +
+        (notas.length ? '<small>' + notas.join(' · ') + '</small>' : '');
+    }
+
     function actualizarPrecio() {
       if (estado.adelanto === 'solo') {
         estado.precioFinal = ADELANTO_COP;
         precioEl.textContent = ADELANTO_TEXTO;
+        refrescarTotal();
         return;
       }
       var extra = estado.incluyeAdelanto ? ADELANTO_COP : 0;
@@ -320,6 +397,7 @@
         estado.precioFinal = estado.precioCOP;
         precioEl.textContent = estado.precioTexto;
       }
+      refrescarTotal();
     }
 
     function mostrarMsgCodigo(texto, tipo) {
@@ -448,6 +526,7 @@
       var fd = new FormData();
       fd.append('cliente_nombre', cliente);
       fd.append('metodo', esTransfer ? 'transferencia' : 'wompi');
+      fd.append('moneda', estado.moneda === 'usd' ? 'usd' : 'cop');
       if (esAdelantoSolo) {
         fd.append('adelanto', 'solo');
         fd.append('producto', 'Adelanto (urgencia)');
@@ -544,6 +623,9 @@
       inpAdelantoTrabajos.value = '';
       inpCodigo.value = '';
       mostrarMsgCodigo('', '');
+      estado.moneda = 'cop';
+      monedaRadios.forEach(function (r) { r.checked = r.value === 'cop'; });
+      aplicarDisponibilidadUsd();
       actualizarPrecio();
       checkbox.checked = false;
       inpCliente.value = '';

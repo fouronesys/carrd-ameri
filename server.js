@@ -34,6 +34,69 @@ function firmaIntegridadWompi(referencia, montoCentavos, moneda) {
 const ADELANTO_COP = 28000;
 const ADELANTO_USD = '10';
 
+// --- Comisión de Wompi (tarjetas): 2,65% + $700 COP + IVA (19% sobre la comisión). ---
+// Se cobra al cliente calculando el bruto para que el negocio reciba el precio neto.
+const WOMPI_COM_PCT = 0.0265;
+const WOMPI_COM_FIJO = 700;
+const WOMPI_IVA = 0.19;
+function conComisionWompi(baseCop) {
+  const factor = 1 - WOMPI_COM_PCT * (1 + WOMPI_IVA); // ≈ 0.968465
+  const fijo = WOMPI_COM_FIJO * (1 + WOMPI_IVA);      // = 833
+  return Math.ceil((baseCop + fijo) / factor);
+}
+
+// --- Tasa del dólar (TRM oficial Colombia) + sobretasa fija por dólar para pagos en USD. ---
+const USD_SOBRETASA = 600;
+const TRM_FILE = path.join(db.DATA_DIR, 'trm.json');
+let TRM = { valor: 0, actualizado: 0 };
+try {
+  const guardada = JSON.parse(fs.readFileSync(TRM_FILE, 'utf8'));
+  if (guardada && guardada.valor > 0) TRM = guardada;
+} catch (e) { /* sin TRM previa */ }
+
+async function actualizarTRM() {
+  try {
+    const url = 'https://www.datos.gov.co/resource/32sa-8pi3.json?$order=vigenciadesde%20DESC&$limit=1';
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const j = await r.json();
+    const v = j && j[0] && parseFloat(j[0].valor);
+    if (v && v > 0) {
+      TRM = { valor: v, actualizado: Date.now() };
+      try { fs.writeFileSync(TRM_FILE, JSON.stringify(TRM)); } catch (e) { /* no persistió */ }
+    }
+  } catch (e) {
+    console.error('[trm] No se pudo actualizar la tasa:', e.message);
+  }
+}
+
+// Tasa efectiva por dólar (TRM + sobretasa). 0 si aún no hay TRM disponible.
+function tasaUsd() {
+  return TRM.valor > 0 ? TRM.valor + USD_SOBRETASA : 0;
+}
+
+// Calcula el monto final a cobrar en COP a partir del precio del servicio,
+// la moneda elegida por el cliente y si el pago es por Wompi (lleva comisión).
+function calcularCobro(baseCop, usdMonto, moneda, esWompi) {
+  const esUsd = moneda === 'usd';
+  const tasa = tasaUsd();
+  let cargoBase = baseCop;
+  if (esUsd) cargoBase = Math.round(usdMonto * tasa);
+  const total = esWompi ? conComisionWompi(cargoBase) : cargoBase;
+  return { total: total, cargoBase: cargoBase, comision: total - cargoBase, tasa: tasa, esUsd: esUsd };
+}
+
+// Añade al texto del precio del servicio una nota clara con el total realmente
+// cobrado (conversión a COP si es USD y/o comisión de Wompi).
+function componerTextoCobro(textoBase, cobro, esWompi) {
+  if (!cobro.esUsd && !esWompi) return textoBase.toString();
+  const detalles = [];
+  if (cobro.esUsd) detalles.push('USD a $' + Math.round(cobro.tasa).toLocaleString('es-CO') + '/USD');
+  if (esWompi) detalles.push('comisión Wompi');
+  return textoBase.toString() + ' · Total cobrado $' + cobro.total.toLocaleString('es-CO') +
+    ' COP (' + detalles.join(' + ') + ')';
+}
+
 // Precios válidos: se extraen del catálogo (index.html) para evitar montos manipulados.
 function cargarPreciosValidos() {
   try {
@@ -254,7 +317,12 @@ async function verificarTransaccionWompi(txId) {
 
 /* ---------- Config pública para el frontend ---------- */
 app.get('/api/config', function (req, res) {
-  res.json({ wompiPublicKey: WOMPI_PUBLIC_KEY });
+  res.json({
+    wompiPublicKey: WOMPI_PUBLIC_KEY,
+    trm: TRM.valor || 0,
+    usdSobretasa: USD_SOBRETASA,
+    comision: { pct: WOMPI_COM_PCT, fijo: WOMPI_COM_FIJO, iva: WOMPI_IVA },
+  });
 });
 
 /* ---------- Promociones activas por fecha (para mostrar precios rebajados) ---------- */
@@ -321,13 +389,19 @@ app.post('/api/booking', function (req, res) {
         if (esTransferencia && !comprobanteFile) {
           return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
         }
+        const monedaA = (b.moneda || 'cop').toString().toLowerCase() === 'usd' ? 'usd' : 'cop';
+        if (monedaA === 'usd' && tasaUsd() === 0) {
+          return res.status(503).json({ error: 'El pago en dólares no está disponible por ahora. Intenta pagando en pesos (COP).' });
+        }
+        const cobroA = calcularCobro(ADELANTO_COP, parseFloat(ADELANTO_USD), monedaA, !esTransferencia);
+        const textoBaseA = '$' + ADELANTO_COP.toLocaleString('es-CO') + ' COP · ' + ADELANTO_USD + ' USD';
         const refA = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
         const registroA = {
           ref: refA,
           producto: 'Adelanto (urgencia)',
-          precio_cop: ADELANTO_COP,
+          precio_cop: cobroA.total,
           precio_usd: ADELANTO_USD,
-          precio_texto: '$' + ADELANTO_COP.toLocaleString('es-CO') + ' COP · ' + ADELANTO_USD + ' USD',
+          precio_texto: componerTextoCobro(textoBaseA, cobroA, !esTransferencia),
           precio_original: '',
           descuento_pct: '',
           codigo_promo: '',
@@ -348,8 +422,8 @@ app.post('/api/booking', function (req, res) {
         };
         db.crearAgendamiento(registroA);
         return res.json({
-          ok: true, ref: refA, precio_cop: ADELANTO_COP, precio_texto: registroA.precio_texto,
-          signature: esTransferencia ? '' : firmaIntegridadWompi(refA, ADELANTO_COP * 100, 'COP'),
+          ok: true, ref: refA, precio_cop: cobroA.total, precio_texto: registroA.precio_texto,
+          signature: esTransferencia ? '' : firmaIntegridadWompi(refA, cobroA.total * 100, 'COP'),
         });
       }
 
@@ -428,13 +502,19 @@ app.post('/api/booking', function (req, res) {
         return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
       }
 
+      const moneda = (b.moneda || 'cop').toString().toLowerCase() === 'usd' ? 'usd' : 'cop';
+      if (moneda === 'usd' && (isNaN(usdNum) || tasaUsd() === 0)) {
+        return res.status(503).json({ error: 'El pago en dólares no está disponible por ahora. Intenta pagando en pesos (COP).' });
+      }
+      const cobro = calcularCobro(precio, usdNum, moneda, !esTransferencia);
+
       const ref = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
       const registro = {
         ref: ref,
         producto: (b.producto || '').toString().slice(0, 200),
-        precio_cop: precio,
+        precio_cop: cobro.total,
         precio_usd: precioUsd,
-        precio_texto: precioTexto.toString().slice(0, 100),
+        precio_texto: componerTextoCobro(precioTexto, cobro, !esTransferencia).slice(0, 180),
         precio_original: precioOriginal || '',
         descuento_pct: descuentoPct || '',
         codigo_promo: codigoAplicado || '',
@@ -455,8 +535,8 @@ app.post('/api/booking', function (req, res) {
       };
       db.crearAgendamiento(registro);
       res.json({
-        ok: true, ref: ref, precio_cop: precio, precio_texto: registro.precio_texto,
-        signature: esTransferencia ? '' : firmaIntegridadWompi(ref, precio * 100, 'COP'),
+        ok: true, ref: ref, precio_cop: cobro.total, precio_texto: registro.precio_texto,
+        signature: esTransferencia ? '' : firmaIntegridadWompi(ref, cobro.total * 100, 'COP'),
       });
     } catch (e) {
       console.error('[booking]', e);
@@ -806,4 +886,6 @@ app.listen(PORT, '0.0.0.0', function () {
   setInterval(limpiarPendientes, 60 * 60 * 1000);
   procesarSeguimientos();
   setInterval(procesarSeguimientos, 6 * 60 * 60 * 1000);
+  actualizarTRM();
+  setInterval(actualizarTRM, 6 * 60 * 60 * 1000);
 });
