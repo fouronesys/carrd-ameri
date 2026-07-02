@@ -1,0 +1,59 @@
+/* Responsividad del catálogo — respeta el diseño original, adapta el ancho a la pantalla */
+
+html {
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+}
+
+/* Evita desbordes horizontales en cualquier dispositivo */
+html, body {
+        max-width: 100%;
+        overflow-x: hidden;
+}
+
+img {
+        max-width: 100%;
+        height: auto;
+}
+
+/* El contenido del catálogo escala con la pantalla en vez de quedar fijo en 20rem */
+.site-main > .inner {
+        --width: 20rem;
+}
+
+/* Tablets */
+@media (min-width: 737px) {
+        .site-main > .inner {
+                --width: 30rem;
+        }
+}
+
+/* Pantallas medianas / laptops */
+@media (min-width: 1024px) {
+        .site-main > .inner {
+                --width: 34rem;
+        }
+}
+
+/* Pantallas grandes / escritorio */
+@media (min-width: 1440px) {
+        .site-main > .inner {
+                --width: 38rem;
+        }
+}
+
+/* Móviles: aprovechar todo el ancho disponible con un respiro lateral */
+@media (max-width: 736px) {
+        .site-wrapper {
+                padding: 0.5rem;
+        }
+        .site-main > .inner {
+                --width: 100%;
+        }
+}
+
+@media (max-width: 480px) {
+        .site-wrapper {
+                padding: 0.35rem;
+        }
+}
