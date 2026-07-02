@@ -1,0 +1,1 @@
+- [Fresatanika backend](fresatanika-backend.md) — Node/Express catalog+booking app: JSON-file DB (no better-sqlite3), CapRover needs volume at /data, strict Wompi payment checks, raster-only uploads.
