@@ -18,6 +18,16 @@ const ROOT = __dirname;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ASSISTANT_PASSWORD = process.env.ASSISTANT_PASSWORD || '';
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
+// Secreto de integridad de Wompi (dashboard → Desarrolladores). Necesario para
+// firmar el checkout: Wompi rechaza la transacción sin `signature:integrity`.
+const WOMPI_INTEGRITY_SECRET = process.env.WOMPI_INTEGRITY_SECRET || '';
+
+// Firma de integridad Wompi = SHA256(referencia + montoEnCentavos + moneda + secreto).
+function firmaIntegridadWompi(referencia, montoCentavos, moneda) {
+  if (!WOMPI_INTEGRITY_SECRET) return '';
+  const cadena = String(referencia) + String(montoCentavos) + String(moneda) + WOMPI_INTEGRITY_SECRET;
+  return crypto.createHash('sha256').update(cadena).digest('hex');
+}
 
 // Adelanto (urgencia): recargo fijo para entrega en un máximo de 2 días.
 // Debe coincidir con el valor mostrado en el catálogo y en assets/wompi.js.
@@ -330,7 +340,10 @@ app.post('/api/booking', function (req, res) {
           pagado_en: '',
         };
         db.crearAgendamiento(registroA);
-        return res.json({ ok: true, ref: refA, precio_cop: ADELANTO_COP, precio_texto: registroA.precio_texto });
+        return res.json({
+          ok: true, ref: refA, precio_cop: ADELANTO_COP, precio_texto: registroA.precio_texto,
+          signature: esTransferencia ? '' : firmaIntegridadWompi(refA, ADELANTO_COP * 100, 'COP'),
+        });
       }
 
       const contacto = (b.contacto || '').toString().trim();
@@ -434,7 +447,10 @@ app.post('/api/booking', function (req, res) {
         pagado_en: '',
       };
       db.crearAgendamiento(registro);
-      res.json({ ok: true, ref: ref, precio_cop: precio, precio_texto: registro.precio_texto });
+      res.json({
+        ok: true, ref: ref, precio_cop: precio, precio_texto: registro.precio_texto,
+        signature: esTransferencia ? '' : firmaIntegridadWompi(ref, precio * 100, 'COP'),
+      });
     } catch (e) {
       console.error('[booking]', e);
       res.status(500).json({ error: 'No se pudo registrar. Intenta de nuevo.' });

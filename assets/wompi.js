@@ -495,6 +495,9 @@
             + '&amount-in-cents=' + centavos
             + '&reference=' + encodeURIComponent(res.data.ref)
             + '&redirect-url=' + encodeURIComponent(destino);
+          if (res.data.signature) {
+            url += '&signature:integrity=' + encodeURIComponent(res.data.signature);
+          }
           window.location.href = url;
         })
         .catch(function (e) {
