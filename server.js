@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const db = require('./lib/db');
 const mailer = require('./lib/mailer');
 const templates = require('./lib/templates');
+const exportar = require('./lib/exportar');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -230,6 +231,33 @@ app.post('/admin/login', function (req, res) {
 
 app.post('/admin/logout', function (req, res) {
   req.session.destroy(function () { res.redirect('/admin'); });
+});
+
+app.get('/admin/exportar/excel', requiereAdmin, function (req, res) {
+  try {
+    const registros = db.listarAgendamientos();
+    const buf = exportar.generarExcel(registros);
+    const nombre = 'fresatanika-agendamientos-' + new Date().toISOString().slice(0, 10) + '.xlsx';
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + nombre + '"');
+    res.send(buf);
+  } catch (e) {
+    console.error('[exportar/excel]', e);
+    res.status(500).send('Error al generar el Excel.');
+  }
+});
+
+app.get('/admin/exportar/pdf', requiereAdmin, function (req, res) {
+  try {
+    const registros = db.listarAgendamientos();
+    const nombre = 'fresatanika-agendamientos-' + new Date().toISOString().slice(0, 10) + '.pdf';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + nombre + '"');
+    exportar.generarPDF(registros, res);
+  } catch (e) {
+    console.error('[exportar/pdf]', e);
+    res.status(500).send('Error al generar el PDF.');
+  }
 });
 
 app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
