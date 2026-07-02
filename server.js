@@ -306,6 +306,13 @@ app.post('/api/booking', function (req, res) {
 
       const esTransferencia = (b.metodo || '').toString().trim() === 'transferencia';
 
+      // Falla en seguro: sin el secreto de integridad, Wompi rechazaría el pago.
+      // Evitamos crear un agendamiento y redirigir a un checkout que dará error.
+      if (!esTransferencia && !WOMPI_INTEGRITY_SECRET) {
+        console.error('[booking] WOMPI_INTEGRITY_SECRET no configurado');
+        return res.status(503).json({ error: 'El pago con tarjeta no está disponible por ahora. Intenta con transferencia o escríbenos.' });
+      }
+
       // --- Pago de adelanto (urgencia) suelto: formulario corto ---
       // Solo se piden el nombre del cliente y el/los trabajos para los que se paga.
       if ((b.adelanto || '').toString().trim() === 'solo') {
