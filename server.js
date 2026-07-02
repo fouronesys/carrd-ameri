@@ -16,6 +16,7 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 const ROOT = __dirname;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const ASSISTANT_PASSWORD = process.env.ASSISTANT_PASSWORD || '';
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
 
 // Precios válidos: se extraen del catálogo (index.html) para evitar montos manipulados.
@@ -35,6 +36,146 @@ function cargarPreciosValidos() {
   }
 }
 const PRECIOS_VALIDOS = cargarPreciosValidos();
+
+/* ---------- Catálogo de hechizos (para promociones/descuentos) ---------- */
+// Los descuentos aplican SOLO a los hechizos. Se parsea la sección
+// #hechizos-section de index.html para conocer cada hechizo y su precio base.
+function decodificarEntidades(str) {
+  return String(str || '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+// Limpia el nombre del hechizo quitando iconos decorativos, para poder
+// identificarlo de forma estable entre el frontend y el servidor.
+function limpiarNombreHechizo(raw) {
+  return decodificarEntidades(raw)
+    .replace(/<[^>]+>/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ෆ⟡⊹˚꒦ᶻ𝗓𐰁ೀ𖥔ꗯಎ☼𝜗᭪𐙚✩ᵎ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cargarHechizos() {
+  const mapa = {};
+  const lista = [];
+  try {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const ini = html.indexOf('id="hechizos-section"');
+    const fin = html.indexOf('id="lecturas-section"');
+    if (ini === -1) return { mapa: mapa, lista: lista };
+    const seccion = html.slice(ini, fin === -1 ? html.length : fin);
+    const reSpan = /<span class="p">([\s\S]*?)<\/span>/g;
+    let m;
+    while ((m = reSpan.exec(seccion)) !== null) {
+      const contenido = m[1];
+      const nombreMatch = contenido.match(/<strong>([\s\S]*?)<\/strong>/);
+      const precioMatch = contenido.match(/\$\s*([0-9]{1,3}(?:\.[0-9]{3})+)/);
+      if (!nombreMatch || !precioMatch) continue;
+      const nombre = limpiarNombreHechizo(nombreMatch[1]);
+      const precio = parseInt(precioMatch[1].replace(/\./g, ''), 10);
+      if (!nombre || !precio || precio < 1000) continue;
+      const clave = nombre.toLowerCase();
+      if (mapa[clave]) {
+        // Un mismo hechizo puede tener varios precios (variantes); se acumulan.
+        if (mapa[clave].precios.indexOf(precio) === -1) mapa[clave].precios.push(precio);
+        continue;
+      }
+      const hechizo = { clave: clave, nombre: nombre, precio_cop: precio, precios: [precio] };
+      mapa[clave] = hechizo;
+      lista.push(hechizo);
+    }
+  } catch (e) {
+    /* noop */
+  }
+  return { mapa: mapa, lista: lista };
+}
+const HECHIZOS = cargarHechizos();
+
+// Fecha actual (YYYY-MM-DD) en horario de Colombia para comparar ventanas.
+function hoyBogota() {
+  try {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  } catch (e) {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+function enVentana(desde, hasta, hoy) {
+  if (desde && hoy < desde) return false;
+  if (hasta && hoy > hasta) return false;
+  return true;
+}
+
+function objetivoIncluye(objetivo, clave) {
+  if (objetivo === 'todos' || !objetivo) return true;
+  return Array.isArray(objetivo) && objetivo.indexOf(clave) !== -1;
+}
+
+function aplicarDescuento(base, pct) {
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  return Math.round(base * (1 - p / 100));
+}
+
+// Descuento por promociones de fecha activas para un hechizo (auto-aplicadas).
+function descuentoFechaPara(clave) {
+  const hoy = hoyBogota();
+  let mejor = 0;
+  db.listarPromos().forEach(function (p) {
+    if (p.activa === false) return;
+    if (!enVentana(p.desde, p.hasta, hoy)) return;
+    if (!objetivoIncluye(p.objetivo, clave)) return;
+    const pct = Number(p.porcentaje) || 0;
+    if (pct > mejor) mejor = pct;
+  });
+  return mejor;
+}
+
+// Valida un código para un hechizo y devuelve su porcentaje (0 si no aplica).
+function codigoDescuentoPara(clave, codigoStr) {
+  const cod = String(codigoStr || '').trim().toLowerCase();
+  if (!cod) return { pct: 0, valido: false, codigo: '' };
+  const hoy = hoyBogota();
+  let encontrado = null;
+  db.listarCodigos().forEach(function (c) {
+    if (String(c.codigo || '').trim().toLowerCase() !== cod) return;
+    if (c.activo === false) return;
+    if (!enVentana(c.desde, c.hasta, hoy)) return;
+    if (!objetivoIncluye(c.objetivo, clave)) return;
+    encontrado = c;
+  });
+  if (!encontrado) return { pct: 0, valido: false, codigo: '' };
+  return { pct: Number(encontrado.porcentaje) || 0, valido: true, codigo: encontrado.codigo };
+}
+
+// Calcula el mejor descuento aplicable a un hechizo (no se acumulan: se toma el mayor).
+// `base` es el precio base validado (algunos hechizos comparten nombre con precios
+// distintos, por eso se usa el precio base recibido y no un mapa fijo).
+function calcularDescuentoHechizo(clave, codigoStr, base) {
+  const h = HECHIZOS.mapa[clave];
+  if (!h) return null;
+  // El precio base debe corresponder realmente a este hechizo; así se evita
+  // que un servicio que no es hechizo obtenga descuento enviando una clave válida.
+  if (Array.isArray(h.precios) && h.precios.indexOf(base) === -1) return null;
+  const pctFecha = descuentoFechaPara(clave);
+  const cod = codigoDescuentoPara(clave, codigoStr);
+  const pct = Math.max(pctFecha, cod.pct);
+  const usaCodigo = cod.valido && cod.pct >= pctFecha && cod.pct > 0;
+  const final = pct > 0 ? aplicarDescuento(base, pct) : base;
+  return {
+    base: base,
+    pct: pct,
+    final: final,
+    fuente: pct === 0 ? '' : (usaCodigo ? 'codigo' : 'fecha'),
+    codigoValido: cod.valido,
+    codigoAplicado: usaCodigo ? cod.codigo : '',
+  };
+}
 
 // Tipos de imagen permitidos (se excluye SVG para evitar XSS almacenado).
 const TIPOS_IMAGEN = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
@@ -101,6 +242,31 @@ app.get('/api/config', function (req, res) {
   res.json({ wompiPublicKey: WOMPI_PUBLIC_KEY });
 });
 
+/* ---------- Promociones activas por fecha (para mostrar precios rebajados) ---------- */
+app.get('/api/promociones', function (req, res) {
+  const descuentos = {};
+  HECHIZOS.lista.forEach(function (h) {
+    const pct = descuentoFechaPara(h.clave);
+    if (pct > 0) descuentos[h.clave] = pct;
+  });
+  res.json({ descuentos: descuentos });
+});
+
+/* ---------- Validar un código promocional para un hechizo ---------- */
+app.post('/api/codigo', function (req, res) {
+  const b = req.body || {};
+  const clave = (b.hechizo_clave || '').toString().trim().toLowerCase();
+  const codigo = (b.codigo || '').toString().trim();
+  if (!clave || !HECHIZOS.mapa[clave]) {
+    return res.status(400).json({ ok: false, error: 'Los códigos solo aplican a los hechizos.' });
+  }
+  const cod = codigoDescuentoPara(clave, codigo);
+  if (!cod.valido || cod.pct <= 0) {
+    return res.status(400).json({ ok: false, error: 'El código no es válido o no aplica a este hechizo.' });
+  }
+  res.json({ ok: true, porcentaje: cod.pct });
+});
+
 /* ---------- Registrar agendamiento (antes de pagar) ---------- */
 const subirArchivos = upload.fields([
   { name: 'objetivo_foto', maxCount: 1 },
@@ -126,10 +292,32 @@ app.post('/api/booking', function (req, res) {
       const contacto = (b.contacto || '').toString().trim();
       if (!contacto) return res.status(400).json({ error: 'Escribe tu WhatsApp o red social para entregarte la evidencia.' });
 
-      const precio = parseInt(b.precio_cop, 10);
-      if (!precio || precio < 1000) return res.status(400).json({ error: 'El precio no es válido.' });
-      if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(precio)) {
+      // El precio base siempre debe corresponder a un servicio del catálogo.
+      const base = parseInt(b.precio_cop, 10);
+      if (!base || base < 1000) return res.status(400).json({ error: 'El precio no es válido.' });
+      if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(base)) {
         return res.status(400).json({ error: 'El precio no corresponde a ningún servicio del catálogo.' });
+      }
+
+      // Precio autoritativo: para hechizos se aplica el descuento (promoción por
+      // fecha o código) sobre el precio base, recalculado siempre en el servidor.
+      const claveEnviada = (b.hechizo_clave || '').toString().trim().toLowerCase();
+      const codigoEnviado = (b.codigo || '').toString().trim();
+      const info = claveEnviada ? calcularDescuentoHechizo(claveEnviada, codigoEnviado, base) : null;
+
+      let precio = base;
+      let precioTexto;
+      let precioOriginal = 0;
+      let descuentoPct = 0;
+      let codigoAplicado = '';
+      if (info && info.pct > 0) {
+        precio = info.final;
+        precioOriginal = info.base;
+        descuentoPct = info.pct;
+        codigoAplicado = info.codigoAplicado;
+        precioTexto = '$' + precio.toLocaleString('es-CO') + ' COP (-' + info.pct + '%)';
+      } else {
+        precioTexto = (b.precio_texto || ('$' + precio + ' COP')).toString().slice(0, 80);
       }
 
       const objNombre = (b.objetivo_nombre || '').toString().trim();
@@ -150,7 +338,10 @@ app.post('/api/booking', function (req, res) {
         producto: (b.producto || '').toString().slice(0, 200),
         precio_cop: precio,
         precio_usd: (b.precio_usd || '').toString().slice(0, 20),
-        precio_texto: (b.precio_texto || ('$' + precio + ' COP')).toString().slice(0, 80),
+        precio_texto: precioTexto.toString().slice(0, 80),
+        precio_original: precioOriginal || '',
+        descuento_pct: descuentoPct || '',
+        codigo_promo: codigoAplicado || '',
         metodo: esTransferencia ? 'transferencia' : 'wompi',
         cliente_nombre: clienteNombre.slice(0, 160),
         contacto: contacto.slice(0, 200),
@@ -166,7 +357,7 @@ app.post('/api/booking', function (req, res) {
         pagado_en: '',
       };
       db.crearAgendamiento(registro);
-      res.json({ ok: true, ref: ref });
+      res.json({ ok: true, ref: ref, precio_cop: precio, precio_texto: registro.precio_texto });
     } catch (e) {
       console.error('[booking]', e);
       res.status(500).json({ error: 'No se pudo registrar. Intenta de nuevo.' });
@@ -222,16 +413,30 @@ app.get('/gracias/:ref', async function (req, res) {
 });
 
 /* ---------- Autenticación del panel ---------- */
-function passwordValida(entrada) {
+function comparaSegura(entrada, esperado) {
+  if (!esperado) return false;
   const a = Buffer.from(String(entrada || ''));
-  const b = Buffer.from(ADMIN_PASSWORD);
+  const b = Buffer.from(esperado);
   if (a.length !== b.length) return false;
   try { return crypto.timingSafeEqual(a, b); } catch (e) { return false; }
+}
+
+// Devuelve el rol correspondiente a la contraseña, o null si no coincide.
+function rolPorPassword(entrada) {
+  if (comparaSegura(entrada, ADMIN_PASSWORD)) return 'admin';
+  if (comparaSegura(entrada, ASSISTANT_PASSWORD)) return 'asistente';
+  return null;
 }
 
 function requiereAdmin(req, res, next) {
   if (req.session && req.session.admin) return next();
   return res.redirect('/admin');
+}
+
+// Solo el rol 'admin' puede pasar (asistentes bloqueados).
+function soloAdmin(req, res, next) {
+  if (req.session && req.session.admin && req.session.rol === 'admin') return next();
+  return res.status(403).send('Solo el administrador puede realizar esta acción.');
 }
 
 function mismoOrigen(req, res, next) {
@@ -245,7 +450,13 @@ function mismoOrigen(req, res, next) {
 
 app.get('/admin', function (req, res) {
   if (req.session && req.session.admin) {
-    return res.send(templates.adminDashboard({ registros: db.listarAgendamientos() }));
+    return res.send(templates.adminDashboard({
+      registros: db.listarAgendamientos(),
+      rol: req.session.rol || 'admin',
+      hechizos: HECHIZOS.lista,
+      promos: db.listarPromos(),
+      codigos: db.listarCodigos(),
+    }));
   }
   res.send(templates.adminLogin({ noConfig: !ADMIN_PASSWORD }));
 });
@@ -254,8 +465,10 @@ app.post('/admin/login', mismoOrigen, function (req, res) {
   if (!ADMIN_PASSWORD) {
     return res.status(500).send(templates.adminLogin({ noConfig: true }));
   }
-  if (passwordValida((req.body || {}).password)) {
+  const rol = rolPorPassword((req.body || {}).password);
+  if (rol) {
     req.session.admin = true;
+    req.session.rol = rol;
     return res.redirect('/admin');
   }
   res.status(401).send(templates.adminLogin({ error: 'Contraseña incorrecta.' }));
@@ -332,7 +545,78 @@ app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, function (req, res)
 });
 
 app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  // Las asistentes no pueden eliminar agendamientos ya marcados como realizados.
+  if (reg && reg.trabajo_hecho && req.session.rol !== 'admin') {
+    return res.status(403).send('Solo el administrador puede eliminar un agendamiento marcado como realizado.');
+  }
   db.eliminarPorRef(req.params.ref);
+  res.redirect('/admin');
+});
+
+/* ---------- Gestión de promociones (panel admin) ---------- */
+function leerObjetivo(body) {
+  // 'todos' o una lista de claves de hechizos.
+  if ((body.objetivo_tipo || '') === 'especificos') {
+    let claves = body.hechizos || [];
+    if (!Array.isArray(claves)) claves = [claves];
+    claves = claves.map(function (c) { return String(c).trim().toLowerCase(); })
+      .filter(function (c) { return c && HECHIZOS.mapa[c]; });
+    if (claves.length) return claves;
+  }
+  return 'todos';
+}
+
+app.post('/admin/promo', mismoOrigen, requiereAdmin, function (req, res) {
+  const b = req.body || {};
+  const pct = parseInt(b.porcentaje, 10);
+  const desde = (b.desde || '').toString().trim();
+  const hasta = (b.hasta || '').toString().trim();
+  if (!pct || pct < 1 || pct > 100 || !desde || !hasta) {
+    return res.status(400).send('Datos de la promoción incompletos.');
+  }
+  db.crearPromo({
+    id: 'promo-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
+    porcentaje: pct,
+    desde: desde,
+    hasta: hasta,
+    objetivo: leerObjetivo(b),
+    activa: true,
+    creado_en: new Date().toISOString(),
+  });
+  res.redirect('/admin');
+});
+
+app.post('/admin/promo/eliminar/:id', mismoOrigen, requiereAdmin, function (req, res) {
+  db.eliminarPromo(req.params.id);
+  res.redirect('/admin');
+});
+
+// Solo el administrador puede generar/eliminar códigos promocionales.
+app.post('/admin/codigo', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+  const b = req.body || {};
+  const codigo = (b.codigo || '').toString().trim();
+  const pct = parseInt(b.porcentaje, 10);
+  const desde = (b.desde || '').toString().trim();
+  const hasta = (b.hasta || '').toString().trim();
+  if (!codigo || !pct || pct < 1 || pct > 100 || !desde || !hasta) {
+    return res.status(400).send('Datos del código incompletos.');
+  }
+  db.crearCodigo({
+    id: 'cod-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
+    codigo: codigo,
+    porcentaje: pct,
+    desde: desde,
+    hasta: hasta,
+    objetivo: leerObjetivo(b),
+    activo: true,
+    creado_en: new Date().toISOString(),
+  });
+  res.redirect('/admin');
+});
+
+app.post('/admin/codigo/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+  db.eliminarCodigo(req.params.id);
   res.redirect('/admin');
 });
 

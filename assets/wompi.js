@@ -58,6 +58,26 @@
     return linea;
   }
 
+  // Promociones por fecha activas (mapa clave -> porcentaje). Se llena al iniciar.
+  var PROMOS_FECHA = {};
+  var ICONOS_HECHIZO = /[ෆ⟡⊹˚꒦ᶻ𝗓𐰁ೀ𖥔ꗯಎ☼𝜗᭪𐙚✩ᵎ]/g;
+
+  // Deriva la clave estable de un hechizo (debe coincidir con el servidor).
+  function claveHechizo(strongEl) {
+    if (!strongEl) return '';
+    var t = (strongEl.textContent || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(ICONOS_HECHIZO, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return t.toLowerCase();
+  }
+
+  function aplicarDescuentoCliente(base, pct) {
+    var p = Math.max(0, Math.min(100, Number(pct) || 0));
+    return Math.round(base * (1 - p / 100));
+  }
+
   function crearModal() {
     var estilos = document.createElement('style');
     estilos.textContent = [
@@ -69,6 +89,16 @@
       '#wompi-modal h3 span{color:#9C4C6D;}',
       '#wompi-modal .wm-producto{text-align:center;font-size:14px;font-weight:700;color:#fff;margin-bottom:3px;line-height:1.35;}',
       '#wompi-modal .wm-precio{text-align:center;font-size:19px;font-weight:900;font-style:italic;color:#F0A3C3;margin-bottom:16px;}',
+      '#wompi-modal .wm-precio-tachado{color:#b58ca1;text-decoration:line-through;font-weight:600;font-size:14px;margin-right:6px;}',
+      '#wompi-modal .wm-precio-off{display:inline-block;background:#7D3754;color:#fff;font-size:11px;font-weight:800;font-style:normal;padding:2px 8px;border-radius:20px;margin-left:6px;vertical-align:middle;}',
+      '#wompi-modal .wm-promo{background:rgba(125,55,84,0.10);border:1px solid rgba(194,167,183,0.25);border-radius:8px;padding:12px 14px;margin-bottom:14px;}',
+      '#wompi-modal .wm-promo .wm-label{margin-bottom:0;}',
+      '#wompi-modal .wm-codigo-btn{padding:0 16px;background:#7D3754;color:#fff;border:1px solid #C2A7B7;border-radius:7px;font-family:"Poppins",sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}',
+      '#wompi-modal .wm-codigo-btn:hover{background:#9C4C6D;}',
+      '#wompi-modal .wm-codigo-msg{font-size:11px;margin-top:8px;line-height:1.4;min-height:0;}',
+      '#wompi-modal .wm-codigo-msg.ok{color:#9be0b4;}',
+      '#wompi-modal .wm-codigo-msg.err{color:#f3b6cd;}',
+      '.wm-promo-badge{display:inline-block;margin-left:0.4rem;padding:0.12rem 0.5rem;font-family:"Poppins",sans-serif;font-size:0.42rem;font-weight:800;letter-spacing:0.04em;color:#fff;background:#7D3754;border-radius:2rem;vertical-align:middle;}',
       '#wompi-modal .wm-divider{border:none;border-top:1px solid rgba(194,167,183,0.35);margin:14px 0;}',
       '#wompi-modal .wm-form-titulo{text-align:center;font-size:12px;font-weight:700;color:#F0A3C3;letter-spacing:0.04em;margin-bottom:12px;}',
       '#wompi-modal .wm-form-titulo span{color:#9C4C6D;}',
@@ -144,6 +174,15 @@
       '<h3><span>♡</span> Confirmar pago <span>♡</span></h3>',
       '<div class="wm-producto" id="wm-nombre-producto"></div>',
       '<div class="wm-precio" id="wm-precio-producto"></div>',
+      '<div class="wm-promo" id="wm-promo" style="display:none">',
+      '  <label class="wm-label">¿Tienes un código promocional?',
+      '    <span style="display:flex;gap:8px;margin-top:6px;">',
+      '      <input type="text" class="wm-input" id="wm-codigo" placeholder="Escribe tu código" style="margin-top:0;" autocomplete="off">',
+      '      <button type="button" class="wm-codigo-btn" id="wm-codigo-btn">Aplicar</button>',
+      '    </span>',
+      '  </label>',
+      '  <div class="wm-codigo-msg" id="wm-codigo-msg"></div>',
+      '</div>',
       '<hr class="wm-divider">',
       '<div class="wm-form-titulo"><span>｡ ˚ ︶︶ꔫ</span> Tus datos <span>ꔫ︶︶ ₊ ˚</span></div>',
       '<label class="wm-label">Tu nombre y apellido <span class="wm-req">*</span>',
@@ -200,7 +239,10 @@
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    var estado = { precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi' };
+    var estado = {
+      precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi',
+      esHechizo: false, clave: '', base: 0, pctFecha: 0, pctCodigo: 0, codigo: '', precioFinal: 0,
+    };
 
     var checkbox = document.getElementById('wm-acepto');
     var btnPagar = document.getElementById('wm-btn-pagar');
@@ -212,6 +254,71 @@
     var inpObjFoto = document.getElementById('wm-obj-foto');
     var inpComprobante = document.getElementById('wm-comprobante');
     var inpInfo = document.getElementById('wm-info');
+    var precioEl = document.getElementById('wm-precio-producto');
+    var promoWrap = document.getElementById('wm-promo');
+    var inpCodigo = document.getElementById('wm-codigo');
+    var btnCodigo = document.getElementById('wm-codigo-btn');
+    var codigoMsg = document.getElementById('wm-codigo-msg');
+
+    function pctActual() {
+      return Math.max(estado.pctFecha || 0, estado.pctCodigo || 0);
+    }
+
+    function actualizarPrecio() {
+      var pct = pctActual();
+      if (estado.esHechizo && pct > 0) {
+        var fin = aplicarDescuentoCliente(estado.base, pct);
+        estado.precioFinal = fin;
+        precioEl.innerHTML = '<span class="wm-precio-tachado">' + estado.precioTexto + '</span> $' +
+          fin.toLocaleString('es-CO') + ' COP <span class="wm-precio-off">-' + pct + '%</span>';
+      } else {
+        estado.precioFinal = estado.precioCOP;
+        precioEl.textContent = estado.precioTexto;
+      }
+    }
+
+    function mostrarMsgCodigo(texto, tipo) {
+      codigoMsg.textContent = texto;
+      codigoMsg.className = 'wm-codigo-msg' + (tipo ? ' ' + tipo : '');
+    }
+
+    btnCodigo.addEventListener('click', function () {
+      var code = inpCodigo.value.trim();
+      if (!estado.esHechizo || !estado.clave) return;
+      if (!code) { mostrarMsgCodigo('Escribe un código.', 'err'); return; }
+      btnCodigo.disabled = true;
+      var txt = btnCodigo.textContent;
+      btnCodigo.textContent = '...';
+      fetch('/api/codigo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hechizo_clave: estado.clave, codigo: code }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.d || !res.d.ok) {
+            estado.pctCodigo = 0;
+            estado.codigo = '';
+            mostrarMsgCodigo((res.d && res.d.error) || 'El código no es válido para este hechizo.', 'err');
+          } else {
+            estado.pctCodigo = Number(res.d.porcentaje) || 0;
+            estado.codigo = code;
+            if (estado.pctCodigo <= (estado.pctFecha || 0)) {
+              mostrarMsgCodigo('Código aplicado. Ya tienes un descuento mayor o igual por promoción vigente.', 'ok');
+            } else {
+              mostrarMsgCodigo('✓ Código aplicado: -' + estado.pctCodigo + '%.', 'ok');
+            }
+          }
+          actualizarPrecio();
+        })
+        .catch(function () {
+          mostrarMsgCodigo('No se pudo validar el código. Intenta de nuevo.', 'err');
+        })
+        .then(function () {
+          btnCodigo.disabled = false;
+          btnCodigo.textContent = txt;
+        });
+    });
 
     function textoBoton() {
       return estado.modo === 'transferencia' ? 'Enviar comprobante ↗' : 'Pagar con Wompi ↗';
@@ -283,6 +390,11 @@
       fd.append('precio_texto', estado.precioTexto);
       fd.append('precio_usd', estado.precioUSD || '');
       fd.append('metodo', esTransfer ? 'transferencia' : 'wompi');
+      if (estado.esHechizo && estado.clave) {
+        fd.append('es_hechizo', '1');
+        fd.append('hechizo_clave', estado.clave);
+        if (estado.codigo) fd.append('codigo', estado.codigo);
+      }
       if (foto) fd.append('objetivo_foto', foto);
       if (comprobante) fd.append('comprobante', comprobante);
 
@@ -299,7 +411,8 @@
             window.location.href = destino;
             return;
           }
-          var centavos = estado.precioCOP * 100;
+          var precioFinalServidor = parseInt(res.data.precio_cop, 10) || estado.precioCOP;
+          var centavos = precioFinalServidor * 100;
           var url = 'https://checkout.wompi.co/p/'
             + '?public-key=' + encodeURIComponent(WOMPI_PUBLIC_KEY)
             + '&currency=COP'
@@ -327,15 +440,24 @@
       limpiarError();
     }
 
-    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo) {
+    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo, hechizoInfo) {
       estado.precioCOP = precioCOP;
       estado.precioUSD = precioUSD || '';
       estado.nombre = nombre;
       estado.precioTexto = precioTexto;
       estado.modo = modo === 'transferencia' ? 'transferencia' : 'wompi';
+      estado.esHechizo = !!(hechizoInfo && hechizoInfo.clave);
+      estado.clave = estado.esHechizo ? hechizoInfo.clave : '';
+      estado.base = precioCOP;
+      estado.pctFecha = estado.esHechizo ? (Number(hechizoInfo.pctFecha) || 0) : 0;
+      estado.pctCodigo = 0;
+      estado.codigo = '';
       modal.classList.toggle('modo-transfer', estado.modo === 'transferencia');
       document.getElementById('wm-nombre-producto').textContent = nombre;
-      document.getElementById('wm-precio-producto').textContent = precioTexto;
+      promoWrap.style.display = estado.esHechizo ? 'block' : 'none';
+      inpCodigo.value = '';
+      mostrarMsgCodigo('', '');
+      actualizarPrecio();
       checkbox.checked = false;
       inpCliente.value = '';
       inpObjNombre.value = '';
@@ -365,6 +487,20 @@
       var precioTexto = precioMatch ? '$' + precioMatch[1] + ' COP' : '$' + precioCOP + ' COP';
       if (precioUSD) precioTexto += ' · ' + precioUSD + ' USD';
 
+      // Los descuentos aplican SOLO a los hechizos (sección #hechizos-section).
+      var enHechizos = !!(span.closest && span.closest('#hechizos-section'));
+      var clave = enHechizos ? claveHechizo(span.querySelector('strong')) : '';
+      var pctFecha = (clave && PROMOS_FECHA[clave]) ? Number(PROMOS_FECHA[clave]) : 0;
+      var hechizoInfo = clave ? { clave: clave, pctFecha: pctFecha } : null;
+
+      if (clave && pctFecha > 0) {
+        var fin = aplicarDescuentoCliente(precioCOP, pctFecha);
+        var badge = document.createElement('span');
+        badge.className = 'wm-promo-badge';
+        badge.textContent = '−' + pctFecha + '% → $' + fin.toLocaleString('es-CO') + ' COP';
+        span.appendChild(badge);
+      }
+
       var btn = document.createElement('button');
       btn.className = 'wm-pay-btn';
       btn.textContent = 'PAGAR ↗';
@@ -372,7 +508,7 @@
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'wompi');
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'wompi', hechizoInfo);
       });
       span.appendChild(btn);
 
@@ -383,7 +519,7 @@
       btnT.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia');
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia', hechizoInfo);
       });
       span.appendChild(btnT);
     });
@@ -391,7 +527,18 @@
 
   function init() {
     var abrirModal = crearModal();
-    agregarBotones(abrirModal);
+    // Carga las promociones por fecha activas antes de dibujar botones/precios.
+    try {
+      fetch('/api/promociones')
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (data && data.descuentos) PROMOS_FECHA = data.descuentos;
+        })
+        .catch(function () {})
+        .then(function () { agregarBotones(abrirModal); });
+    } catch (e) {
+      agregarBotones(abrirModal);
+    }
   }
 
   if (document.readyState === 'loading') {
