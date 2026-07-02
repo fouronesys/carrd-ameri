@@ -1,23 +1,18 @@
 (function () {
   var WOMPI_PUBLIC_KEY = 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
 
-  // Tasa del dólar (TRM + sobretasa) y comisión de Wompi; llegan desde /api/config.
+  // Comisión de Wompi (para el pago en pesos); llega desde /api/config.
   // El monto real siempre lo calcula el servidor; esto es solo para mostrar un estimado.
-  var TRM_VALOR = 0;
-  var USD_SOBRETASA = 600;
   var COM = { pct: 0.0265, fijo: 700, iva: 0.19 };
 
-  // Intenta obtener la llave pública y la tasa desde el servidor (fuente única).
+  // Intenta obtener la llave pública y la comisión desde el servidor (fuente única).
   try {
     fetch('/api/config')
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (cfg) {
         if (!cfg) return;
         if (cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = cfg.wompiPublicKey;
-        if (cfg.trm > 0) TRM_VALOR = cfg.trm;
-        if (cfg.usdSobretasa >= 0) USD_SOBRETASA = cfg.usdSobretasa;
         if (cfg.comision) COM = cfg.comision;
-        if (typeof aplicarDisponibilidadUsd === 'function') aplicarDisponibilidadUsd();
       })
       .catch(function () {});
   } catch (e) {}
@@ -169,6 +164,9 @@
       '#wompi-modal .wm-transfer-only{display:none;}',
       '#wompi-modal.modo-transfer .wm-transfer-only{display:block;}',
       '#wompi-modal.modo-transfer .wm-wompi-only{display:none;}',
+      '#wompi-modal.moneda-usd .wm-metodos{display:none;}',
+      '#wompi-modal .wm-usd-note{display:none;margin:6px 0 2px;font-size:12px;color:#f0d9e4;}',
+      '#wompi-modal.moneda-usd .wm-usd-note{display:block;}',
       '#wompi-modal .wm-pagos{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;}',
       '#wompi-modal .wm-pago-btn{display:block;width:100%;padding:11px;background:rgba(125,55,84,0.28);color:#fff;font-family:"Poppins",sans-serif;font-size:12.5px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border:1px solid #C2A7B7;border-radius:48px;text-align:center;text-decoration:none;transition:transform 0.125s ease,background 0.2s;}',
       '#wompi-modal .wm-pago-btn:hover{transform:translateY(-1px);background:rgba(125,55,84,0.5);}',
@@ -259,6 +257,7 @@
       '    <div class="wm-metodos-tit">Realiza el pago a cualquiera de estos métodos:</div>',
       '    ' + metodosItems,
       '  </div>',
+      '  <p class="wm-usd-note">Para pagar en <strong>dólares (USD)</strong>, usa PayPal o AstroPay:</p>',
       '  <div class="wm-pagos">',
       '    <a class="wm-pago-btn" href="' + URL_ASTROPAY + '" target="_blank" rel="noopener">Pagar por AstroPay ↗</a>',
       '    <a class="wm-pago-btn" href="https://www.paypal.com/myaccount/transfer/homepage/pay" target="_blank" rel="noopener">Pagar por PayPal ↗</a>',
@@ -316,21 +315,36 @@
     var monedaUsdWrap = document.getElementById('wm-moneda-usd-wrap');
     var monedaRadios = Array.prototype.slice.call(modal.querySelectorAll('input[name="wm-moneda"]'));
 
-    // Oculta la opción de USD si aún no hay tasa del dólar disponible.
+    // Oculta la opción de USD si el servicio no tiene precio en dólares.
     function aplicarDisponibilidadUsd() {
       if (!monedaUsdWrap) return;
-      var hayTasa = TRM_VALOR > 0;
-      monedaUsdWrap.style.display = hayTasa ? '' : 'none';
-      if (!hayTasa && estado.moneda === 'usd') {
+      var hayUsd = !!String(estado.precioUSD || '').trim();
+      monedaUsdWrap.style.display = hayUsd ? '' : 'none';
+      if (!hayUsd && estado.moneda === 'usd') {
         estado.moneda = 'cop';
         monedaRadios.forEach(function (r) { r.checked = r.value === 'cop'; });
-        if (typeof actualizarPrecio === 'function') actualizarPrecio();
       }
+    }
+
+    // Al elegir USD el cobro es por PayPal/AstroPay (Wompi solo cobra pesos):
+    // se muestra el bloque de pago manual y se oculta el botón de Wompi.
+    function esManual() {
+      return estado.modo === 'transferencia' || estado.moneda === 'usd';
+    }
+    function aplicarModoPago() {
+      modal.classList.toggle('modo-transfer', esManual());
+      modal.classList.toggle('moneda-usd', estado.moneda === 'usd');
+      btnPagar.textContent = textoBoton();
+      if (typeof actualizarBoton === 'function') actualizarBoton();
     }
 
     monedaRadios.forEach(function (r) {
       r.addEventListener('change', function () {
-        if (r.checked) { estado.moneda = r.value === 'usd' ? 'usd' : 'cop'; actualizarPrecio(); }
+        if (r.checked) {
+          estado.moneda = r.value === 'usd' ? 'usd' : 'cop';
+          aplicarModoPago();
+          actualizarPrecio();
+        }
       });
     });
 
@@ -354,21 +368,20 @@
       return usdConDescuento(estado.esHechizo ? pctActual() : 0, estado.incluyeAdelanto);
     }
 
-    // Muestra el total realmente cobrado (conversión USD y/o comisión de Wompi).
+    // Muestra el total a pagar. En dólares se muestra solo el monto en USD (sin
+    // conversión ni tasa); en pesos, el total en COP con la comisión de Wompi.
     function refrescarTotal() {
       if (!totalEl) return;
-      var esUsd = estado.moneda === 'usd' && TRM_VALOR > 0;
-      var usdVal = parseFloat(String(servicioUsdActual()).replace(',', '.'));
-      var tasa = TRM_VALOR + USD_SOBRETASA;
-      var cargoBase = estado.precioFinal;
-      if (esUsd && !isNaN(usdVal)) cargoBase = Math.round(usdVal * tasa);
+      if (estado.moneda === 'usd') {
+        var usd = servicioUsdActual();
+        totalEl.innerHTML = 'Total a pagar: ' + (usd || '—') + ' USD' +
+          '<small>se paga por PayPal o AstroPay</small>';
+        return;
+      }
       var esWompi = estado.modo === 'wompi';
-      var total = esWompi ? conComisionWompi(cargoBase) : cargoBase;
-      var notas = [];
-      if (esUsd && !isNaN(usdVal)) notas.push('USD ' + servicioUsdActual() + ' a $' + Math.round(tasa).toLocaleString('es-CO') + '/USD');
-      if (esWompi) notas.push('incluye comisión Wompi');
+      var total = esWompi ? conComisionWompi(estado.precioFinal) : estado.precioFinal;
       totalEl.innerHTML = 'Total a pagar: $' + total.toLocaleString('es-CO') + ' COP' +
-        (notas.length ? '<small>' + notas.join(' · ') + '</small>' : '');
+        (esWompi ? '<small>incluye comisión Wompi</small>' : '');
     }
 
     function actualizarPrecio() {
@@ -444,7 +457,7 @@
     });
 
     function textoBoton() {
-      return estado.modo === 'transferencia' ? 'Enviar comprobante ↗' : 'Pagar con Wompi ↗';
+      return esManual() ? 'Enviar comprobante ↗' : 'Pagar con Wompi ↗';
     }
 
     function mostrarError(msg) {
@@ -458,7 +471,7 @@
 
     function datosCompletos() {
       var cliente = inpCliente.value.trim();
-      var comprobanteOk = estado.modo !== 'transferencia' || (inpComprobante.files && inpComprobante.files.length);
+      var comprobanteOk = !esManual() || (inpComprobante.files && inpComprobante.files.length);
       if (!checkbox.checked || !cliente || !comprobanteOk) return false;
       if (estado.adelanto === 'solo') {
         return !!inpAdelantoTrabajos.value.trim();
@@ -512,9 +525,9 @@
           return;
         }
       }
-      var esTransfer = estado.modo === 'transferencia';
+      var esManualPago = esManual();
       var comprobante = inpComprobante.files && inpComprobante.files[0];
-      if (esTransfer && !comprobante) {
+      if (esManualPago && !comprobante) {
         mostrarError('Sube el comprobante de tu pago.');
         return;
       }
@@ -525,7 +538,7 @@
 
       var fd = new FormData();
       fd.append('cliente_nombre', cliente);
-      fd.append('metodo', esTransfer ? 'transferencia' : 'wompi');
+      fd.append('metodo', esManualPago ? 'transferencia' : 'wompi');
       fd.append('moneda', estado.moneda === 'usd' ? 'usd' : 'cop');
       if (esAdelantoSolo) {
         fd.append('adelanto', 'solo');
@@ -562,7 +575,7 @@
             throw new Error((res.data && res.data.error) || 'No se pudo registrar.');
           }
           var destino = window.location.origin + '/gracias/' + encodeURIComponent(res.data.ref);
-          if (esTransfer) {
+          if (esManualPago) {
             window.location.href = destino;
             return;
           }
@@ -613,7 +626,6 @@
       estado.pctFecha = estado.esHechizo ? (Number(hechizoInfo.pctFecha) || 0) : 0;
       estado.pctCodigo = 0;
       estado.codigo = '';
-      modal.classList.toggle('modo-transfer', estado.modo === 'transferencia');
       document.getElementById('wm-nombre-producto').textContent = nombre;
       normalOnlyEls.forEach(function (el) { el.style.display = solo ? 'none' : ''; });
       adelantoTrabajosWrap.style.display = solo ? 'block' : 'none';
@@ -626,6 +638,7 @@
       estado.moneda = 'cop';
       monedaRadios.forEach(function (r) { r.checked = r.value === 'cop'; });
       aplicarDisponibilidadUsd();
+      aplicarModoPago();
       actualizarPrecio();
       checkbox.checked = false;
       inpCliente.value = '';
