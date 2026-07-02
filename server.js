@@ -102,16 +102,24 @@ app.get('/api/config', function (req, res) {
 });
 
 /* ---------- Registrar agendamiento (antes de pagar) ---------- */
+const subirArchivos = upload.fields([
+  { name: 'objetivo_foto', maxCount: 1 },
+  { name: 'comprobante', maxCount: 1 },
+]);
+
 app.post('/api/booking', function (req, res) {
-  upload.single('objetivo_foto')(req, res, function (err) {
+  subirArchivos(req, res, function (err) {
     if (err) {
       const msg = err.code === 'LIMIT_FILE_SIZE'
-        ? 'La foto es demasiado grande (máximo 8 MB).'
-        : (err.message || 'No se pudo subir la foto.');
+        ? 'La imagen es demasiado grande (máximo 8 MB).'
+        : (err.message || 'No se pudo subir la imagen.');
       return res.status(400).json({ error: msg });
     }
     try {
       const b = req.body || {};
+      const fotoFile = req.files && req.files.objetivo_foto && req.files.objetivo_foto[0];
+      const comprobanteFile = req.files && req.files.comprobante && req.files.comprobante[0];
+
       const clienteNombre = (b.cliente_nombre || '').toString().trim();
       if (!clienteNombre) return res.status(400).json({ error: 'Escribe tu nombre y apellido.' });
 
@@ -126,9 +134,14 @@ app.post('/api/booking', function (req, res) {
 
       const objNombre = (b.objetivo_nombre || '').toString().trim();
       const objFecha = (b.objetivo_fecha_nac || '').toString().trim();
-      const tieneFoto = !!req.file;
+      const tieneFoto = !!fotoFile;
       if (!objNombre && !objFecha && !tieneFoto) {
         return res.status(400).json({ error: 'Proporciona el nombre o la fecha de nacimiento de la persona, o sube una foto.' });
+      }
+
+      const esTransferencia = (b.metodo || '').toString().trim() === 'transferencia';
+      if (esTransferencia && !comprobanteFile) {
+        return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
       }
 
       const ref = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
@@ -136,14 +149,17 @@ app.post('/api/booking', function (req, res) {
         ref: ref,
         producto: (b.producto || '').toString().slice(0, 200),
         precio_cop: precio,
-        precio_texto: (b.precio_texto || ('$' + precio + ' COP')).toString().slice(0, 60),
+        precio_usd: (b.precio_usd || '').toString().slice(0, 20),
+        precio_texto: (b.precio_texto || ('$' + precio + ' COP')).toString().slice(0, 80),
+        metodo: esTransferencia ? 'transferencia' : 'wompi',
         cliente_nombre: clienteNombre.slice(0, 160),
         contacto: contacto.slice(0, 200),
         objetivo_nombre: objNombre.slice(0, 200),
         objetivo_fecha_nac: objFecha.slice(0, 40),
-        objetivo_foto: req.file ? req.file.filename : '',
+        objetivo_foto: fotoFile ? fotoFile.filename : '',
+        comprobante: comprobanteFile ? comprobanteFile.filename : '',
         info_extra: (b.info_extra || '').toString().trim().slice(0, 2000),
-        estado: 'pendiente_pago',
+        estado: esTransferencia ? 'pendiente_verificacion' : 'pendiente_pago',
         wompi_tx: '',
         correo_enviado: false,
         creado_en: new Date().toISOString(),
@@ -167,9 +183,12 @@ app.get('/gracias/:ref', async function (req, res) {
   }
 
   const txId = req.query.id;
-  let estado = registro.estado === 'agendado' ? 'agendado' : 'verificando';
+  let estado;
+  if (registro.estado === 'agendado') estado = 'agendado';
+  else if (registro.estado === 'pendiente_verificacion') estado = 'comprobante_recibido';
+  else estado = 'verificando';
 
-  if (txId && registro.estado !== 'agendado') {
+  if (txId && registro.estado !== 'agendado' && registro.estado !== 'pendiente_verificacion') {
     try {
       const tx = await verificarTransaccionWompi(txId);
       const montoOk = tx && Number(tx.amount_in_cents) === registro.precio_cop * 100;
@@ -281,6 +300,33 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, function (req, res) 
       trabajo_hecho: hecho,
       trabajo_hecho_en: hecho ? new Date().toISOString() : '',
     });
+  }
+  res.redirect('/admin');
+});
+
+app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  if (reg && reg.estado === 'pendiente_verificacion') {
+    const actualizado = db.actualizarPorRef(req.params.ref, {
+      estado: 'agendado',
+      pagado_en: new Date().toISOString(),
+    });
+    if (actualizado && !actualizado.correo_enviado) {
+      try {
+        const r = await mailer.enviarNotificacion(actualizado);
+        if (r.enviado) db.actualizarPorRef(req.params.ref, { correo_enviado: true });
+      } catch (e) {
+        console.error('[mailer] Falló el envío de la notificación:', e.message);
+      }
+    }
+  }
+  res.redirect('/admin');
+});
+
+app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  if (reg && reg.estado === 'pendiente_verificacion') {
+    db.actualizarPorRef(req.params.ref, { estado: 'rechazado' });
   }
   res.redirect('/admin');
 });

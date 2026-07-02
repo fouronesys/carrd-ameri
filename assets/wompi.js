@@ -21,6 +21,16 @@
   ];
 
   var REGEX_COP = /\$\s*([0-9]{1,3}(?:\.[0-9]{3})+)/;
+  var REGEX_USD = /([0-9]+(?:[.,][0-9]+)?)\s*usd/i;
+
+  var METODOS_PAGO = [
+    { nombre: 'BBVA México', detalle: '4152314395088746 · Naomi Carrillo' },
+    { nombre: 'Nequi', detalle: '3104462860 (Sa* Izq**)' },
+    { nombre: 'Mercado Pago', detalle: 'opacelia (Celeste Villalba)' },
+    { nombre: 'Yape', detalle: '964 806 000 (Andrea)' },
+    { nombre: 'Banco Popular RD', detalle: 'Ahorros: 844480111 · Cédula: 40215343837' },
+    { nombre: 'También', detalle: 'Astropay, Paypal, Western Union y Remitly' }
+  ];
 
   function extraerPrecioCOP(texto) {
     var match = texto.match(REGEX_COP);
@@ -28,6 +38,12 @@
       var val = parseInt(match[1].replace(/\./g, ''), 10);
       if (val > 999) return val;
     }
+    return null;
+  }
+
+  function extraerPrecioUSD(texto) {
+    var match = texto.match(REGEX_USD);
+    if (match) return match[1].replace(',', '.');
     return null;
   }
 
@@ -85,6 +101,15 @@
       '#wompi-modal .wm-nota{font-size:10px;color:#9c7788;text-align:center;margin-top:11px;}',
       '.wm-pay-btn{display:inline-block;margin-top:0.5rem;padding:0.22rem 0.7rem;font-family:"Poppins",sans-serif;font-size:0.48rem;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:#fff;background-color:#7D3754;background-image:linear-gradient(360deg, rgba(0,0,0,0.72) 0%, rgba(125,55,84,0.012) 100%);border:solid 1px #C2A7B7;border-radius:3rem;cursor:pointer;transition:transform 0.125s ease;vertical-align:middle;}',
       '.wm-pay-btn:hover{transform:translateY(-1px);}',
+      '.wm-pay-btn.transfer{background-color:#4c2740;margin-left:0.3rem;}',
+      '#wompi-modal .wm-metodos{background:rgba(125,55,84,0.12);border:1px solid rgba(194,167,183,0.3);border-radius:8px;padding:12px 14px;margin-bottom:14px;}',
+      '#wompi-modal .wm-metodos-tit{font-size:12px;font-weight:700;color:#F0A3C3;margin-bottom:8px;}',
+      '#wompi-modal .wm-metodo{font-size:11.5px;color:#e0c0cf;line-height:1.45;padding:6px 0;border-top:1px solid rgba(194,167,183,0.15);}',
+      '#wompi-modal .wm-metodo:first-of-type{border-top:none;}',
+      '#wompi-modal .wm-metodo b{color:#fff;}',
+      '#wompi-modal .wm-transfer-only{display:none;}',
+      '#wompi-modal.modo-transfer .wm-transfer-only{display:block;}',
+      '#wompi-modal.modo-transfer .wm-wompi-only{display:none;}',
       '.p{position:relative;}'
     ].join('');
     document.head.appendChild(estilos);
@@ -99,6 +124,10 @@
 
     var listItems = ACLARACIONES_RESUMEN.map(function (t) {
       return '<li>' + t + '</li>';
+    }).join('');
+
+    var metodosItems = METODOS_PAGO.map(function (m) {
+      return '<div class="wm-metodo"><b>' + m.nombre + ':</b> ' + m.detalle + '</div>';
     }).join('');
 
     modal.innerHTML = [
@@ -131,6 +160,16 @@
       '<label class="wm-label">Otra información que desees proporcionar',
       '  <textarea class="wm-input wm-textarea" id="wm-info" placeholder="Escribe aquí cualquier detalle adicional..."></textarea>',
       '</label>',
+      '<div class="wm-transfer-only">',
+      '  <hr class="wm-divider">',
+      '  <div class="wm-metodos">',
+      '    <div class="wm-metodos-tit">Realiza el pago a cualquiera de estos métodos:</div>',
+      '    ' + metodosItems,
+      '  </div>',
+      '  <label class="wm-label">Sube el comprobante de tu pago <span class="wm-req">*</span>',
+      '    <input type="file" class="wm-input wm-file" id="wm-comprobante" accept="image/*">',
+      '  </label>',
+      '</div>',
       '<hr class="wm-divider">',
       '<div class="wm-aclaraciones-titulo"><span>｡ ˚ ︶︶ꔫ</span> Aclaraciones <span>ꔫ︶︶ ₊ ˚</span></div>',
       '<ul class="wm-aclaraciones-lista">' + listItems + '</ul>',
@@ -141,13 +180,14 @@
       '</label>',
       '<div class="wm-error" id="wm-error"></div>',
       '<button class="wm-btn-pagar" id="wm-btn-pagar" disabled>Pagar con Wompi ↗</button>',
-      '<p class="wm-nota">Serás redirigido/a al checkout seguro de Wompi. Tu trabajo se agenda automáticamente cuando el pago sea aprobado.</p>'
+      '<p class="wm-nota wm-wompi-only">Serás redirigido/a al checkout seguro de Wompi. Tu trabajo se agenda automáticamente cuando el pago sea aprobado.</p>',
+      '<p class="wm-nota wm-transfer-only">Después de enviar tu comprobante, verificaremos tu pago manualmente. Te avisaremos por tu contacto cuando quede confirmado.</p>'
     ].join('');
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    var estado = { precioCOP: 0, nombre: '', precioTexto: '' };
+    var estado = { precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi' };
 
     var checkbox = document.getElementById('wm-acepto');
     var btnPagar = document.getElementById('wm-btn-pagar');
@@ -157,7 +197,12 @@
     var inpObjNombre = document.getElementById('wm-obj-nombre');
     var inpObjFecha = document.getElementById('wm-obj-fecha');
     var inpObjFoto = document.getElementById('wm-obj-foto');
+    var inpComprobante = document.getElementById('wm-comprobante');
     var inpInfo = document.getElementById('wm-info');
+
+    function textoBoton() {
+      return estado.modo === 'transferencia' ? 'Enviar comprobante ↗' : 'Pagar con Wompi ↗';
+    }
 
     function mostrarError(msg) {
       errorBox.textContent = msg;
@@ -172,7 +217,8 @@
       var cliente = inpCliente.value.trim();
       var contacto = inpContacto.value.trim();
       var tienePersona = inpObjNombre.value.trim() || inpObjFecha.value || (inpObjFoto.files && inpObjFoto.files.length);
-      return checkbox.checked && cliente && contacto && tienePersona;
+      var comprobanteOk = estado.modo !== 'transferencia' || (inpComprobante.files && inpComprobante.files.length);
+      return checkbox.checked && cliente && contacto && tienePersona && comprobanteOk;
     }
 
     function actualizarBoton() {
@@ -181,7 +227,7 @@
     }
 
     checkbox.addEventListener('change', actualizarBoton);
-    [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpInfo].forEach(function (el) {
+    [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpComprobante, inpInfo].forEach(function (el) {
       el.addEventListener('input', actualizarBoton);
       el.addEventListener('change', actualizarBoton);
     });
@@ -202,6 +248,12 @@
         mostrarError('Proporciona los datos de la persona o sube una foto.');
         return;
       }
+      var esTransfer = estado.modo === 'transferencia';
+      var comprobante = inpComprobante.files && inpComprobante.files[0];
+      if (esTransfer && !comprobante) {
+        mostrarError('Sube el comprobante de tu pago.');
+        return;
+      }
       limpiarError();
       btnPagar.disabled = true;
       var textoOriginal = btnPagar.textContent;
@@ -216,7 +268,10 @@
       fd.append('producto', estado.nombre);
       fd.append('precio_cop', String(estado.precioCOP));
       fd.append('precio_texto', estado.precioTexto);
+      fd.append('precio_usd', estado.precioUSD || '');
+      fd.append('metodo', esTransfer ? 'transferencia' : 'wompi');
       if (foto) fd.append('objetivo_foto', foto);
+      if (comprobante) fd.append('comprobante', comprobante);
 
       fetch('/api/booking', { method: 'POST', body: fd })
         .then(function (resp) {
@@ -226,14 +281,18 @@
           if (!res.ok || !res.data || !res.data.ok) {
             throw new Error((res.data && res.data.error) || 'No se pudo registrar.');
           }
+          var destino = window.location.origin + '/gracias/' + encodeURIComponent(res.data.ref);
+          if (esTransfer) {
+            window.location.href = destino;
+            return;
+          }
           var centavos = estado.precioCOP * 100;
-          var redirect = window.location.origin + '/gracias/' + encodeURIComponent(res.data.ref);
           var url = 'https://checkout.wompi.co/p/'
             + '?public-key=' + encodeURIComponent(WOMPI_PUBLIC_KEY)
             + '&currency=COP'
             + '&amount-in-cents=' + centavos
             + '&reference=' + encodeURIComponent(res.data.ref)
-            + '&redirect-url=' + encodeURIComponent(redirect);
+            + '&redirect-url=' + encodeURIComponent(destino);
           window.location.href = url;
         })
         .catch(function (e) {
@@ -251,14 +310,17 @@
       overlay.classList.remove('activo');
       checkbox.checked = false;
       btnPagar.disabled = true;
-      btnPagar.textContent = 'Pagar con Wompi ↗';
+      btnPagar.textContent = textoBoton();
       limpiarError();
     }
 
-    return function abrirModal(nombre, precioCOP, precioTexto) {
+    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo) {
       estado.precioCOP = precioCOP;
+      estado.precioUSD = precioUSD || '';
       estado.nombre = nombre;
       estado.precioTexto = precioTexto;
+      estado.modo = modo === 'transferencia' ? 'transferencia' : 'wompi';
+      modal.classList.toggle('modo-transfer', estado.modo === 'transferencia');
       document.getElementById('wm-nombre-producto').textContent = nombre;
       document.getElementById('wm-precio-producto').textContent = precioTexto;
       checkbox.checked = false;
@@ -266,10 +328,11 @@
       inpObjNombre.value = '';
       inpObjFecha.value = '';
       inpObjFoto.value = '';
+      inpComprobante.value = '';
       inpInfo.value = '';
       limpiarError();
       btnPagar.disabled = true;
-      btnPagar.textContent = 'Pagar con Wompi ↗';
+      btnPagar.textContent = textoBoton();
       overlay.classList.add('activo');
     };
   }
@@ -285,7 +348,9 @@
       if (!nombre) return;
 
       var precioMatch = texto.match(REGEX_COP);
+      var precioUSD = extraerPrecioUSD(texto);
       var precioTexto = precioMatch ? '$' + precioMatch[1] + ' COP' : '$' + precioCOP + ' COP';
+      if (precioUSD) precioTexto += ' · ' + precioUSD + ' USD';
 
       var btn = document.createElement('button');
       btn.className = 'wm-pay-btn';
@@ -294,10 +359,20 @@
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        abrirModal(nombre, precioCOP, precioTexto);
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'wompi');
       });
-
       span.appendChild(btn);
+
+      var btnT = document.createElement('button');
+      btnT.className = 'wm-pay-btn transfer';
+      btnT.textContent = 'TRANSFERENCIA ↗';
+      btnT.setAttribute('aria-label', 'Pagar por transferencia ' + nombre);
+      btnT.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia');
+      });
+      span.appendChild(btnT);
     });
   }
 
