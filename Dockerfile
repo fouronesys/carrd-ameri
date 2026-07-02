@@ -1,8 +1,16 @@
-FROM nginx:1.27-alpine
+FROM node:20-bookworm-slim
 
-RUN rm -rf /usr/share/nginx/html/*
-COPY . /usr/share/nginx/html
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --omit=dev
+
+COPY . .
+
+ENV NODE_ENV=production
+ENV PORT=80
+ENV DATA_DIR=/data
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server.js"]

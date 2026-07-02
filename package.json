@@ -1,0 +1,19 @@
+{
+  "name": "fresatanika",
+  "version": "1.0.0",
+  "description": "Catálogo Fresatanika con agendamiento, pagos Wompi y panel de administración",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.3"
+  }
+}

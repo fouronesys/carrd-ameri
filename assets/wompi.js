@@ -1,6 +1,14 @@
 (function () {
   var WOMPI_PUBLIC_KEY = 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
 
+  // Intenta obtener la llave pública desde el servidor (fuente única: variable de entorno).
+  try {
+    fetch('/api/config')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cfg) { if (cfg && cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = cfg.wompiPublicKey; })
+      .catch(function () {});
+  } catch (e) {}
+
   var ACLARACIONES_RESUMEN = [
     'Los precios <strong>no incluyen comisión</strong> de la pasarela de pago.',
     'El trabajo se agenda únicamente cuando el pago esté <strong>totalmente cancelado</strong>.',
@@ -11,10 +19,6 @@
     'Lunes a viernes: 1:40 p.m. a 9:30 p.m. (hora Colombia). Sábados: 11:30 a.m. a 5:30 p.m.',
     'Al pagar se asume que leíste <strong>TODAS</strong> las aclaraciones y las aceptas.'
   ];
-
-  function generarReferencia() {
-    return 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
-  }
 
   var REGEX_COP = /\$\s*([0-9]{1,3}(?:\.[0-9]{3})+)/;
 
@@ -47,18 +51,32 @@
       '#wompi-modal .wm-producto{text-align:center;font-size:14px;font-weight:700;color:#fff;margin-bottom:3px;line-height:1.35;}',
       '#wompi-modal .wm-precio{text-align:center;font-size:19px;font-weight:900;font-style:italic;color:#F0A3C3;margin-bottom:16px;}',
       '#wompi-modal .wm-divider{border:none;border-top:1px solid rgba(194,167,183,0.35);margin:14px 0;}',
+      '#wompi-modal .wm-form-titulo{text-align:center;font-size:12px;font-weight:700;color:#F0A3C3;letter-spacing:0.04em;margin-bottom:12px;}',
+      '#wompi-modal .wm-form-titulo span{color:#9C4C6D;}',
+      '#wompi-modal .wm-label{display:block;font-size:11.5px;color:#e0c0cf;margin-bottom:12px;font-weight:500;}',
+      '#wompi-modal .wm-label .wm-req{color:#F0A3C3;}',
+      '#wompi-modal .wm-input{display:block;width:100%;margin-top:5px;padding:10px 12px;border-radius:7px;border:1px solid rgba(194,167,183,0.4);background:rgba(0,0,0,0.35);color:#fff;font-family:"Poppins",sans-serif;font-size:13px;}',
+      '#wompi-modal .wm-input:focus{outline:none;border-color:#F0A3C3;}',
+      '#wompi-modal .wm-textarea{resize:vertical;min-height:60px;}',
+      '#wompi-modal .wm-file{padding:8px 10px;font-size:12px;color:#d6b9c8;}',
+      '#wompi-modal .wm-file::file-selector-button{background:#7D3754;color:#fff;border:1px solid #C2A7B7;border-radius:20px;padding:5px 12px;font-size:11px;cursor:pointer;margin-right:10px;font-family:"Poppins",sans-serif;}',
+      '#wompi-modal .wm-fieldset{background:rgba(125,55,84,0.10);border:1px solid rgba(194,167,183,0.25);border-radius:8px;padding:14px 14px 4px;margin-bottom:14px;}',
+      '#wompi-modal .wm-fieldset-tit{font-size:12px;font-weight:700;color:#F0A3C3;margin-bottom:4px;}',
+      '#wompi-modal .wm-fieldset-sub{font-size:10.5px;color:#b58ca1;line-height:1.45;margin-bottom:12px;}',
       '#wompi-modal .wm-aclaraciones-titulo{text-align:center;font-size:12px;font-weight:700;color:#F0A3C3;letter-spacing:0.04em;margin-bottom:10px;}',
       '#wompi-modal .wm-aclaraciones-titulo span{color:#9C4C6D;}',
-      '#wompi-modal .wm-aclaraciones-lista{background:rgba(125,55,84,0.10);border:1px solid rgba(194,167,183,0.25);border-radius:6px;padding:14px 16px;margin-bottom:14px;max-height:160px;overflow-y:auto;}',
+      '#wompi-modal .wm-aclaraciones-lista{background:rgba(125,55,84,0.10);border:1px solid rgba(194,167,183,0.25);border-radius:6px;padding:14px 16px;margin-bottom:14px;max-height:140px;overflow-y:auto;}',
       '#wompi-modal .wm-aclaraciones-lista li{font-size:12px;color:#d6b9c8;line-height:1.55;margin-bottom:8px;padding-left:18px;position:relative;}',
       '#wompi-modal .wm-aclaraciones-lista li:last-child{margin-bottom:0;}',
       '#wompi-modal .wm-aclaraciones-lista li::before{content:"ꪮꫀ.";position:absolute;left:0;color:#9C4C6D;font-size:10px;}',
       '#wompi-modal .wm-aclaraciones-lista li strong{color:#F0A3C3;}',
       '#wompi-modal .wm-aclaraciones-link{display:block;font-size:12px;color:#F0A3C3;text-decoration:underline;margin-bottom:16px;text-align:center;}',
-      '#wompi-modal .wm-check-wrap{display:flex;align-items:flex-start;gap:10px;margin-bottom:18px;cursor:pointer;background:rgba(125,55,84,0.08);border:1px solid rgba(194,167,183,0.25);border-radius:6px;padding:12px 13px;}',
+      '#wompi-modal .wm-check-wrap{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;cursor:pointer;background:rgba(125,55,84,0.08);border:1px solid rgba(194,167,183,0.25);border-radius:6px;padding:12px 13px;}',
       '#wompi-modal .wm-check-wrap input[type=checkbox]{width:18px;height:18px;min-width:18px;accent-color:#7D3754;margin-top:2px;cursor:pointer;}',
       '#wompi-modal .wm-check-wrap label{font-size:12px;color:#e0c0cf;line-height:1.45;cursor:pointer;}',
       '#wompi-modal .wm-check-wrap label strong{color:#F0A3C3;}',
+      '#wompi-modal .wm-error{display:none;background:rgba(229,123,160,0.14);border:1px solid rgba(229,123,160,0.4);color:#f3b6cd;font-size:11.5px;padding:9px 11px;border-radius:6px;margin-bottom:14px;text-align:center;}',
+      '#wompi-modal .wm-error.activo{display:block;}',
       '#wompi-modal .wm-btn-pagar{display:block;width:100%;padding:13px;background-color:#7D3754;background-image:linear-gradient(360deg, rgba(0,0,0,0.72) 0%, rgba(125,55,84,0.012) 100%);color:#fff;font-family:"Poppins",sans-serif;font-size:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;border:solid 1px #C2A7B7;border-radius:48px;cursor:pointer;transition:transform 0.125s ease,opacity 0.2s;text-align:center;text-decoration:none;}',
       '#wompi-modal .wm-btn-pagar:hover:not(:disabled){transform:translateY(-1px);}',
       '#wompi-modal .wm-btn-pagar:disabled{opacity:0.35;cursor:not-allowed;border-color:rgba(194,167,183,0.4);}',
@@ -90,46 +108,131 @@
       '<div class="wm-producto" id="wm-nombre-producto"></div>',
       '<div class="wm-precio" id="wm-precio-producto"></div>',
       '<hr class="wm-divider">',
+      '<div class="wm-form-titulo"><span>｡ ˚ ︶︶ꔫ</span> Tus datos <span>ꔫ︶︶ ₊ ˚</span></div>',
+      '<label class="wm-label">Tu nombre y apellido <span class="wm-req">*</span>',
+      '  <input type="text" class="wm-input" id="wm-cliente" placeholder="Escribe tu nombre y apellido" autocomplete="name">',
+      '</label>',
+      '<div class="wm-fieldset">',
+      '  <div class="wm-fieldset-tit">Datos de la persona a trabajar</div>',
+      '  <div class="wm-fieldset-sub">Pueden ser tuyos o de otra persona. Si no tienes los datos, sube una foto de la persona.</div>',
+      '  <label class="wm-label">Nombre y apellidos',
+      '    <input type="text" class="wm-input" id="wm-obj-nombre" placeholder="Nombre y apellidos">',
+      '  </label>',
+      '  <label class="wm-label">Fecha de nacimiento',
+      '    <input type="date" class="wm-input" id="wm-obj-fecha">',
+      '  </label>',
+      '  <label class="wm-label">O una foto de la persona',
+      '    <input type="file" class="wm-input wm-file" id="wm-obj-foto" accept="image/*">',
+      '  </label>',
+      '</div>',
+      '<label class="wm-label">Otra información que desees proporcionar',
+      '  <textarea class="wm-input wm-textarea" id="wm-info" placeholder="Escribe aquí cualquier detalle adicional..."></textarea>',
+      '</label>',
+      '<hr class="wm-divider">',
       '<div class="wm-aclaraciones-titulo"><span>｡ ˚ ︶︶ꔫ</span> Aclaraciones <span>ꔫ︶︶ ₊ ˚</span></div>',
       '<ul class="wm-aclaraciones-lista">' + listItems + '</ul>',
       '<a class="wm-aclaraciones-link" href="#aclaraciones" id="wm-link-aclaraciones">→ Leer todas las aclaraciones completas</a>',
-      '<hr class="wm-divider">',
       '<label class="wm-check-wrap">',
       '  <input type="checkbox" id="wm-acepto">',
       '  <span>He leído <strong>todas las aclaraciones</strong> y las acepto. Entiendo que <strong>no hay reembolsos</strong> una vez realizado el pago y que el precio no incluye comisión.</span>',
       '</label>',
+      '<div class="wm-error" id="wm-error"></div>',
       '<button class="wm-btn-pagar" id="wm-btn-pagar" disabled>Pagar con Wompi ↗</button>',
-      '<p class="wm-nota">Serás redirigido/a al checkout seguro de Wompi</p>'
+      '<p class="wm-nota">Serás redirigido/a al checkout seguro de Wompi. Tu trabajo se agenda automáticamente cuando el pago sea aprobado.</p>'
     ].join('');
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    var estado = { precioCOP: 0, nombre: '' };
+    var estado = { precioCOP: 0, nombre: '', precioTexto: '' };
+
+    var checkbox = document.getElementById('wm-acepto');
+    var btnPagar = document.getElementById('wm-btn-pagar');
+    var errorBox = document.getElementById('wm-error');
+    var inpCliente = document.getElementById('wm-cliente');
+    var inpObjNombre = document.getElementById('wm-obj-nombre');
+    var inpObjFecha = document.getElementById('wm-obj-fecha');
+    var inpObjFoto = document.getElementById('wm-obj-foto');
+    var inpInfo = document.getElementById('wm-info');
+
+    function mostrarError(msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.add('activo');
+    }
+    function limpiarError() {
+      errorBox.textContent = '';
+      errorBox.classList.remove('activo');
+    }
+
+    function datosCompletos() {
+      var cliente = inpCliente.value.trim();
+      var tienePersona = inpObjNombre.value.trim() || inpObjFecha.value || (inpObjFoto.files && inpObjFoto.files.length);
+      return checkbox.checked && cliente && tienePersona;
+    }
+
+    function actualizarBoton() {
+      btnPagar.disabled = !datosCompletos();
+      if (datosCompletos()) limpiarError();
+    }
+
+    checkbox.addEventListener('change', actualizarBoton);
+    [inpCliente, inpObjNombre, inpObjFecha, inpObjFoto, inpInfo].forEach(function (el) {
+      el.addEventListener('input', actualizarBoton);
+      el.addEventListener('change', actualizarBoton);
+    });
 
     document.getElementById('wm-cerrar').addEventListener('click', cerrarModal);
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay) cerrarModal();
     });
 
-    var checkbox = document.getElementById('wm-acepto');
-    var btnPagar = document.getElementById('wm-btn-pagar');
-
-    checkbox.addEventListener('change', function () {
-      btnPagar.disabled = !checkbox.checked;
-    });
-
     btnPagar.addEventListener('click', function () {
-      if (!checkbox.checked) return;
-      var centavos = estado.precioCOP * 100;
-      var ref = generarReferencia();
-      var url = 'https://checkout.wompi.co/p/'
-        + '?public-key=' + encodeURIComponent(WOMPI_PUBLIC_KEY)
-        + '&currency=COP'
-        + '&amount-in-cents=' + centavos
-        + '&reference=' + encodeURIComponent(ref)
-        + '&redirect-url=' + encodeURIComponent(window.location.href);
-      window.open(url, '_blank', 'noopener');
+      if (btnPagar.disabled) return;
+      var cliente = inpCliente.value.trim();
+      if (!cliente) { mostrarError('Escribe tu nombre y apellido.'); return; }
+      var foto = inpObjFoto.files && inpObjFoto.files[0];
+      if (!inpObjNombre.value.trim() && !inpObjFecha.value && !foto) {
+        mostrarError('Proporciona los datos de la persona o sube una foto.');
+        return;
+      }
+      limpiarError();
+      btnPagar.disabled = true;
+      var textoOriginal = btnPagar.textContent;
+      btnPagar.textContent = 'Procesando...';
+
+      var fd = new FormData();
+      fd.append('cliente_nombre', cliente);
+      fd.append('objetivo_nombre', inpObjNombre.value.trim());
+      fd.append('objetivo_fecha_nac', inpObjFecha.value);
+      fd.append('info_extra', inpInfo.value.trim());
+      fd.append('producto', estado.nombre);
+      fd.append('precio_cop', String(estado.precioCOP));
+      fd.append('precio_texto', estado.precioTexto);
+      if (foto) fd.append('objetivo_foto', foto);
+
+      fetch('/api/booking', { method: 'POST', body: fd })
+        .then(function (resp) {
+          return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        })
+        .then(function (res) {
+          if (!res.ok || !res.data || !res.data.ok) {
+            throw new Error((res.data && res.data.error) || 'No se pudo registrar.');
+          }
+          var centavos = estado.precioCOP * 100;
+          var redirect = window.location.origin + '/gracias/' + encodeURIComponent(res.data.ref);
+          var url = 'https://checkout.wompi.co/p/'
+            + '?public-key=' + encodeURIComponent(WOMPI_PUBLIC_KEY)
+            + '&currency=COP'
+            + '&amount-in-cents=' + centavos
+            + '&reference=' + encodeURIComponent(res.data.ref)
+            + '&redirect-url=' + encodeURIComponent(redirect);
+          window.location.href = url;
+        })
+        .catch(function (e) {
+          mostrarError(e.message || 'No se pudo procesar. Intenta de nuevo.');
+          btnPagar.disabled = false;
+          btnPagar.textContent = textoOriginal;
+        });
     });
 
     document.getElementById('wm-link-aclaraciones').addEventListener('click', function () {
@@ -140,15 +243,25 @@
       overlay.classList.remove('activo');
       checkbox.checked = false;
       btnPagar.disabled = true;
+      btnPagar.textContent = 'Pagar con Wompi ↗';
+      limpiarError();
     }
 
     return function abrirModal(nombre, precioCOP, precioTexto) {
       estado.precioCOP = precioCOP;
       estado.nombre = nombre;
+      estado.precioTexto = precioTexto;
       document.getElementById('wm-nombre-producto').textContent = nombre;
       document.getElementById('wm-precio-producto').textContent = precioTexto;
       checkbox.checked = false;
+      inpCliente.value = '';
+      inpObjNombre.value = '';
+      inpObjFecha.value = '';
+      inpObjFoto.value = '';
+      inpInfo.value = '';
+      limpiarError();
       btnPagar.disabled = true;
+      btnPagar.textContent = 'Pagar con Wompi ↗';
       overlay.classList.add('activo');
     };
   }

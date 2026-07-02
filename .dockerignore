@@ -1,8 +1,8 @@
 .git
 .gitignore
+.dockerignore
 Dockerfile
 captain-definition
-.dockerignore
 *.md
 .local
 .agents
@@ -10,3 +10,6 @@ node_modules
 .config
 .cache
 .upm
+data
+zipFile.zip
+.env
