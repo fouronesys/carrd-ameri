@@ -1,0 +1,12 @@
+.git
+.gitignore
+Dockerfile
+captain-definition
+.dockerignore
+*.md
+.local
+.agents
+node_modules
+.config
+.cache
+.upm
