@@ -65,7 +65,7 @@
       '#wompi-modal .wm-btn-cerrar{position:absolute;top:12px;right:14px;background:none;border:none;color:#9C4C6D;font-size:22px;cursor:pointer;line-height:1;transition:color 0.15s;}',
       '#wompi-modal .wm-btn-cerrar:hover{color:#F0A3C3;}',
       '#wompi-modal .wm-nota{font-size:10px;color:#9c7788;text-align:center;margin-top:11px;}',
-      '.wm-pay-btn{display:inline-block;margin-top:0.55rem;padding:0.3rem 0.9rem;font-family:"Poppins",sans-serif;font-size:0.58rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fff;background-color:#7D3754;background-image:linear-gradient(360deg, rgba(0,0,0,0.72) 0%, rgba(125,55,84,0.012) 100%);border:solid 1px #C2A7B7;border-radius:3rem;cursor:pointer;transition:transform 0.125s ease;vertical-align:middle;}',
+      '.wm-pay-btn{display:inline-block;margin-top:0.5rem;padding:0.22rem 0.7rem;font-family:"Poppins",sans-serif;font-size:0.48rem;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:#fff;background-color:#7D3754;background-image:linear-gradient(360deg, rgba(0,0,0,0.72) 0%, rgba(125,55,84,0.012) 100%);border:solid 1px #C2A7B7;border-radius:3rem;cursor:pointer;transition:transform 0.125s ease;vertical-align:middle;}',
       '.wm-pay-btn:hover{transform:translateY(-1px);}',
       '.p{position:relative;}'
     ].join('');
