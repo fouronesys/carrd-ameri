@@ -567,7 +567,7 @@ function leerObjetivo(body) {
   return 'todos';
 }
 
-app.post('/admin/promo', mismoOrigen, requiereAdmin, function (req, res) {
+app.post('/admin/promo', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
   const b = req.body || {};
   const pct = parseInt(b.porcentaje, 10);
   const desde = (b.desde || '').toString().trim();
@@ -587,7 +587,7 @@ app.post('/admin/promo', mismoOrigen, requiereAdmin, function (req, res) {
   res.redirect('/admin');
 });
 
-app.post('/admin/promo/eliminar/:id', mismoOrigen, requiereAdmin, function (req, res) {
+app.post('/admin/promo/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
   db.eliminarPromo(req.params.id);
   res.redirect('/admin');
 });
