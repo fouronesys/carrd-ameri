@@ -211,6 +211,15 @@ function requiereAdmin(req, res, next) {
   return res.redirect('/admin');
 }
 
+function mismoOrigen(req, res, next) {
+  const origen = req.get('origin') || req.get('referer') || '';
+  const host = req.get('host') || '';
+  try {
+    if (origen && new URL(origen).host === host) return next();
+  } catch (e) { /* origen inválido */ }
+  return res.status(403).send('Solicitud no permitida.');
+}
+
 app.get('/admin', function (req, res) {
   if (req.session && req.session.admin) {
     return res.send(templates.adminDashboard({ registros: db.listarAgendamientos() }));
@@ -218,7 +227,7 @@ app.get('/admin', function (req, res) {
   res.send(templates.adminLogin({ noConfig: !ADMIN_PASSWORD }));
 });
 
-app.post('/admin/login', function (req, res) {
+app.post('/admin/login', mismoOrigen, function (req, res) {
   if (!ADMIN_PASSWORD) {
     return res.status(500).send(templates.adminLogin({ noConfig: true }));
   }
@@ -229,7 +238,7 @@ app.post('/admin/login', function (req, res) {
   res.status(401).send(templates.adminLogin({ error: 'Contraseña incorrecta.' }));
 });
 
-app.post('/admin/logout', function (req, res) {
+app.post('/admin/logout', mismoOrigen, function (req, res) {
   req.session.destroy(function () { res.redirect('/admin'); });
 });
 
@@ -260,6 +269,23 @@ app.get('/admin/exportar/pdf', requiereAdmin, function (req, res) {
   }
 });
 
+app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  if (reg) {
+    const hecho = !reg.trabajo_hecho;
+    db.actualizarPorRef(req.params.ref, {
+      trabajo_hecho: hecho,
+      trabajo_hecho_en: hecho ? new Date().toISOString() : '',
+    });
+  }
+  res.redirect('/admin');
+});
+
+app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+  db.eliminarPorRef(req.params.ref);
+  res.redirect('/admin');
+});
+
 app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
   const nombre = path.basename(req.params.nombre);
   const ruta = path.join(db.UPLOADS_DIR, nombre);
@@ -281,8 +307,20 @@ app.use(function (req, res) {
   res.status(404).sendFile(path.join(ROOT, 'index.html'));
 });
 
+/* ---------- Limpieza automática de agendamientos sin pago (>48h) ---------- */
+function limpiarPendientes() {
+  try {
+    const n = db.eliminarPendientesAntiguos(48);
+    if (n > 0) console.log('[limpieza] ' + n + ' agendamiento(s) sin pago eliminados (>48h).');
+  } catch (e) {
+    console.error('[limpieza]', e.message);
+  }
+}
+
 app.listen(PORT, '0.0.0.0', function () {
   console.log('Fresatanika escuchando en el puerto ' + PORT);
   console.log('Datos en: ' + db.DATA_DIR);
   if (!process.env.SMTP_PASS) console.warn('Aviso: SMTP_PASS no está configurado; las notificaciones por correo están desactivadas.');
+  limpiarPendientes();
+  setInterval(limpiarPendientes, 60 * 60 * 1000);
 });

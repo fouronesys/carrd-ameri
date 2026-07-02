@@ -16,3 +16,7 @@ description: Environment quirks and deployment constraints for the Fresatanika N
 - **Payment integrity:** `/api/booking` accepts a price only if it appears in the catalog (prices are parsed from `index.html` at startup). `/gracias/:ref` marks a booking as `agendado` ONLY when the Wompi tx is APPROVED **and** `reference`, `amount_in_cents` (== precio_cop*100), and `currency === 'COP'` all match exactly. Never loosen these checks.
 
 - **Photo uploads are raster-only** (jpeg/png/webp; SVG blocked) and served with `X-Content-Type-Options: nosniff` + `Content-Security-Policy: default-src 'none'; sandbox` to prevent stored-XSS in the authenticated admin view.
+
+- **CSRF on admin POST routes uses Origin/Referer validation** (a `mismoOrigen` middleware), not a token library. **Why:** the whole UI is plain HTML built via string concatenation in `lib/templates.js`, so per-form hidden-token plumbing is heavy; combined with the `SameSite=Lax` session cookie, Origin/Referer matching is sufficient defense for the destructive actions. **How to apply:** any new state-changing admin POST must be guarded by `mismoOrigen` (and `requiereAdmin`).
+
+- **Both exports must stay in sync.** Excel (`generarExcel`) and PDF (`generarPDF`) in `lib/exportar.js` are separate hand-built layouts; a new booking field (e.g. `trabajo_hecho`) must be added to BOTH or they silently diverge. **Why:** the PDF was initially forgotten in review.
