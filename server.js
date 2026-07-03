@@ -45,6 +45,12 @@ function conComisionWompi(baseCop) {
   return Math.ceil((baseCop + fijo) / factor);
 }
 
+// Formatea un monto en dólares: entero sin decimales, o con dos decimales.
+function formatUsd(n) {
+  const r = Math.round(n * 100) / 100;
+  return Number.isInteger(r) ? String(r) : r.toFixed(2);
+}
+
 // Nota: los pagos en dólares (USD) NO pasan por Wompi (que solo cobra en COP);
 // se cobran por PayPal/AstroPay y se verifican manualmente, sin conversión a pesos.
 
@@ -355,31 +361,66 @@ app.post('/api/booking', function (req, res) {
         return res.status(503).json({ error: 'El pago con tarjeta no está disponible por ahora. Intenta con transferencia o escríbenos.' });
       }
 
-      // --- Pago de adelanto (urgencia) suelto: formulario corto ---
-      // Solo se piden el nombre del cliente y el/los trabajos para los que se paga.
-      if ((b.adelanto || '').toString().trim() === 'solo') {
-        const trabajos = (b.info_extra || '').toString().trim();
-        if (!trabajos) return res.status(400).json({ error: 'Escribe para cuál(es) trabajo(s) es el adelanto.' });
+      // --- Servicios extra (complementos de los hechizos): formulario corto ---
+      // Adelanto/urgencia, velación, ocultamiento, velita... Solo se piden el
+      // nombre del cliente y los hechizos (máximo 3) a los que se aplica el extra.
+      // No se piden datos de la persona ni de contacto.
+      const esAdelantoSolo = (b.adelanto || '').toString().trim() === 'solo';
+      const esExtra = esAdelantoSolo || (b.tipo || '').toString().trim() === 'extra';
+      if (esExtra) {
+        const hechizosTexto = (b.info_extra || '').toString().trim();
+        if (!hechizosTexto) {
+          return res.status(400).json({ error: 'Escribe a cuál(es) hechizo(s) se aplica este extra.' });
+        }
         if (esManual && !comprobanteFile) {
           return res.status(400).json({ error: 'Sube el comprobante de tu pago.' });
         }
-        let totalCopA, precioTextoA;
+
+        // Precio del extra: para el adelanto es un valor fijo del servidor; para
+        // los demás extras debe corresponder a un precio real del catálogo.
+        let baseExtra, usdExtra, nombreExtra;
+        if (esAdelantoSolo) {
+          baseExtra = ADELANTO_COP;
+          usdExtra = parseFloat(ADELANTO_USD);
+          nombreExtra = 'Adelanto (urgencia)';
+        } else {
+          baseExtra = parseInt(b.precio_cop, 10);
+          if (!baseExtra || baseExtra < 1000) {
+            return res.status(400).json({ error: 'El precio no es válido.' });
+          }
+          if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(baseExtra)) {
+            return res.status(400).json({ error: 'El precio no corresponde a ningún servicio del catálogo.' });
+          }
+          usdExtra = parseFloat((b.precio_usd || '').toString().replace(',', '.'));
+          nombreExtra = (b.producto || 'Extra').toString().slice(0, 200);
+        }
+
+        let totalExtra, precioTextoExtra, precioUsdExtra;
         if (usdManual) {
           // Pago en dólares por transferencia: PayPal/AstroPay, sin conversión.
-          totalCopA = 0;
-          precioTextoA = '$' + ADELANTO_USD + ' USD';
+          if (isNaN(usdExtra)) {
+            return res.status(400).json({ error: 'Este extra no tiene precio en dólares. Paga en pesos (COP).' });
+          }
+          if (!esAdelantoSolo && USD_VALIDOS.size && !USD_VALIDOS.has(Math.round(usdExtra * 100) / 100)) {
+            return res.status(400).json({ error: 'El precio en dólares no corresponde a ningún servicio del catálogo.' });
+          }
+          totalExtra = 0;
+          precioUsdExtra = formatUsd(usdExtra);
+          precioTextoExtra = '$' + precioUsdExtra + ' USD';
         } else {
-          totalCopA = !esTransferencia ? conComisionWompi(ADELANTO_COP) : ADELANTO_COP;
-          precioTextoA = '$' + ADELANTO_COP.toLocaleString('es-CO') + ' COP' +
-            (!esTransferencia ? ' · Total $' + totalCopA.toLocaleString('es-CO') + ' COP (incluye comisión Wompi)' : '');
+          totalExtra = !esTransferencia ? conComisionWompi(baseExtra) : baseExtra;
+          precioUsdExtra = isNaN(usdExtra) ? '' : formatUsd(usdExtra);
+          precioTextoExtra = '$' + baseExtra.toLocaleString('es-CO') + ' COP' +
+            (!esTransferencia ? ' · Total $' + totalExtra.toLocaleString('es-CO') + ' COP (incluye comisión Wompi)' : '');
         }
+
         const refA = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
         const registroA = {
           ref: refA,
-          producto: 'Adelanto (urgencia)',
-          precio_cop: totalCopA,
-          precio_usd: ADELANTO_USD,
-          precio_texto: precioTextoA,
+          producto: nombreExtra,
+          precio_cop: totalExtra,
+          precio_usd: precioUsdExtra,
+          precio_texto: precioTextoExtra.slice(0, 180),
           precio_original: '',
           descuento_pct: '',
           codigo_promo: '',
@@ -390,8 +431,8 @@ app.post('/api/booking', function (req, res) {
           objetivo_fecha_nac: '',
           objetivo_foto: '',
           comprobante: comprobanteFile ? comprobanteFile.filename : '',
-          info_extra: trabajos.slice(0, 2000),
-          adelanto: 'solo',
+          info_extra: hechizosTexto.slice(0, 2000),
+          adelanto: esAdelantoSolo ? 'solo' : 'extra',
           estado: esManual ? 'pendiente_verificacion' : 'pendiente_pago',
           wompi_tx: '',
           correo_enviado: false,
@@ -400,8 +441,8 @@ app.post('/api/booking', function (req, res) {
         };
         db.crearAgendamiento(registroA);
         return res.json({
-          ok: true, ref: refA, precio_cop: totalCopA, precio_texto: registroA.precio_texto,
-          signature: esManual ? '' : firmaIntegridadWompi(refA, totalCopA * 100, 'COP'),
+          ok: true, ref: refA, precio_cop: totalExtra, precio_texto: registroA.precio_texto,
+          signature: esManual ? '' : firmaIntegridadWompi(refA, totalExtra * 100, 'COP'),
         });
       }
 

@@ -79,6 +79,23 @@
     return linea;
   }
 
+  // Nombre corto y legible para un extra de la sección de aclaraciones (que son
+  // frases, no fichas de producto). Reconoce los extras conocidos y, si no,
+  // recorta la frase antes del precio.
+  function limpiarNombreExtra(texto) {
+    var t = (texto || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    var low = t.toLowerCase();
+    if (low.indexOf('urgencia') !== -1) return 'Adelanto (urgencia)';
+    if (low.indexOf('velación') !== -1 || low.indexOf('velacion') !== -1) return 'Velación nocturna';
+    if (low.indexOf('ocultamiento') !== -1) return 'Ocultamiento';
+    if (low.indexOf('velita') !== -1) return 'Velita de ansiedad';
+    t = t.replace(/^[^0-9A-Za-zÁÉÍÓÚáéíóúÑñ]+/, '');
+    t = t.replace(/^si deseas (una |un )?/i, '').replace(/^si hacés /i, '');
+    t = t.split(/[,(]|\$/)[0].trim();
+    if (t.length > 60) t = t.substring(0, 57) + '…';
+    return t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Extra';
+  }
+
   // Promociones por fecha activas (mapa clave -> porcentaje). Se llena al iniciar.
   var PROMOS_FECHA = {};
   var ICONOS_HECHIZO = /[ෆ⟡⊹˚꒦ᶻ𝗓𐰁ೀ𖥔ꗯಎ☼𝜗᭪𐙚✩ᵎ]/g;
@@ -223,9 +240,11 @@
       '<label class="wm-label">Tu nombre y apellido <span class="wm-req">*</span>',
       '  <input type="text" class="wm-input" id="wm-cliente" placeholder="Escribe tu nombre y apellido" autocomplete="name">',
       '</label>',
-      '<label class="wm-label wm-adelanto-solo-only" id="wm-adelanto-trabajos-wrap" style="display:none">¿Para cuál(es) trabajo(s) es este adelanto? <span class="wm-req">*</span>',
-      '  <textarea class="wm-input wm-textarea" id="wm-adelanto-trabajos" placeholder="Escribe el nombre del trabajo o hechizo para el que pagas el adelanto..."></textarea>',
-      '</label>',
+      '<div class="wm-label wm-extra-only" id="wm-adelanto-trabajos-wrap" style="display:none">¿A cuál(es) hechizo(s) se aplica este extra? <span class="wm-req">*</span> <span style="color:#b58ca1;font-weight:400;">(máximo 3)</span>',
+      '  <input type="text" class="wm-input" id="wm-extra-h1" placeholder="Hechizo 1" autocomplete="off">',
+      '  <input type="text" class="wm-input" id="wm-extra-h2" placeholder="Hechizo 2 (opcional)" autocomplete="off">',
+      '  <input type="text" class="wm-input" id="wm-extra-h3" placeholder="Hechizo 3 (opcional)" autocomplete="off">',
+      '</div>',
       '<label class="wm-label wm-normal-only">WhatsApp o red social para entregarte la evidencia <span class="wm-req">*</span>',
       '  <input type="text" class="wm-input" id="wm-contacto" placeholder="Ej: WhatsApp +57 300 123 4567 o @tu_usuario" autocomplete="tel">',
       '</label>',
@@ -287,7 +306,7 @@
     var estado = {
       precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi',
       esHechizo: false, clave: '', base: 0, pctFecha: 0, pctCodigo: 0, codigo: '', precioFinal: 0,
-      adelanto: '', incluyeAdelanto: false, moneda: 'cop',
+      adelanto: '', incluyeAdelanto: false, moneda: 'cop', esExtra: false,
     };
 
     var checkbox = document.getElementById('wm-acepto');
@@ -308,7 +327,12 @@
     var adelantoAddWrap = document.getElementById('wm-adelanto-add');
     var adelantoCheck = document.getElementById('wm-adelanto-check');
     var adelantoTrabajosWrap = document.getElementById('wm-adelanto-trabajos-wrap');
-    var inpAdelantoTrabajos = document.getElementById('wm-adelanto-trabajos');
+    var inpExtraH1 = document.getElementById('wm-extra-h1');
+    var inpExtraH2 = document.getElementById('wm-extra-h2');
+    var inpExtraH3 = document.getElementById('wm-extra-h3');
+    function hechizosExtra() {
+      return [inpExtraH1.value.trim(), inpExtraH2.value.trim(), inpExtraH3.value.trim()].filter(Boolean);
+    }
     var normalOnlyEls = Array.prototype.slice.call(modal.querySelectorAll('.wm-normal-only'));
     var totalEl = document.getElementById('wm-total');
     var monedaWrap = document.getElementById('wm-moneda-wrap');
@@ -365,7 +389,7 @@
 
     // Valor del servicio en USD según el estado actual (descuento/adelanto).
     function servicioUsdActual() {
-      if (estado.adelanto === 'solo') return ADELANTO_USD;
+      if (estado.esExtra) return estado.precioUSD || '';
       return usdConDescuento(estado.esHechizo ? pctActual() : 0, estado.incluyeAdelanto);
     }
 
@@ -392,9 +416,9 @@
     }
 
     function actualizarPrecio() {
-      if (estado.adelanto === 'solo') {
-        estado.precioFinal = ADELANTO_COP;
-        precioEl.textContent = ADELANTO_TEXTO;
+      if (estado.esExtra) {
+        estado.precioFinal = estado.precioCOP;
+        precioEl.textContent = estado.precioTexto;
         refrescarTotal();
         return;
       }
@@ -480,8 +504,8 @@
       var cliente = inpCliente.value.trim();
       var comprobanteOk = !esManual() || (inpComprobante.files && inpComprobante.files.length);
       if (!checkbox.checked || !cliente || !comprobanteOk) return false;
-      if (estado.adelanto === 'solo') {
-        return !!inpAdelantoTrabajos.value.trim();
+      if (estado.esExtra) {
+        return hechizosExtra().length > 0;
       }
       var contacto = inpContacto.value.trim();
       var tienePersona = inpObjNombre.value.trim() || inpObjFecha.value || (inpObjFoto.files && inpObjFoto.files.length);
@@ -494,7 +518,7 @@
     }
 
     checkbox.addEventListener('change', actualizarBoton);
-    [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpComprobante, inpInfo, inpAdelantoTrabajos].forEach(function (el) {
+    [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpComprobante, inpInfo, inpExtraH1, inpExtraH2, inpExtraH3].forEach(function (el) {
       el.addEventListener('input', actualizarBoton);
       el.addEventListener('change', actualizarBoton);
     });
@@ -515,12 +539,14 @@
       var cliente = inpCliente.value.trim();
       if (!cliente) { mostrarError('Escribe tu nombre y apellido.'); return; }
 
-      var esAdelantoSolo = estado.adelanto === 'solo';
+      var esExtra = estado.esExtra;
       var contacto = '';
       var foto = null;
-      if (esAdelantoSolo) {
-        if (!inpAdelantoTrabajos.value.trim()) {
-          mostrarError('Escribe para cuál(es) trabajo(s) es el adelanto.');
+      var hechizos = [];
+      if (esExtra) {
+        hechizos = hechizosExtra();
+        if (!hechizos.length) {
+          mostrarError('Escribe a cuál(es) hechizo(s) se aplica este extra.');
           return;
         }
       } else {
@@ -547,13 +573,21 @@
       fd.append('cliente_nombre', cliente);
       fd.append('metodo', esManualPago ? 'transferencia' : 'wompi');
       fd.append('moneda', estado.moneda === 'usd' ? 'usd' : 'cop');
-      if (esAdelantoSolo) {
-        fd.append('adelanto', 'solo');
-        fd.append('producto', 'Adelanto (urgencia)');
-        fd.append('precio_cop', String(ADELANTO_COP));
-        fd.append('precio_texto', ADELANTO_TEXTO);
-        fd.append('precio_usd', ADELANTO_USD);
-        fd.append('info_extra', inpAdelantoTrabajos.value.trim());
+      if (esExtra) {
+        fd.append('tipo', 'extra');
+        fd.append('info_extra', hechizos.join(' · '));
+        if (estado.adelanto === 'solo') {
+          fd.append('adelanto', 'solo');
+          fd.append('producto', 'Adelanto (urgencia)');
+          fd.append('precio_cop', String(ADELANTO_COP));
+          fd.append('precio_texto', ADELANTO_TEXTO);
+          fd.append('precio_usd', ADELANTO_USD);
+        } else {
+          fd.append('producto', estado.nombre);
+          fd.append('precio_cop', String(estado.precioCOP));
+          fd.append('precio_texto', estado.precioTexto);
+          fd.append('precio_usd', estado.precioUSD || '');
+        }
       } else {
         fd.append('contacto', contacto);
         fd.append('objetivo_nombre', inpObjNombre.value.trim());
@@ -618,28 +652,31 @@
       limpiarError();
     }
 
-    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo, hechizoInfo, esAdelantoSolo) {
-      var solo = !!esAdelantoSolo;
-      estado.adelanto = solo ? 'solo' : '';
+    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo, hechizoInfo, esExtra, esAdelanto) {
+      var extra = !!esExtra;
+      estado.esExtra = extra;
+      estado.adelanto = esAdelanto ? 'solo' : '';
       estado.incluyeAdelanto = false;
       estado.precioCOP = precioCOP;
       estado.precioUSD = precioUSD || '';
       estado.nombre = nombre;
       estado.precioTexto = precioTexto;
       estado.modo = modo === 'transferencia' ? 'transferencia' : 'wompi';
-      estado.esHechizo = !solo && !!(hechizoInfo && hechizoInfo.clave);
+      estado.esHechizo = !extra && !!(hechizoInfo && hechizoInfo.clave);
       estado.clave = estado.esHechizo ? hechizoInfo.clave : '';
       estado.base = precioCOP;
       estado.pctFecha = estado.esHechizo ? (Number(hechizoInfo.pctFecha) || 0) : 0;
       estado.pctCodigo = 0;
       estado.codigo = '';
       document.getElementById('wm-nombre-producto').textContent = nombre;
-      normalOnlyEls.forEach(function (el) { el.style.display = solo ? 'none' : ''; });
-      adelantoTrabajosWrap.style.display = solo ? 'block' : 'none';
-      adelantoAddWrap.style.display = (!solo && estado.esHechizo) ? 'block' : 'none';
+      normalOnlyEls.forEach(function (el) { el.style.display = extra ? 'none' : ''; });
+      adelantoTrabajosWrap.style.display = extra ? 'block' : 'none';
+      adelantoAddWrap.style.display = (!extra && estado.esHechizo) ? 'block' : 'none';
       promoWrap.style.display = estado.esHechizo ? 'block' : 'none';
       adelantoCheck.checked = false;
-      inpAdelantoTrabajos.value = '';
+      inpExtraH1.value = '';
+      inpExtraH2.value = '';
+      inpExtraH3.value = '';
       inpCodigo.value = '';
       mostrarMsgCodigo('', '');
       estado.moneda = 'cop';
@@ -668,7 +705,11 @@
       var precioCOP = extraerPrecioCOP(texto);
       if (!precioCOP) return;
 
-      var nombre = extraerNombreProducto(texto);
+      // Los extras (sección #aclaraciones-section) son complementos de los
+      // hechizos: abren un formulario corto (nombre + hechizos, máximo 3).
+      var enAclaraciones = !!(span.closest && span.closest('#aclaraciones-section'));
+
+      var nombre = enAclaraciones ? limpiarNombreExtra(texto) : extraerNombreProducto(texto);
       if (!nombre) return;
 
       var precioMatch = texto.match(REGEX_COP);
@@ -697,7 +738,7 @@
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'wompi', hechizoInfo);
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'wompi', hechizoInfo, enAclaraciones, false);
       });
       span.appendChild(btn);
 
@@ -708,7 +749,7 @@
       btnT.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia', hechizoInfo);
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia', hechizoInfo, enAclaraciones, false);
       });
       span.appendChild(btnT);
     });
@@ -718,12 +759,12 @@
     var bw = document.getElementById('wm-adelanto-wompi');
     if (bw) bw.addEventListener('click', function (e) {
       e.preventDefault();
-      abrirModal('Adelanto (urgencia)', ADELANTO_COP, ADELANTO_TEXTO, ADELANTO_USD, 'wompi', null, true);
+      abrirModal('Adelanto (urgencia)', ADELANTO_COP, ADELANTO_TEXTO, ADELANTO_USD, 'wompi', null, true, true);
     });
     var bt = document.getElementById('wm-adelanto-transfer');
     if (bt) bt.addEventListener('click', function (e) {
       e.preventDefault();
-      abrirModal('Adelanto (urgencia)', ADELANTO_COP, ADELANTO_TEXTO, ADELANTO_USD, 'transferencia', null, true);
+      abrirModal('Adelanto (urgencia)', ADELANTO_COP, ADELANTO_TEXTO, ADELANTO_USD, 'transferencia', null, true, true);
     });
   }
 
