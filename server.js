@@ -247,6 +247,72 @@ function obtenerSecretoSesion() {
   }
 }
 
+/* ---------- Cuentas de cliente: hashing de contraseñas (Node core) ---------- */
+// Se usa scrypt de la librería `crypto` de Node (JavaScript puro, sin dependencias
+// nativas como bcrypt). El hash y la sal se guardan en hexadecimal.
+function hashearPassword(password, salt) {
+  const s = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), s, 64).toString('hex');
+  return { salt: s, hash: hash };
+}
+
+function verificarPassword(password, salt, hashEsperado) {
+  if (!salt || !hashEsperado) return false;
+  let hash;
+  try {
+    hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  } catch (e) { return false; }
+  const a = Buffer.from(hash, 'hex');
+  const b = Buffer.from(hashEsperado, 'hex');
+  if (a.length !== b.length) return false;
+  try { return crypto.timingSafeEqual(a, b); } catch (e) { return false; }
+}
+
+function emailValido(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+// Cliente autenticado en la sesión (independiente del acceso de administrador).
+function clienteSesion(req) {
+  return (req.session && req.session.cliente) || null;
+}
+
+// Normaliza y sanea un ítem del carrito para almacenarlo/procesarlo.
+function sanitizarItemCarrito(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const nombre = (raw.nombre || '').toString().trim();
+  if (!nombre) return null;
+  const precio = parseInt(raw.precio_cop, 10) || 0;
+  const id = (raw.id || '').toString().slice(0, 60) ||
+    (Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+  return {
+    id: id,
+    nombre: nombre.slice(0, 200),
+    precio_cop: precio,
+    precio_usd: (raw.precio_usd || '').toString().slice(0, 20),
+    precio_texto: (raw.precio_texto || '').toString().slice(0, 120),
+    es_hechizo: !!raw.es_hechizo,
+    hechizo_clave: (raw.hechizo_clave || '').toString().trim().toLowerCase().slice(0, 120),
+    es_extra: !!raw.es_extra,
+    es_adelanto: !!raw.es_adelanto,
+  };
+}
+
+function sanitizarCarrito(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista.map(sanitizarItemCarrito).filter(Boolean).slice(0, 30);
+}
+
+// Vista pública del cliente para el frontend (sin datos sensibles).
+function clientePublico(cliente) {
+  if (!cliente) return null;
+  return {
+    email: cliente.email,
+    nombre: cliente.nombre || '',
+    carrito: Array.isArray(cliente.carrito) ? cliente.carrito : [],
+  };
+}
+
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -322,6 +388,92 @@ app.post('/api/codigo', function (req, res) {
     return res.status(400).json({ ok: false, error: 'El código no es válido o no aplica a este hechizo.' });
   }
   res.json({ ok: true, porcentaje: cod.pct });
+});
+
+/* ---------- Cuentas de cliente (correo + contraseña) ---------- */
+// Estado de la sesión del cliente (para que el frontend sepa si hay sesión y
+// recupere el carrito guardado en el servidor).
+app.get('/api/cuenta', function (req, res) {
+  const sesion = clienteSesion(req);
+  if (!sesion) return res.json({ autenticado: false });
+  const cliente = db.obtenerClientePorId(sesion.id);
+  if (!cliente) {
+    delete req.session.cliente;
+    return res.json({ autenticado: false });
+  }
+  res.json({ autenticado: true, cliente: clientePublico(cliente) });
+});
+
+app.post('/api/cuenta/registro', mismoOrigen, function (req, res) {
+  const b = req.body || {};
+  const email = db.normalizarEmail(b.email);
+  const password = (b.password || '').toString();
+  const nombre = (b.nombre || '').toString().trim().slice(0, 160);
+  if (!emailValido(email)) {
+    return res.status(400).json({ ok: false, error: 'Escribe un correo electrónico válido.' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ ok: false, error: 'La contraseña debe tener al menos 6 caracteres.' });
+  }
+  if (db.obtenerClientePorEmail(email)) {
+    return res.status(409).json({ ok: false, error: 'Ya existe una cuenta con este correo. Inicia sesión.' });
+  }
+  const cred = hashearPassword(password);
+  // El carrito enviado por el navegador (invitado) se conserva al crear la cuenta.
+  const carrito = sanitizarCarrito(b.carrito);
+  const cliente = db.crearCliente({
+    id: 'cli-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
+    email: email,
+    nombre: nombre,
+    pass_hash: cred.hash,
+    pass_salt: cred.salt,
+    carrito: carrito,
+    creado_en: new Date().toISOString(),
+  });
+  req.session.cliente = { id: cliente.id, email: cliente.email, nombre: cliente.nombre };
+  res.json({ ok: true, cliente: clientePublico(cliente) });
+});
+
+app.post('/api/cuenta/login', mismoOrigen, function (req, res) {
+  const b = req.body || {};
+  const email = db.normalizarEmail(b.email);
+  const password = (b.password || '').toString();
+  const cliente = db.obtenerClientePorEmail(email);
+  if (!cliente || !verificarPassword(password, cliente.pass_salt, cliente.pass_hash)) {
+    return res.status(401).json({ ok: false, error: 'Correo o contraseña incorrectos.' });
+  }
+  // Al iniciar sesión se fusiona el carrito del navegador con el guardado en el
+  // servidor (sin duplicar ítems idénticos). El resultado se persiste.
+  const delNavegador = sanitizarCarrito(b.carrito);
+  const guardado = Array.isArray(cliente.carrito) ? cliente.carrito : [];
+  const fusion = guardado.slice();
+  const firma = function (it) {
+    return [it.nombre, it.precio_cop, it.hechizo_clave, it.es_extra, it.es_adelanto].join('|');
+  };
+  const vistos = {};
+  fusion.forEach(function (it) { vistos[firma(it)] = true; });
+  delNavegador.forEach(function (it) {
+    if (!vistos[firma(it)]) { fusion.push(it); vistos[firma(it)] = true; }
+  });
+  const actualizado = db.guardarCarritoCliente(cliente.id, fusion) || cliente;
+  req.session.cliente = { id: cliente.id, email: cliente.email, nombre: cliente.nombre };
+  res.json({ ok: true, cliente: clientePublico(actualizado) });
+});
+
+app.post('/api/cuenta/logout', mismoOrigen, function (req, res) {
+  // Solo cierra la sesión del cliente; no afecta la sesión de administrador.
+  if (req.session) delete req.session.cliente;
+  res.json({ ok: true });
+});
+
+// Guarda (reemplaza) el carrito del cliente autenticado en el servidor.
+app.put('/api/carrito', mismoOrigen, function (req, res) {
+  const sesion = clienteSesion(req);
+  if (!sesion) return res.status(401).json({ ok: false, error: 'Inicia sesión para guardar tu carrito.' });
+  const carrito = sanitizarCarrito((req.body || {}).carrito);
+  const actualizado = db.guardarCarritoCliente(sesion.id, carrito);
+  if (!actualizado) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada.' });
+  res.json({ ok: true, carrito: actualizado.carrito || [] });
 });
 
 /* ---------- Registrar agendamiento (antes de pagar) ---------- */
@@ -627,6 +779,251 @@ app.get('/gracias/:ref', async function (req, res) {
   res.send(templates.paginaGracias({ estado: estado, reg: regActual }));
 });
 
+/* ---------- Checkout combinado del carrito (varios servicios, un solo pago) ---------- */
+// Acepta nombres de archivo dinámicos (foto_0, foto_1, ... y comprobante).
+const subirArchivosCheckout = upload.any();
+
+app.post('/api/checkout', function (req, res) {
+  subirArchivosCheckout(req, res, function (err) {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+        ? 'Una de las imágenes es demasiado grande (máximo 8 MB).'
+        : (err.message || 'No se pudo subir una imagen.');
+      return res.status(400).json({ ok: false, error: msg });
+    }
+    try {
+      const b = req.body || {};
+      const archivos = Array.isArray(req.files) ? req.files : [];
+      const archivoPorCampo = {};
+      archivos.forEach(function (f) { archivoPorCampo[f.fieldname] = f; });
+
+      let items;
+      try {
+        items = JSON.parse(b.items || '[]');
+      } catch (e) {
+        return res.status(400).json({ ok: false, error: 'El carrito no es válido.' });
+      }
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ ok: false, error: 'Tu carrito está vacío.' });
+      }
+      if (items.length > 30) {
+        return res.status(400).json({ ok: false, error: 'Demasiados servicios en el carrito.' });
+      }
+
+      const clienteNombre = (b.cliente_nombre || '').toString().trim();
+      if (!clienteNombre) return res.status(400).json({ ok: false, error: 'Escribe tu nombre y apellido.' });
+
+      const contacto = (b.contacto || '').toString().trim();
+      const esTransferencia = (b.metodo || '').toString().trim() === 'transferencia';
+      const esManual = esTransferencia;
+
+      // Falla en seguro: sin secreto de integridad, Wompi rechazaría el pago.
+      if (!esManual && !WOMPI_INTEGRITY_SECRET) {
+        console.error('[checkout] WOMPI_INTEGRITY_SECRET no configurado');
+        return res.status(503).json({ ok: false, error: 'El pago con tarjeta no está disponible por ahora. Intenta con transferencia o escríbenos.' });
+      }
+
+      const comprobanteFile = archivoPorCampo['comprobante'];
+      if (esManual && !comprobanteFile) {
+        return res.status(400).json({ ok: false, error: 'Sube el comprobante de tu pago.' });
+      }
+
+      // Se requiere contacto si hay algún servicio que no sea un extra (los extras
+      // no necesitan datos de la persona ni de contacto).
+      const hayServicioNormal = items.some(function (it) { return !it.es_extra && !it.es_adelanto; });
+      if (hayServicioNormal && !contacto) {
+        return res.status(400).json({ ok: false, error: 'Escribe tu WhatsApp o red social para entregarte la evidencia.' });
+      }
+
+      // --- Validación y cálculo de precios AUTORITATIVO en el servidor ---
+      const preparados = [];
+      let totalNeto = 0;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i] || {};
+        const esAdelanto = !!it.es_adelanto;
+        const esExtra = esAdelanto || !!it.es_extra;
+
+        let base, nombre, precioUsd;
+        if (esAdelanto) {
+          base = ADELANTO_COP;
+          nombre = 'Adelanto (urgencia)';
+          precioUsd = ADELANTO_USD;
+        } else {
+          base = parseInt(it.precio_cop, 10);
+          if (!base || base < 1000) {
+            return res.status(400).json({ ok: false, error: 'Uno de los servicios tiene un precio no válido.' });
+          }
+          if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(base)) {
+            return res.status(400).json({ ok: false, error: 'Un precio no corresponde a ningún servicio del catálogo.' });
+          }
+          nombre = (it.nombre || 'Servicio').toString().slice(0, 200);
+          precioUsd = (it.precio_usd || '').toString().slice(0, 20);
+        }
+
+        // Descuentos automáticos por fecha SOLO para hechizos reales (no se piden
+        // códigos en el carrito; cada servicio conserva su precio de catálogo).
+        let precioNeto = base;
+        let descuentoPct = 0;
+        let precioOriginal = 0;
+        if (!esExtra && it.es_hechizo && it.hechizo_clave) {
+          const info = calcularDescuentoHechizo(
+            it.hechizo_clave.toString().trim().toLowerCase(), '', base);
+          if (info && info.pct > 0) {
+            precioNeto = info.final;
+            descuentoPct = info.pct;
+            precioOriginal = info.base;
+          }
+        }
+
+        let precioTexto = '$' + precioNeto.toLocaleString('es-CO') + ' COP' +
+          (descuentoPct ? ' (-' + descuentoPct + '%)' : '');
+
+        // Datos por servicio (recogidos en el checkout).
+        let objNombre = '', objFecha = '', infoExtra = '', fotoFile = null;
+        if (esExtra) {
+          infoExtra = (it.info_extra || '').toString().trim().slice(0, 2000);
+          if (!infoExtra) {
+            return res.status(400).json({ ok: false, error: 'Indica a cuál(es) hechizo(s) se aplica: ' + nombre + '.' });
+          }
+        } else {
+          objNombre = (it.objetivo_nombre || '').toString().trim().slice(0, 200);
+          objFecha = (it.objetivo_fecha_nac || '').toString().trim().slice(0, 40);
+          infoExtra = (it.info_extra || '').toString().trim().slice(0, 2000);
+          const campoFoto = (it.foto_campo || '').toString();
+          fotoFile = campoFoto ? archivoPorCampo[campoFoto] : null;
+          if (!objNombre && !objFecha && !fotoFile) {
+            return res.status(400).json({ ok: false, error: 'Faltan los datos de la persona para: ' + nombre + '.' });
+          }
+        }
+
+        totalNeto += precioNeto;
+        preparados.push({
+          nombre: nombre,
+          precioNeto: precioNeto,
+          precioUsd: precioUsd,
+          precioTexto: precioTexto,
+          precioOriginal: precioOriginal,
+          descuentoPct: descuentoPct,
+          esAdelanto: esAdelanto,
+          esExtra: esExtra,
+          objNombre: objNombre,
+          objFecha: objFecha,
+          infoExtra: infoExtra,
+          fotoFile: fotoFile,
+        });
+      }
+
+      // La comisión de Wompi se aplica UNA sola vez sobre el total (no por servicio).
+      const totalCobro = esTransferencia ? totalNeto : conComisionWompi(totalNeto);
+      const pedidoRef = 'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
+      const creadoEn = new Date().toISOString();
+
+      preparados.forEach(function (p, i) {
+        const registro = {
+          ref: pedidoRef + '-' + (i + 1),
+          pedido_ref: pedidoRef,
+          pedido_total_cop: totalCobro,
+          producto: p.nombre,
+          precio_cop: p.precioNeto,
+          precio_usd: p.precioUsd,
+          precio_texto: p.precioTexto.slice(0, 180),
+          precio_original: p.precioOriginal || '',
+          descuento_pct: p.descuentoPct || '',
+          codigo_promo: '',
+          metodo: esManual ? 'transferencia' : 'wompi',
+          cliente_nombre: clienteNombre.slice(0, 160),
+          contacto: p.esExtra ? '' : contacto.slice(0, 200),
+          objetivo_nombre: p.objNombre,
+          objetivo_fecha_nac: p.objFecha,
+          objetivo_foto: p.fotoFile ? p.fotoFile.filename : '',
+          // El comprobante (uno por pedido) se guarda en el primer servicio.
+          comprobante: (i === 0 && comprobanteFile) ? comprobanteFile.filename : '',
+          info_extra: p.infoExtra,
+          adelanto: p.esAdelanto ? 'solo' : (p.esExtra ? 'extra' : ''),
+          estado: esManual ? 'pendiente_verificacion' : 'pendiente_pago',
+          wompi_tx: '',
+          correo_enviado: false,
+          creado_en: creadoEn,
+          pagado_en: '',
+        };
+        db.crearAgendamiento(registro);
+      });
+
+      // Al completar el pedido se vacía el carrito guardado del cliente (si hay sesión).
+      const sesion = clienteSesion(req);
+      if (sesion) {
+        try { db.guardarCarritoCliente(sesion.id, []); } catch (e) { /* noop */ }
+      }
+
+      res.json({
+        ok: true,
+        pedido_ref: pedidoRef,
+        total_cop: totalCobro,
+        signature: esManual ? '' : firmaIntegridadWompi(pedidoRef, totalCobro * 100, 'COP'),
+      });
+    } catch (e) {
+      console.error('[checkout]', e);
+      res.status(500).json({ ok: false, error: 'No se pudo procesar el pedido. Intenta de nuevo.' });
+    }
+  });
+});
+
+/* ---------- Regreso desde Wompi para un pedido: verifica y agenda todo ---------- */
+app.get('/pedido/:pedidoRef', async function (req, res) {
+  const pedidoRef = req.params.pedidoRef;
+  let registros = db.obtenerPorPedido(pedidoRef);
+  if (!registros.length) {
+    return res.status(404).send(templates.paginaGracias({ estado: 'no_encontrado' }));
+  }
+
+  const primero = registros[0];
+  const totalPedido = parseInt(primero.pedido_total_cop, 10) || 0;
+  const txId = req.query.id;
+  let estado;
+  if (primero.estado === 'agendado') estado = 'agendado';
+  else if (primero.estado === 'pendiente_verificacion') estado = 'comprobante_recibido';
+  else estado = 'verificando';
+
+  if (txId && primero.estado === 'pendiente_pago') {
+    try {
+      const tx = await verificarTransaccionWompi(txId);
+      const montoOk = tx && Number(tx.amount_in_cents) === totalPedido * 100;
+      const monedaOk = tx && tx.currency === 'COP';
+      const refOk = tx && tx.reference === pedidoRef;
+      if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
+        db.actualizarPorPedido(pedidoRef, {
+          estado: 'agendado',
+          wompi_tx: txId,
+          pagado_en: new Date().toISOString(),
+        });
+        estado = 'agendado';
+        registros = db.obtenerPorPedido(pedidoRef);
+        if (!primero.correo_enviado) {
+          try {
+            const r = await mailer.enviarNotificacionPedido(registros, totalPedido);
+            if (r.enviado) db.actualizarPorPedido(pedidoRef, { correo_enviado: true });
+          } catch (e) {
+            console.error('[mailer] Falló la notificación del pedido:', e.message);
+          }
+        }
+      } else if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+        estado = 'rechazado';
+      }
+    } catch (e) {
+      console.error('[wompi] Falló la verificación del pedido:', e.message);
+    }
+  }
+
+  registros = db.obtenerPorPedido(pedidoRef);
+  res.send(templates.paginaGraciasPedido({
+    estado: estado,
+    registros: registros,
+    pedidoRef: pedidoRef,
+    total: totalPedido,
+    metodo: primero.metodo,
+  }));
+});
+
 /* ---------- Autenticación del panel ---------- */
 function comparaSegura(entrada, esperado) {
   if (!esperado) return false;
@@ -735,16 +1132,29 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, function (req, res) 
 app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
   const reg = db.obtenerPorRef(req.params.ref);
   if (reg && reg.estado === 'pendiente_verificacion') {
-    const actualizado = db.actualizarPorRef(req.params.ref, {
-      estado: 'agendado',
-      pagado_en: new Date().toISOString(),
-    });
-    if (actualizado && !actualizado.correo_enviado) {
-      try {
-        const r = await mailer.enviarNotificacion(actualizado);
-        if (r.enviado) db.actualizarPorRef(req.params.ref, { correo_enviado: true });
-      } catch (e) {
-        console.error('[mailer] Falló el envío de la notificación:', e.message);
+    const pagadoEn = new Date().toISOString();
+    if (reg.pedido_ref) {
+      // Pedido de carrito: se aprueban todos los servicios del pedido a la vez.
+      db.actualizarPorPedido(reg.pedido_ref, { estado: 'agendado', pagado_en: pagadoEn });
+      if (!reg.correo_enviado) {
+        try {
+          const registros = db.obtenerPorPedido(reg.pedido_ref);
+          const total = parseInt(reg.pedido_total_cop, 10) || 0;
+          const r = await mailer.enviarNotificacionPedido(registros, total);
+          if (r.enviado) db.actualizarPorPedido(reg.pedido_ref, { correo_enviado: true });
+        } catch (e) {
+          console.error('[mailer] Falló la notificación del pedido:', e.message);
+        }
+      }
+    } else {
+      const actualizado = db.actualizarPorRef(req.params.ref, { estado: 'agendado', pagado_en: pagadoEn });
+      if (actualizado && !actualizado.correo_enviado) {
+        try {
+          const r = await mailer.enviarNotificacion(actualizado);
+          if (r.enviado) db.actualizarPorRef(req.params.ref, { correo_enviado: true });
+        } catch (e) {
+          console.error('[mailer] Falló el envío de la notificación:', e.message);
+        }
       }
     }
   }
@@ -754,7 +1164,11 @@ app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req,
 app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, function (req, res) {
   const reg = db.obtenerPorRef(req.params.ref);
   if (reg && reg.estado === 'pendiente_verificacion') {
-    db.actualizarPorRef(req.params.ref, { estado: 'rechazado' });
+    if (reg.pedido_ref) {
+      db.actualizarPorPedido(reg.pedido_ref, { estado: 'rechazado' });
+    } else {
+      db.actualizarPorRef(req.params.ref, { estado: 'rechazado' });
+    }
   }
   res.redirect('/admin');
 });

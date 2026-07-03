@@ -173,6 +173,7 @@
       '.wm-pay-btn{display:inline-block;margin-top:0.5rem;padding:0.22rem 0.7rem;font-family:"Poppins",sans-serif;font-size:0.48rem;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:#fff;background-color:#7D3754;background-image:linear-gradient(360deg, rgba(0,0,0,0.72) 0%, rgba(125,55,84,0.012) 100%);border:solid 1px #C2A7B7;border-radius:3rem;cursor:pointer;transition:transform 0.125s ease;vertical-align:middle;}',
       '.wm-pay-btn:hover{transform:translateY(-1px);}',
       '.wm-pay-btn.transfer{background-color:#4c2740;margin-left:0.3rem;}',
+      '.wm-pay-btn.carrito{background-color:#2f1a28;margin-left:0.3rem;}',
       '#wompi-modal .wm-metodos{background:rgba(125,55,84,0.12);border:1px solid rgba(194,167,183,0.3);border-radius:8px;padding:12px 14px;margin-bottom:14px;}',
       '#wompi-modal .wm-metodos-tit{font-size:12px;font-weight:700;color:#F0A3C3;margin-bottom:8px;}',
       '#wompi-modal .wm-metodo{font-size:11.5px;color:#e0c0cf;line-height:1.45;padding:6px 0;border-top:1px solid rgba(194,167,183,0.15);}',
@@ -752,6 +753,29 @@
         abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia', hechizoInfo, enAclaraciones, false);
       });
       span.appendChild(btnT);
+
+      // Botón para añadir el servicio al carrito (compra combinada). Reutiliza
+      // los datos ya extraídos del catálogo; el servidor revalida los precios.
+      var btnC = document.createElement('button');
+      btnC.className = 'wm-pay-btn carrito';
+      btnC.textContent = '＋ Carrito';
+      btnC.setAttribute('aria-label', 'Agregar al carrito ' + nombre);
+      btnC.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!window.FresaCart) return;
+        window.FresaCart.add({
+          nombre: nombre,
+          precio_cop: precioCOP,
+          precio_usd: precioUSD || '',
+          precio_texto: precioTexto,
+          es_hechizo: !!clave,
+          hechizo_clave: clave || '',
+          es_extra: enAclaraciones,
+          es_adelanto: false,
+        });
+      });
+      span.appendChild(btnC);
     });
   }
 
