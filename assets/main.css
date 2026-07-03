@@ -9389,3 +9389,61 @@ body.is-instant::after {
 		font-size: 0.625em;
 	}
 }
+/* --- Botón flotante de WhatsApp (estilo catálogo) --- */
+#wa-flotante {
+position: fixed;
+right: 1.1rem;
+bottom: 1.1rem;
+z-index: 9999;
+display: flex;
+align-items: center;
+gap: 0.6rem;
+max-width: 17rem;
+padding: 0.7rem 1.1rem 0.7rem 0.8rem;
+background-image: linear-gradient(45deg, #7D3754 60%, #a24b74 100%);
+color: #FFFFFF;
+text-decoration: none;
+border-radius: 2.2rem;
+box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+font-family: 'Poppins', sans-serif;
+font-size: 0.8rem;
+line-height: 1.2;
+border: 1px solid rgba(255,255,255,0.25);
+transition: transform 0.18s ease, box-shadow 0.18s ease;
+animation: wa-pulse 2.6s ease-in-out infinite;
+}
+#wa-flotante:hover {
+transform: translateY(-2px) scale(1.03);
+box-shadow: 0 10px 26px rgba(125,55,84,0.55);
+}
+#wa-flotante .wa-icon {
+display: flex;
+align-items: center;
+justify-content: center;
+flex: 0 0 auto;
+width: 2.4rem;
+height: 2.4rem;
+background: #25D366;
+color: #FFFFFF;
+border-radius: 50%;
+}
+#wa-flotante .wa-texto {
+display: block;
+}
+#wa-flotante .wa-texto strong {
+font-weight: 700;
+}
+@keyframes wa-pulse {
+0%, 100% { box-shadow: 0 6px 20px rgba(0,0,0,0.35); }
+50% { box-shadow: 0 6px 20px rgba(0,0,0,0.35), 0 0 0 8px rgba(37,211,102,0.12); }
+}
+@media (max-width: 480px) {
+#wa-flotante {
+max-width: 14.5rem;
+font-size: 0.72rem;
+padding: 0.6rem 0.9rem 0.6rem 0.7rem;
+right: 0.7rem;
+bottom: 0.7rem;
+}
+#wa-flotante .wa-icon { width: 2.1rem; height: 2.1rem; }
+}
