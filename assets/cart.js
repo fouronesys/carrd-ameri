@@ -589,11 +589,9 @@
       .then(parseJson)
       .then(function (res) {
         if (!res.ok || !res.data.ok) throw new Error(res.data.error || 'No se pudo procesar el pedido.');
-        // El servidor ya vació el carrito del cliente; limpiamos también el local.
-        estado.items = [];
-        guardarLocal();
-        render();
-
+        // El carrito NO se vacía aquí: el pago aún no está confirmado. Si el pago
+        // se rechaza o se abandona, el carrito debe seguir disponible para reintentar.
+        // La página /pedido lo vacía solo cuando el pago queda confirmado/recibido.
         var destino = window.location.origin + '/pedido/' + encodeURIComponent(res.data.pedido_ref);
         if (esTransfer || !res.data.signature) {
           window.location.href = destino;

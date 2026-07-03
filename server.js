@@ -917,12 +917,17 @@ app.post('/api/checkout', function (req, res) {
       const totalCobro = esTransferencia ? totalNeto : conComisionWompi(totalNeto);
       const pedidoRef = 'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
       const creadoEn = new Date().toISOString();
+      // Se guarda el cliente dueño del pedido (si hay sesión) para vaciar su
+      // carrito guardado SOLO cuando el pago quede confirmado.
+      const sesionCheckout = clienteSesion(req);
+      const clienteId = sesionCheckout ? sesionCheckout.id : '';
 
       preparados.forEach(function (p, i) {
         const registro = {
           ref: pedidoRef + '-' + (i + 1),
           pedido_ref: pedidoRef,
           pedido_total_cop: totalCobro,
+          cliente_id: clienteId,
           producto: p.nombre,
           precio_cop: p.precioNeto,
           precio_usd: p.precioUsd,
@@ -949,11 +954,10 @@ app.post('/api/checkout', function (req, res) {
         db.crearAgendamiento(registro);
       });
 
-      // Al completar el pedido se vacía el carrito guardado del cliente (si hay sesión).
-      const sesion = clienteSesion(req);
-      if (sesion) {
-        try { db.guardarCarritoCliente(sesion.id, []); } catch (e) { /* noop */ }
-      }
+      // NO se vacía el carrito aquí: el pedido aún no está pagado. Se vacía solo
+      // cuando el pago queda confirmado (Wompi APROBADO en /pedido o aprobación
+      // manual de la transferencia en el panel), para no perder el carrito si el
+      // pago se rechaza o se abandona.
 
       res.json({
         ok: true,
@@ -997,6 +1001,10 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
           pagado_en: new Date().toISOString(),
         });
         estado = 'agendado';
+        // Pago confirmado: recién ahora se vacía el carrito guardado del cliente.
+        if (primero.cliente_id) {
+          try { db.guardarCarritoCliente(primero.cliente_id, []); } catch (e) { /* noop */ }
+        }
         registros = db.obtenerPorPedido(pedidoRef);
         if (!primero.correo_enviado) {
           try {
@@ -1136,6 +1144,10 @@ app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req,
     if (reg.pedido_ref) {
       // Pedido de carrito: se aprueban todos los servicios del pedido a la vez.
       db.actualizarPorPedido(reg.pedido_ref, { estado: 'agendado', pagado_en: pagadoEn });
+      // Pago confirmado manualmente: recién ahora se vacía el carrito del cliente.
+      if (reg.cliente_id) {
+        try { db.guardarCarritoCliente(reg.cliente_id, []); } catch (e) { /* noop */ }
+      }
       if (!reg.correo_enviado) {
         try {
           const registros = db.obtenerPorPedido(reg.pedido_ref);
