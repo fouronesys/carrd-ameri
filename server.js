@@ -277,6 +277,70 @@ function clienteSesion(req) {
   return (req.session && req.session.cliente) || null;
 }
 
+// URL base pública (protocolo + host) para construir enlaces absolutos.
+function baseUrlDe(req) {
+  return req.protocol + '://' + req.get('host');
+}
+
+// Correo del cliente registrado dueño de un agendamiento (vacío si es invitado).
+function emailDelCliente(reg) {
+  if (!reg || !reg.cliente_id) return '';
+  try {
+    const c = db.obtenerClientePorId(reg.cliente_id);
+    return (c && c.email) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+// Aviso automático de estado a un cliente registrado (un solo servicio).
+// Usa una bandera por estado para no repetir el mismo aviso.
+async function notificarEstadoCliente(ref, estado) {
+  const reg = db.obtenerPorRef(ref);
+  if (!reg) return;
+  const to = emailDelCliente(reg);
+  if (!to) return;
+  const bandera = 'cliente_aviso_' + estado;
+  if (reg[bandera]) return;
+  try {
+    const r = await mailer.enviarEstadoCliente(estado, reg, to);
+    if (r && r.enviado) {
+      const cambios = {};
+      cambios[bandera] = new Date().toISOString();
+      db.actualizarPorRef(ref, cambios);
+    }
+  } catch (e) {
+    console.error('[mailer] Falló el aviso de estado al cliente:', e.message);
+  }
+}
+
+// Aviso automático de estado para un pedido completo (carrito, varios servicios).
+// Envía un único correo al cliente y marca todos los servicios del pedido.
+async function notificarEstadoPedido(pedidoRef, estado) {
+  const registros = db.obtenerPorPedido(pedidoRef);
+  if (!registros.length) return;
+  const primero = registros[0];
+  const to = emailDelCliente(primero);
+  if (!to) return;
+  const bandera = 'cliente_aviso_' + estado;
+  if (primero[bandera]) return;
+  const datos = Object.assign({}, primero, {
+    producto: registros.length > 1 ? ('Pedido de ' + registros.length + ' servicios') : primero.producto,
+    precio_texto: '',
+    ref: primero.pedido_ref,
+  });
+  try {
+    const r = await mailer.enviarEstadoCliente(estado, datos, to);
+    if (r && r.enviado) {
+      const cambios = {};
+      cambios[bandera] = new Date().toISOString();
+      db.actualizarPorPedido(pedidoRef, cambios);
+    }
+  } catch (e) {
+    console.error('[mailer] Falló el aviso de estado (pedido) al cliente:', e.message);
+  }
+}
+
 // Normaliza y sanea un ítem del carrito para almacenarlo/procesarlo.
 function sanitizarItemCarrito(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -577,6 +641,7 @@ app.post('/api/booking', function (req, res) {
           descuento_pct: '',
           codigo_promo: '',
           metodo: esManual ? 'transferencia' : 'wompi',
+          cliente_id: clienteSesion(req) ? clienteSesion(req).id : '',
           cliente_nombre: clienteNombre.slice(0, 160),
           contacto: '',
           objetivo_nombre: '',
@@ -706,6 +771,7 @@ app.post('/api/booking', function (req, res) {
         descuento_pct: descuentoPct || '',
         codigo_promo: codigoAplicado || '',
         metodo: esManual ? 'transferencia' : 'wompi',
+        cliente_id: clienteSesion(req) ? clienteSesion(req).id : '',
         cliente_nombre: clienteNombre.slice(0, 160),
         contacto: contacto.slice(0, 200),
         objetivo_nombre: objNombre.slice(0, 200),
@@ -767,6 +833,7 @@ app.get('/gracias/:ref', async function (req, res) {
             console.error('[mailer] Falló el envío de la notificación:', e.message);
           }
         }
+        await notificarEstadoCliente(ref, 'agendado');
       } else if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
         estado = 'rechazado';
       }
@@ -1014,6 +1081,7 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
             console.error('[mailer] Falló la notificación del pedido:', e.message);
           }
         }
+        await notificarEstadoPedido(pedidoRef, 'agendado');
       } else if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
         estado = 'rechazado';
       }
@@ -1070,9 +1138,13 @@ function mismoOrigen(req, res, next) {
 
 app.get('/admin', function (req, res) {
   if (req.session && req.session.admin) {
+    const registros = db.listarAgendamientos().map(function (r) {
+      return Object.assign({}, r, { cliente_email: emailDelCliente(r) });
+    });
     return res.send(templates.adminDashboard({
-      registros: db.listarAgendamientos(),
+      registros: registros,
       rol: req.session.rol || 'admin',
+      baseUrl: baseUrlDe(req),
       hechizos: HECHIZOS.lista,
       promos: db.listarPromos(),
       codigos: db.listarCodigos(),
@@ -1125,7 +1197,7 @@ app.get('/admin/exportar/pdf', requiereAdmin, function (req, res) {
   }
 });
 
-app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
   const reg = db.obtenerPorRef(req.params.ref);
   if (reg) {
     const hecho = !reg.trabajo_hecho;
@@ -1133,6 +1205,8 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, function (req, res) 
       trabajo_hecho: hecho,
       trabajo_hecho_en: hecho ? new Date().toISOString() : '',
     });
+    // Al marcar el trabajo como realizado, se avisa al cliente registrado.
+    if (hecho) await notificarEstadoCliente(req.params.ref, 'realizado');
   }
   res.redirect('/admin');
 });
@@ -1158,6 +1232,7 @@ app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req,
           console.error('[mailer] Falló la notificación del pedido:', e.message);
         }
       }
+      await notificarEstadoPedido(reg.pedido_ref, 'agendado');
     } else {
       const actualizado = db.actualizarPorRef(req.params.ref, { estado: 'agendado', pagado_en: pagadoEn });
       if (actualizado && !actualizado.correo_enviado) {
@@ -1168,18 +1243,21 @@ app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req,
           console.error('[mailer] Falló el envío de la notificación:', e.message);
         }
       }
+      await notificarEstadoCliente(req.params.ref, 'agendado');
     }
   }
   res.redirect('/admin');
 });
 
-app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
   const reg = db.obtenerPorRef(req.params.ref);
   if (reg && reg.estado === 'pendiente_verificacion') {
     if (reg.pedido_ref) {
       db.actualizarPorPedido(reg.pedido_ref, { estado: 'rechazado' });
+      await notificarEstadoPedido(reg.pedido_ref, 'rechazado');
     } else {
       db.actualizarPorRef(req.params.ref, { estado: 'rechazado' });
+      await notificarEstadoCliente(req.params.ref, 'rechazado');
     }
   }
   res.redirect('/admin');
@@ -1263,6 +1341,71 @@ app.post('/admin/codigo/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, fu
 
 app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
   const nombre = path.basename(req.params.nombre);
+  const ruta = path.join(db.UPLOADS_DIR, nombre);
+  if (!ruta.startsWith(db.UPLOADS_DIR) || !fs.existsSync(ruta)) {
+    return res.status(404).send('No encontrada');
+  }
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  res.sendFile(ruta);
+});
+
+/* ---------- Evidencia del trabajo ---------- */
+// El administrador sube imágenes + notas de la evidencia y (si el cliente está
+// registrado) se le envían por correo. Siempre queda un enlace público con token
+// para poder compartirlo también por WhatsApp.
+const subirEvidencia = upload.array('fotos', 10);
+app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+  subirEvidencia(req, res, async function (err) {
+    if (err) {
+      console.error('[evidencia] Error al subir:', err.message);
+      return res.status(400).send('No se pudo subir la evidencia: ' + templates.escaparHtml(err.message));
+    }
+    const ref = req.params.ref;
+    const reg = db.obtenerPorRef(ref);
+    if (!reg) return res.redirect('/admin');
+    const nuevas = (req.files || []).map(function (f) { return f.filename; });
+    const fotos = (Array.isArray(reg.evidencia_fotos) ? reg.evidencia_fotos : []).concat(nuevas);
+    const notas = ((req.body && req.body.notas) || '').toString().trim().slice(0, 2000);
+    const token = reg.evidencia_token || crypto.randomBytes(16).toString('hex');
+    const actualizado = db.actualizarPorRef(ref, {
+      evidencia_fotos: fotos,
+      evidencia_notas: notas,
+      evidencia_en: new Date().toISOString(),
+      evidencia_token: token,
+    });
+    const to = emailDelCliente(actualizado);
+    if (to) {
+      try {
+        const rutasNuevas = nuevas.map(function (n) { return path.join(db.UPLOADS_DIR, n); });
+        await mailer.enviarEvidenciaCliente(actualizado, to, rutasNuevas, baseUrlDe(req));
+      } catch (e) {
+        console.error('[mailer] Falló el envío de la evidencia:', e.message);
+      }
+    }
+    res.redirect('/admin');
+  });
+});
+
+// Página pública de la evidencia (protegida por un token en la URL).
+app.get('/evidencia/:ref/:token', function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  if (!reg || !reg.evidencia_token || reg.evidencia_token !== req.params.token) {
+    return res.status(404).send('Evidencia no encontrada.');
+  }
+  res.send(templates.paginaEvidencia(reg, baseUrlDe(req)));
+});
+
+// Imagen de evidencia servida públicamente solo con el token correcto.
+app.get('/evidencia-foto/:ref/:token/:nombre', function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  if (!reg || !reg.evidencia_token || reg.evidencia_token !== req.params.token) {
+    return res.status(404).send('No encontrada');
+  }
+  const nombre = path.basename(req.params.nombre);
+  if (!Array.isArray(reg.evidencia_fotos) || reg.evidencia_fotos.indexOf(nombre) === -1) {
+    return res.status(404).send('No encontrada');
+  }
   const ruta = path.join(db.UPLOADS_DIR, nombre);
   if (!ruta.startsWith(db.UPLOADS_DIR) || !fs.existsSync(ruta)) {
     return res.status(404).send('No encontrada');
