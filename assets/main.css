@@ -9406,20 +9406,21 @@ gap: 0.7rem;
 display: flex;
 align-items: center;
 justify-content: center;
-width: 3.6rem;
-height: 3.6rem;
-background-image: radial-gradient(circle at 32% 28%, #a85178 0%, #7D3754 55%, #5f2740 100%);
+width: 3.5rem;
+height: 3.5rem;
+background-image: linear-gradient(145deg, #8a3d5e 0%, #7D3754 48%, #5f2740 100%);
 color: #FFFFFF;
 border-radius: 50%;
-border: 1.5px solid rgba(255,255,255,0.35);
-box-shadow: 0 8px 22px rgba(95,39,64,0.45), inset 0 1px 3px rgba(255,255,255,0.25);
-transition: transform 0.22s ease, box-shadow 0.22s ease;
+border: 1px solid rgba(240,163,195,0.22);
+box-shadow: 0 10px 26px rgba(0,0,0,0.45), 0 3px 8px rgba(95,39,64,0.45), inset 0 1px 1px rgba(255,255,255,0.18);
+transition: transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s ease, border-color 0.22s ease;
 animation: wa-float 3.2s ease-in-out infinite;
 align-self: flex-start;
 }
 #wa-flotante:hover .wa-icon {
-transform: translateY(-3px) scale(1.06);
-box-shadow: 0 12px 28px rgba(95,39,64,0.55), inset 0 1px 3px rgba(255,255,255,0.3);
+transform: translateY(-3px) scale(1.05);
+border-color: rgba(240,163,195,0.5);
+box-shadow: 0 16px 34px rgba(0,0,0,0.5), 0 5px 12px rgba(95,39,64,0.5), inset 0 1px 1px rgba(255,255,255,0.24);
 }
 #wa-flotante .wa-globo {
 position: relative;

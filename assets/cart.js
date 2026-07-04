@@ -123,12 +123,15 @@
   function inyectarEstilos() {
     if (document.getElementById('fresa-cart-css')) return;
     var css = [
-      '#fc-fab-wrap{position:fixed;right:18px;bottom:88px;z-index:9998;display:flex;flex-direction:column;gap:10px;font-family:"Poppins",sans-serif;}',
-      '.fc-fab{width:52px;height:52px;border-radius:50%;border:1px solid #C2A7B7;background:#7D3754;color:#fff;font-size:22px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;position:relative;transition:transform .12s ease;}',
-      '.fc-fab:hover{transform:translateY(-2px);}',
-      '.fc-fab.pulso{animation:fcPulso .4s ease;}',
-      '@keyframes fcPulso{0%{transform:scale(1);}50%{transform:scale(1.18);}100%{transform:scale(1);}}',
-      '.fc-badge{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:12px;background:#F0A3C3;color:#3a0a1f;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #1a0710;}',
+      '#fc-fab-wrap{position:fixed;right:22px;bottom:24px;z-index:9998;display:flex;flex-direction:column;gap:12px;font-family:"Poppins",sans-serif;}',
+      '.fc-fab{width:56px;height:56px;border-radius:50%;border:1px solid rgba(240,163,195,0.22);background:linear-gradient(145deg,#8a3d5e 0%,#7D3754 48%,#5f2740 100%);color:#fff;font-size:23px;cursor:pointer;box-shadow:0 10px 26px rgba(0,0,0,0.45),0 3px 8px rgba(95,39,64,0.45),inset 0 1px 1px rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;position:relative;transition:transform .22s cubic-bezier(0.22,1,0.36,1),box-shadow .22s ease,border-color .22s ease;}',
+      '.fc-fab:hover{transform:translateY(-3px) scale(1.05);border-color:rgba(240,163,195,0.5);box-shadow:0 16px 34px rgba(0,0,0,0.5),0 5px 12px rgba(95,39,64,0.5),inset 0 1px 1px rgba(255,255,255,0.24);}',
+      '.fc-fab:active{transform:translateY(-1px) scale(0.99);}',
+      '.fc-fab.secundario{background:linear-gradient(145deg,#3d2036 0%,#2a1526 100%);border-color:rgba(194,167,183,0.2);}',
+      '.fc-fab.secundario:hover{border-color:rgba(240,163,195,0.4);}',
+      '.fc-fab.pulso{animation:fcPulso .5s cubic-bezier(0.22,1,0.36,1);}',
+      '@keyframes fcPulso{0%{transform:scale(1);}45%{transform:scale(1.16);}100%{transform:scale(1);}}',
+      '.fc-badge{position:absolute;top:-5px;right:-5px;min-width:21px;height:21px;padding:0 5px;border-radius:12px;background:linear-gradient(145deg,#F6B6D0,#EC8FB6);color:#3a0a1f;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #14060d;box-shadow:0 2px 6px rgba(0,0,0,0.4);}',
       '.fc-overlay{position:fixed;inset:0;z-index:9999;background:rgba(10,2,7,0.7);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding:24px 14px;overflow-y:auto;}',
       '.fc-overlay.activo{display:flex;}',
       '.fc-panel{width:100%;max-width:460px;margin-top:4vh;background:#1a0710;border:1px solid #C2A7B7;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,0.6);color:#f4e6ee;overflow:hidden;}',
@@ -188,8 +191,8 @@
     wrap.innerHTML =
       '<button class="fc-fab" id="fc-fab-cart" aria-label="Ver carrito" title="Carrito">🛒' +
       '<span class="fc-badge" id="fc-badge" style="display:none">0</span></button>' +
-      '<button class="fc-fab" id="fc-fab-user" aria-label="Mi cuenta" title="Mi cuenta" ' +
-      'style="background:#4c2740;font-size:20px;">👤</button>';
+      '<button class="fc-fab secundario" id="fc-fab-user" aria-label="Mi cuenta" title="Mi cuenta" ' +
+      'style="font-size:20px;">👤</button>';
     document.body.appendChild(wrap);
 
     var overlay = document.createElement('div');
