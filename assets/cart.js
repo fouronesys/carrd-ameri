@@ -128,11 +128,21 @@
     if (document.getElementById('fresa-cart-css')) return;
     var css = [
       '#fc-fab-wrap{position:fixed;right:22px;bottom:24px;z-index:9998;display:flex;flex-direction:column;gap:12px;font-family:"Poppins",sans-serif;}',
-      '.fc-fab{width:56px;height:56px;border-radius:50%;border:1px solid rgba(240,163,195,0.22);background:linear-gradient(145deg,#8a3d5e 0%,#7D3754 48%,#5f2740 100%);color:#fff;font-size:23px;cursor:pointer;box-shadow:0 10px 26px rgba(0,0,0,0.45),0 3px 8px rgba(95,39,64,0.45),inset 0 1px 1px rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;position:relative;transition:transform .22s cubic-bezier(0.22,1,0.36,1),box-shadow .22s ease,border-color .22s ease;}',
-      '.fc-fab:hover{transform:translateY(-3px) scale(1.05);border-color:rgba(240,163,195,0.5);box-shadow:0 16px 34px rgba(0,0,0,0.5),0 5px 12px rgba(95,39,64,0.5),inset 0 1px 1px rgba(255,255,255,0.24);}',
-      '.fc-fab:active{transform:translateY(-1px) scale(0.99);}',
-      '.fc-fab.secundario{background:linear-gradient(145deg,#3d2036 0%,#2a1526 100%);border-color:rgba(194,167,183,0.2);}',
-      '.fc-fab.secundario:hover{border-color:rgba(240,163,195,0.4);}',
+      '.fc-fab{width:58px;height:58px;border-radius:50%;border:1px solid rgba(240,163,195,0.3);background:linear-gradient(145deg,#8a3d5e 0%,#7D3754 48%,#5f2740 100%);color:#fff;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 10px 26px rgba(0,0,0,0.45),0 3px 8px rgba(95,39,64,0.45),inset 0 1px 1px rgba(255,255,255,0.22);display:flex;align-items:center;justify-content:center;position:relative;transition:transform .24s cubic-bezier(0.22,1,0.36,1),box-shadow .24s ease,border-color .24s ease;}',
+      '.fc-fab svg{width:25px;height:25px;stroke:#fff;fill:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.4));transition:transform .24s cubic-bezier(0.22,1,0.36,1),filter .24s ease,stroke .24s ease;}',
+      '.fc-fab:hover{transform:translateY(-3px) scale(1.06);border-color:rgba(240,163,195,0.62);box-shadow:0 16px 36px rgba(0,0,0,0.5),0 6px 14px rgba(95,39,64,0.55),inset 0 1px 1px rgba(255,255,255,0.28);}',
+      '.fc-fab:hover svg{transform:scale(1.1);filter:drop-shadow(0 0 6px rgba(240,163,195,0.9));}',
+      '.fc-fab:active{transform:translateY(-1px) scale(0.98);}',
+      '.fc-fab:focus-visible{outline:2px solid #F0A3C3;outline-offset:3px;}',
+      '.fc-fab.principal::before{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 0 rgba(240,163,195,0);animation:fcHalo 3.2s ease-in-out infinite;pointer-events:none;}',
+      '@keyframes fcHalo{0%,100%{box-shadow:0 0 0 0 rgba(240,163,195,0);}50%{box-shadow:0 0 20px 4px rgba(240,163,195,0.45);}}',
+      '.fc-fab.secundario{background:linear-gradient(145deg,#3a1e33 0%,#241322 55%,#180c16 100%);border-color:rgba(240,163,195,0.28);}',
+      '.fc-fab.secundario svg{stroke:#F3C6D8;}',
+      '.fc-fab.secundario:hover{border-color:rgba(240,163,195,0.55);}',
+      '.fc-fab.secundario:hover svg{stroke:#fff;}',
+      '.fc-fab::after{content:attr(data-tip);position:absolute;right:68px;top:50%;transform:translateY(-50%) translateX(8px);background:linear-gradient(135deg,#2a1526,#160610);border:1px solid rgba(240,163,195,0.4);color:#f4e6ee;font-family:"Poppins",sans-serif;font-size:11px;font-weight:600;letter-spacing:.03em;padding:6px 12px;border-radius:20px;white-space:nowrap;opacity:0;pointer-events:none;box-shadow:0 6px 18px rgba(0,0,0,0.45);transition:opacity .2s ease,transform .2s cubic-bezier(0.22,1,0.36,1);}',
+      '.fc-fab:hover::after{opacity:1;transform:translateY(-50%) translateX(0);}',
+      '@media (prefers-reduced-motion: reduce){.fc-fab.principal::before{animation:none;}}',
       '.fc-fab.pulso{animation:fcPulso .5s cubic-bezier(0.22,1,0.36,1);}',
       '@keyframes fcPulso{0%{transform:scale(1);}45%{transform:scale(1.16);}100%{transform:scale(1);}}',
       '.fc-badge{position:absolute;top:-5px;right:-5px;min-width:21px;height:21px;padding:0 5px;border-radius:12px;background:linear-gradient(145deg,#F6B6D0,#EC8FB6);color:#3a0a1f;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #14060d;box-shadow:0 2px 6px rgba(0,0,0,0.4);}',
@@ -212,10 +222,15 @@
     var wrap = document.createElement('div');
     wrap.id = 'fc-fab-wrap';
     wrap.innerHTML =
-      '<button class="fc-fab" id="fc-fab-cart" aria-label="Ver carrito" title="Carrito">🛒' +
+      '<button class="fc-fab principal" id="fc-fab-cart" data-tip="Carrito" aria-label="Ver carrito" title="Carrito">' +
+      '<svg viewBox="0 0 24 24" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<circle cx="9" cy="20" r="1.35"/><circle cx="18" cy="20" r="1.35"/>' +
+      '<path d="M2.5 3.5h2.2l2.1 11.15a1.6 1.6 0 0 0 1.58 1.3h8.15a1.6 1.6 0 0 0 1.57-1.26L21 7.5H6.2"/></svg>' +
       '<span class="fc-badge" id="fc-badge" style="display:none">0</span></button>' +
-      '<button class="fc-fab secundario" id="fc-fab-user" aria-label="Mi cuenta" title="Mi cuenta" ' +
-      'style="font-size:20px;">👤</button>';
+      '<button class="fc-fab secundario" id="fc-fab-user" data-tip="Mi cuenta" aria-label="Mi cuenta" title="Mi cuenta">' +
+      '<svg viewBox="0 0 24 24" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5c0-3.9 3.4-6.2 7.5-6.2s7.5 2.3 7.5 6.2"/></svg>' +
+      '</button>';
     document.body.appendChild(wrap);
 
     var overlay = document.createElement('div');
