@@ -9397,10 +9397,8 @@ bottom: 1.5rem;
 z-index: 9999;
 text-decoration: none;
 font-family: 'Poppins', sans-serif;
-display: flex;
-flex-direction: column;
-align-items: flex-start;
-gap: 0.7rem;
+width: 3.5rem;
+height: 3.5rem;
 }
 #wa-flotante .wa-icon {
 display: flex;
@@ -9415,7 +9413,6 @@ border: 1px solid rgba(240,163,195,0.22);
 box-shadow: 0 10px 26px rgba(0,0,0,0.45), 0 3px 8px rgba(95,39,64,0.45), inset 0 1px 1px rgba(255,255,255,0.18);
 transition: transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s ease, border-color 0.22s ease;
 animation: wa-float 3.2s ease-in-out infinite;
-align-self: flex-start;
 }
 #wa-flotante:hover .wa-icon {
 transform: translateY(-3px) scale(1.05);
@@ -9423,7 +9420,9 @@ border-color: rgba(240,163,195,0.5);
 box-shadow: 0 16px 34px rgba(0,0,0,0.5), 0 5px 12px rgba(95,39,64,0.5), inset 0 1px 1px rgba(255,255,255,0.24);
 }
 #wa-flotante .wa-globo {
-position: relative;
+position: absolute;
+bottom: calc(100% + 0.6rem);
+left: 0;
 max-width: 12rem;
 padding: 0.6rem 0.8rem;
 background: rgba(255,255,255,0.97);
@@ -9473,7 +9472,7 @@ filter: drop-shadow(0 2px 1px rgba(0,0,0,0.06));
 100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 @media (max-width: 480px) {
-#wa-flotante { left: 1rem; bottom: 1rem; gap: 0.6rem; }
+#wa-flotante { left: 1rem; bottom: 1rem; width: 3.2rem; height: 3.2rem; }
 #wa-flotante .wa-icon { width: 3.2rem; height: 3.2rem; }
 #wa-flotante .wa-globo { max-width: 12.5rem; font-size: 0.7rem; padding: 0.6rem 0.8rem; }
 #wa-flotante .wa-globo strong { font-size: 0.76rem; }
