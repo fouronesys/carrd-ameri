@@ -9440,6 +9440,7 @@ animation: wa-globo-in 0.5s cubic-bezier(0.22,1,0.36,1) 0.4s both;
 transition: opacity 0.4s ease, transform 0.4s ease, visibility 0.4s ease;
 }
 #wa-flotante.wa-colapsado .wa-globo {
+animation: none;
 opacity: 0;
 visibility: hidden;
 transform: translateY(6px) scale(0.92);
