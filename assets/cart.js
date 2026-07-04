@@ -177,6 +177,9 @@
       '.fc-svc{background:rgba(125,55,84,0.1);border:1px solid rgba(194,167,183,0.22);border-radius:10px;padding:12px 14px;margin-bottom:12px;}',
       '.fc-svc-tit{font-size:13px;font-weight:700;color:#F0A3C3;margin-bottom:4px;}',
       '.fc-svc-precio{font-size:12px;color:#c9a9ba;margin-bottom:6px;}',
+      '.fc-check{display:flex;align-items:flex-start;gap:10px;font-size:12.5px;color:#e0c0cf;line-height:1.45;background:rgba(125,55,84,0.16);border:1px solid rgba(240,163,195,0.32);border-radius:10px;padding:11px 13px;margin:0 0 12px;cursor:pointer;-webkit-user-select:none;user-select:none;}',
+      '.fc-check input{margin:1px 0 0;width:17px;height:17px;flex-shrink:0;accent-color:#EC8FB6;cursor:pointer;}',
+      '.fc-check b{color:#F0A3C3;font-weight:700;}',
       '.fc-metodos{display:flex;gap:8px;margin-top:4px;}',
       '.fc-metodo{flex:1;text-align:center;padding:9px;border-radius:10px;border:1px solid rgba(194,167,183,0.35);font-size:12px;color:#e0c0cf;cursor:pointer;}',
       '.fc-metodo.sel{background:rgba(240,163,195,0.14);border-color:#F0A3C3;color:#fff;font-weight:700;}',
@@ -560,7 +563,17 @@
 
     var hayNormal = estado.items.some(function (it) { return !it.es_extra && !it.es_adelanto; });
 
+    // Índices de los servicios "normales" (hechizo/lectura) que piden datos de la
+    // persona. Con 2 o más se ofrece reutilizar los mismos datos para todos.
+    var idxNormales = [];
+    estado.items.forEach(function (it, i) {
+      if (!it.es_extra && !it.es_adelanto) idxNormales.push(i);
+    });
+    var refNormal = idxNormales.length ? idxNormales[0] : -1;
+    var permitirMismos = idxNormales.length >= 2;
+
     var bloques = estado.items.map(function (it, i) {
+      var esNormal = !it.es_extra && !it.es_adelanto;
       var titulo = '<div class="fc-svc-tit">' + (i + 1) + '. ' + esc(it.nombre) + '</div>' +
         '<div class="fc-svc-precio">' + esc(it.precio_texto || fmtCOP(it.precio_cop)) + '</div>';
       var campos;
@@ -581,9 +594,18 @@
           '<input class="fc-input" data-campo="foto" data-idx="' + i + '" type="file" accept="image/*">' +
           '<label class="fc-label">Información adicional</label>' +
           '<textarea class="fc-input" data-campo="info_extra" data-idx="' + i + '" placeholder="Cualquier detalle adicional..."></textarea>';
+        if (i === refNormal && permitirMismos) {
+          campos += '<p class="fc-nota fc-mismos-nota" style="display:none">\u2728 Estos datos se aplicarán a los ' + idxNormales.length + ' servicios.</p>';
+        }
       }
-      return '<div class="fc-svc" data-svc="' + i + '">' + titulo + campos + '</div>';
+      return '<div class="fc-svc" data-svc="' + i + '"' + (esNormal ? ' data-normal="1"' : '') + '>' + titulo + campos + '</div>';
     }).join('');
+
+    // Casilla para indicar que todos los servicios comparten los mismos datos.
+    var mismosHtml = permitirMismos
+      ? '<label class="fc-check"><input type="checkbox" id="fc-mismos">' +
+        '<span>Los datos son los <b>mismos para todos</b> los hechizos/lecturas. Rellena el primero y se copiarán a los demás.</span></label>'
+      : '';
 
     var neto = totalNeto();
     var estWompi = conComisionWompi(neto);
@@ -600,6 +622,7 @@
           '<input class="fc-input" id="fc-contacto" type="text" placeholder="Para entregarte la evidencia">'
         : '') +
       '<div style="height:6px"></div>' +
+      mismosHtml +
       bloques +
       '<label class="fc-label">Método de pago</label>' +
       '<div class="fc-metodos">' +
@@ -622,6 +645,13 @@
     document.getElementById('fc-close').addEventListener('click', cerrar);
     document.getElementById('fc-volver').addEventListener('click', abrirPanel);
     document.getElementById('fc-pagar').addEventListener('click', enviarCheckout);
+
+    var chkMismos = document.getElementById('fc-mismos');
+    if (chkMismos) {
+      chkMismos.addEventListener('change', function () {
+        aplicarMismosDatos(chkMismos.checked, refNormal, idxNormales);
+      });
+    }
 
     Array.prototype.forEach.call(refs.overlay.querySelectorAll('.fc-metodo'), function (m) {
       m.addEventListener('click', function () {
@@ -662,6 +692,18 @@
     el.className = 'fc-msg ' + (tipo || 'err');
   }
 
+  // Oculta/muestra los bloques de servicio duplicados cuando el cliente indica
+  // que los datos son los mismos para todos (solo se rellena el primero).
+  function aplicarMismosDatos(activo, refIdx, idxNormales) {
+    idxNormales.forEach(function (i) {
+      if (i === refIdx) return;
+      var bloque = refs.overlay.querySelector('.fc-svc[data-svc="' + i + '"]');
+      if (bloque) bloque.style.display = activo ? 'none' : '';
+    });
+    var nota = refs.overlay.querySelector('.fc-mismos-nota');
+    if (nota) nota.style.display = activo ? 'block' : 'none';
+  }
+
   function enviarCheckout() {
     var btn = document.getElementById('fc-pagar');
     var textoBtn = btn.textContent;
@@ -675,6 +717,32 @@
 
     // Recolecta los datos por servicio desde el formulario.
     var fd = new FormData();
+
+    // Servicios "normales" y opción "los datos son los mismos para todos".
+    var idxNormales = [];
+    estado.items.forEach(function (it, i) {
+      if (!it.es_extra && !it.es_adelanto) idxNormales.push(i);
+    });
+    var refIdx = idxNormales.length ? idxNormales[0] : -1;
+    var mismos = idxNormales.length >= 2 && !!(document.getElementById('fc-mismos') || {}).checked;
+
+    // Lee una sola vez los datos (y la foto) del bloque de referencia.
+    var refVals = { objetivo_nombre: '', objetivo_fecha_nac: '', info_extra: '' };
+    var refFile = null;
+    if (mismos && refIdx >= 0) {
+      var refBloque = refs.overlay.querySelector('.fc-svc[data-svc="' + refIdx + '"]');
+      if (refBloque) {
+        Array.prototype.forEach.call(refBloque.querySelectorAll('[data-campo]'), function (c) {
+          var campo = c.getAttribute('data-campo');
+          if (campo === 'foto') {
+            if (c.files && c.files[0]) refFile = c.files[0];
+          } else {
+            refVals[campo] = (c.value || '').trim();
+          }
+        });
+      }
+    }
+
     var itemsPayload = estado.items.map(function (it, i) {
       var out = {
         nombre: it.nombre,
@@ -689,6 +757,21 @@
         info_extra: '',
         foto_campo: '',
       };
+
+      // Con "mismos datos" activo, los servicios normales reutilizan los datos
+      // y la foto del primero, sin volver a escribirlos.
+      if (mismos && !it.es_extra && !it.es_adelanto) {
+        out.objetivo_nombre = refVals.objetivo_nombre;
+        out.objetivo_fecha_nac = refVals.objetivo_fecha_nac;
+        out.info_extra = refVals.info_extra;
+        if (refFile) {
+          var fn = 'foto_' + i;
+          fd.append(fn, refFile);
+          out.foto_campo = fn;
+        }
+        return out;
+      }
+
       var bloque = refs.overlay.querySelector('.fc-svc[data-svc="' + i + '"]');
       if (bloque) {
         var campos = bloque.querySelectorAll('[data-campo]');
