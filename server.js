@@ -1136,11 +1136,31 @@ function mismoOrigen(req, res, next) {
   return res.status(403).send('Solicitud no permitida.');
 }
 
+// Guarda el acceso en la auditoría y envía la alerta por correo en segundo plano
+// (sin bloquear el inicio de sesión). Se llama en cada intento, correcto o no.
+function registrarYalertarAcceso(req, info) {
+  const evento = {
+    id: 'acc-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
+    usuario: (info.usuario || '').toString().slice(0, 120),
+    rol: info.rol || '',
+    exito: !!info.exito,
+    ip: (req.ip || '').toString().slice(0, 60),
+    agente: (req.get('user-agent') || '').toString().slice(0, 300),
+    cuando: new Date().toISOString(),
+  };
+  try { db.registrarAcceso(evento); } catch (e) { console.error('[auditoria]', e.message); }
+  mailer.enviarAlertaLogin(evento).catch(function (e) {
+    console.error('[mailer] Falló la alerta de inicio de sesión:', e.message);
+  });
+  return evento;
+}
+
 app.get('/admin', function (req, res) {
   if (req.session && req.session.admin) {
     const registros = db.listarAgendamientos().map(function (r) {
       return Object.assign({}, r, { cliente_email: emailDelCliente(r) });
     });
+    const esAdmin = req.session.rol === 'admin';
     return res.send(templates.adminDashboard({
       registros: registros,
       rol: req.session.rol || 'admin',
@@ -1148,6 +1168,10 @@ app.get('/admin', function (req, res) {
       hechizos: HECHIZOS.lista,
       promos: db.listarPromos(),
       codigos: db.listarCodigos(),
+      usuario: req.session.usuario || '',
+      usuarioId: req.session.usuario_id || '',
+      usuarios: esAdmin ? db.listarUsuariosAdmin() : [],
+      accesos: esAdmin ? db.listarAccesos(80) : [],
     }));
   }
   res.send(templates.adminLogin({ noConfig: !ADMIN_PASSWORD }));
@@ -1157,13 +1181,37 @@ app.post('/admin/login', mismoOrigen, function (req, res) {
   if (!ADMIN_PASSWORD) {
     return res.status(500).send(templates.adminLogin({ noConfig: true }));
   }
-  const rol = rolPorPassword((req.body || {}).password);
+  const cuerpo = req.body || {};
+  const usuarioIngresado = String(cuerpo.usuario || '').trim().toLowerCase();
+  const password = cuerpo.password;
+
+  // 1) Usuario con nombre creado por el administrador (verificación con hash).
+  if (usuarioIngresado) {
+    const u = db.obtenerUsuarioAdmin(usuarioIngresado);
+    if (u && verificarPassword(password, u.salt, u.hash)) {
+      req.session.admin = true;
+      req.session.rol = u.rol;
+      req.session.usuario = u.usuario;
+      req.session.usuario_id = u.id;
+      try { db.actualizarUsuarioAdmin(u.id, { ultimo_acceso: new Date().toISOString() }); } catch (e) { /* no crítico */ }
+      registrarYalertarAcceso(req, { usuario: u.usuario, rol: u.rol, exito: true });
+      return res.redirect('/admin');
+    }
+    registrarYalertarAcceso(req, { usuario: usuarioIngresado, rol: '', exito: false });
+    return res.status(401).send(templates.adminLogin({ error: 'Usuario o contraseña incorrectos.' }));
+  }
+
+  // 2) Compatibilidad: acceso solo con la contraseña de entorno (sin usuario).
+  const rol = rolPorPassword(password);
   if (rol) {
     req.session.admin = true;
     req.session.rol = rol;
+    req.session.usuario = rol === 'admin' ? 'administrador' : 'asistente';
+    registrarYalertarAcceso(req, { usuario: req.session.usuario, rol: rol, exito: true });
     return res.redirect('/admin');
   }
-  res.status(401).send(templates.adminLogin({ error: 'Contraseña incorrecta.' }));
+  registrarYalertarAcceso(req, { usuario: '(contraseña directa)', rol: '', exito: false });
+  res.status(401).send(templates.adminLogin({ error: 'Usuario o contraseña incorrectos.' }));
 });
 
 app.post('/admin/logout', mismoOrigen, function (req, res) {
@@ -1211,7 +1259,7 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
   res.redirect('/admin');
 });
 
-app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
+app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const reg = db.obtenerPorRef(req.params.ref);
   if (reg && reg.estado === 'pendiente_verificacion') {
     const pagadoEn = new Date().toISOString();
@@ -1249,7 +1297,7 @@ app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, async function (req,
   res.redirect('/admin');
 });
 
-app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
+app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const reg = db.obtenerPorRef(req.params.ref);
   if (reg && reg.estado === 'pendiente_verificacion') {
     if (reg.pedido_ref) {
@@ -1270,6 +1318,137 @@ app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, function (req, res)
     return res.status(403).send('Solo el administrador puede eliminar un agendamiento marcado como realizado.');
   }
   db.eliminarPorRef(req.params.ref);
+  res.redirect('/admin');
+});
+
+/* ---------- Edición de pedidos (solo administrador) ---------- */
+const ESTADOS_VALIDOS = ['pendiente_pago', 'pendiente_verificacion', 'agendado', 'rechazado'];
+
+// Recalcula el total de un pedido como la suma de los precios de sus servicios.
+function recalcularTotalPedido(pedidoRef) {
+  if (!pedidoRef) return 0;
+  const registros = db.obtenerPorPedido(pedidoRef);
+  const total = registros.reduce(function (s, r) { return s + (parseInt(r.precio_cop, 10) || 0); }, 0);
+  db.actualizarPorPedido(pedidoRef, { pedido_total_cop: total });
+  return total;
+}
+
+// El administrador puede corregir el servicio, su precio y el estado de pago.
+app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  if (!reg) return res.status(404).send('Agendamiento no encontrado.');
+  const b = req.body || {};
+  const cambios = {};
+
+  const producto = (b.producto || '').toString().trim();
+  if (producto) cambios.producto = producto.slice(0, 200);
+
+  if (b.precio_cop !== undefined && String(b.precio_cop).trim() !== '') {
+    const precio = parseInt(b.precio_cop, 10);
+    if (!isNaN(precio) && precio >= 0) {
+      cambios.precio_cop = precio;
+      cambios.precio_texto = '$' + precio.toLocaleString('es-CO') + ' COP';
+    }
+  }
+
+  const estado = (b.estado || '').toString().trim();
+  if (estado && ESTADOS_VALIDOS.indexOf(estado) !== -1) cambios.estado = estado;
+
+  db.actualizarPorRef(req.params.ref, cambios);
+
+  // Si el servicio pertenece a un pedido, se recalcula el total del pedido.
+  if (reg.pedido_ref) recalcularTotalPedido(reg.pedido_ref);
+
+  res.redirect('/admin');
+});
+
+// Agrega un servicio a un agendamiento. Si era individual, lo convierte en un
+// pedido para poder agrupar varios servicios bajo una misma referencia.
+app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+  const reg = db.obtenerPorRef(req.params.ref);
+  if (!reg) return res.status(404).send('Agendamiento no encontrado.');
+  const b = req.body || {};
+  const producto = (b.producto || '').toString().trim();
+  const precio = parseInt(b.precio_cop, 10);
+  if (!producto || isNaN(precio) || precio < 0) {
+    return res.status(400).send('Datos del servicio incompletos.');
+  }
+
+  let pedidoRef = reg.pedido_ref;
+  if (!pedidoRef) {
+    pedidoRef = 'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
+    db.actualizarPorRef(reg.ref, { pedido_ref: pedidoRef });
+  }
+
+  const nuevoRef = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
+  db.crearAgendamiento({
+    ref: nuevoRef,
+    producto: producto.slice(0, 200),
+    precio_cop: precio,
+    precio_usd: 0,
+    precio_texto: '$' + precio.toLocaleString('es-CO') + ' COP',
+    precio_original: '',
+    descuento_pct: '',
+    codigo_promo: '',
+    metodo: reg.metodo || 'transferencia',
+    cliente_id: reg.cliente_id || '',
+    cliente_nombre: reg.cliente_nombre || '',
+    contacto: reg.contacto || '',
+    objetivo_nombre: (b.objetivo_nombre || '').toString().trim().slice(0, 200),
+    objetivo_fecha_nac: '',
+    objetivo_foto: '',
+    comprobante: '',
+    info_extra: (b.info_extra || '').toString().trim().slice(0, 2000),
+    adelanto: false,
+    estado: reg.estado || 'agendado',
+    wompi_tx: '',
+    // Servicio agregado manualmente por el admin: sin correo de pago automático.
+    correo_enviado: true,
+    pedido_ref: pedidoRef,
+    creado_en: new Date().toISOString(),
+    pagado_en: reg.pagado_en || '',
+  });
+  recalcularTotalPedido(pedidoRef);
+  res.redirect('/admin');
+});
+
+/* ---------- Gestión de usuarios del panel (solo administrador) ---------- */
+app.post('/admin/usuarios', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+  const b = req.body || {};
+  const nombre = (b.nombre || '').toString().trim().slice(0, 120);
+  const usuario = (b.usuario || '').toString().trim().toLowerCase();
+  const password = (b.password || '').toString();
+  const rol = b.rol === 'admin' ? 'admin' : 'asistente';
+
+  if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) {
+    return res.status(400).send('El usuario debe tener entre 3 y 30 caracteres: letras, números, punto, guion o guion bajo.');
+  }
+  if (password.length < 6) {
+    return res.status(400).send('La contraseña debe tener al menos 6 caracteres.');
+  }
+  if (db.obtenerUsuarioAdmin(usuario)) {
+    return res.status(400).send('Ya existe un usuario con ese nombre.');
+  }
+  const cred = hashearPassword(password);
+  db.crearUsuarioAdmin({
+    id: 'usr-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
+    usuario: usuario,
+    nombre: nombre || usuario,
+    rol: rol,
+    salt: cred.salt,
+    hash: cred.hash,
+    creado_en: new Date().toISOString(),
+    ultimo_acceso: '',
+  });
+  res.redirect('/admin');
+});
+
+app.post('/admin/usuarios/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+  // Un administrador no puede eliminar la propia cuenta con la que inició sesión.
+  if (req.session.usuario_id && req.session.usuario_id === req.params.id) {
+    return res.status(400).send('No puedes eliminar tu propia cuenta mientras la usas.');
+  }
+  db.eliminarUsuarioAdmin(req.params.id);
   res.redirect('/admin');
 });
 
@@ -1355,7 +1534,7 @@ app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
 // registrado) se le envían por correo. Siempre queda un enlace público con token
 // para poder compartirlo también por WhatsApp.
 const subirEvidencia = upload.array('fotos', 10);
-app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, function (req, res) {
+app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
   subirEvidencia(req, res, async function (err) {
     if (err) {
       console.error('[evidencia] Error al subir:', err.message);
