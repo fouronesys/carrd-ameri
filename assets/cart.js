@@ -1,6 +1,8 @@
 /* Fresatanika — Carrito de compras y cuentas de cliente (frontend)
  *
- * Expone window.FresaCart.add(item) para que el catálogo agregue servicios.
+ * Expone window.FresaCart.add(item, origen) para que el catálogo agregue
+ * servicios. "origen" (opcional) es el botón pulsado, usado como punto de
+ * partida de la animación mágica hacia el carrito.
  * - Carrito guardado en localStorage (invitado) y sincronizado en el servidor
  *   cuando hay una sesión de cliente iniciada.
  * - Widget flotante con contador, panel del carrito, modal de cuenta
@@ -96,13 +98,15 @@
   }
 
   /* ---------- API pública del carrito ---------- */
-  function add(item) {
+  function add(item, origen) {
     var it = sanitizar(item);
     if (!it) return;
     estado.items.push(it);
     persistir();
-    abrirPanel();
-    pulso();
+    // En vez de abrir el panel completo (intrusivo al añadir varios servicios),
+    // se muestra una animación mágica hacia el carrito + un aviso discreto.
+    volarAlCarrito(origen);
+    mostrarToast(it.nombre);
   }
 
   function eliminar(id) {
@@ -175,6 +179,25 @@
       '.fc-sesion{font-size:12px;color:#c9a9ba;padding:8px 0;}',
       '.fc-sesion strong{color:#F0A3C3;}',
       '.fc-transfer-info{font-size:11.5px;color:#e0c0cf;line-height:1.5;background:rgba(125,55,84,0.14);border:1px solid rgba(194,167,183,0.25);border-radius:8px;padding:10px 12px;margin-top:8px;}',
+      /* --- Animación "añadir al carrito" (estilo místico del catálogo) --- */
+      '.fc-orb{position:fixed;left:0;top:0;width:30px;height:30px;z-index:10001;pointer-events:none;display:flex;align-items:center;justify-content:center;border-radius:50%;background:radial-gradient(circle at 34% 28%,#fff 0%,#F6B6D0 32%,#EC8FB6 58%,#7D3754 100%);box-shadow:0 0 12px 3px rgba(240,163,195,0.75),0 0 28px 9px rgba(156,76,109,0.45);will-change:transform,opacity;}',
+      '.fc-orb span{color:#fff;font-size:15px;line-height:1;text-shadow:0 0 7px rgba(255,255,255,0.9);}',
+      '.fc-spark{position:fixed;left:0;top:0;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;z-index:10000;pointer-events:none;border-radius:50%;background:radial-gradient(circle,#fff 0%,#F6B6D0 45%,rgba(240,163,195,0) 72%);animation:fcSpark .7s ease-out forwards;}',
+      '@keyframes fcSpark{0%{transform:scale(1);opacity:.95;}100%{transform:scale(.15);opacity:0;}}',
+      '.fc-spark.burst{width:9px;height:9px;margin:-4.5px 0 0 -4.5px;animation:fcBurst .72s cubic-bezier(0.22,1,0.36,1) forwards;}',
+      '@keyframes fcBurst{0%{transform:translate(0,0) scale(1);opacity:1;}100%{transform:translate(var(--dx,0),var(--dy,0)) scale(.15);opacity:0;}}',
+      '.fc-badge.bump{animation:fcBadgeBump .5s cubic-bezier(0.22,1,0.36,1);}',
+      '@keyframes fcBadgeBump{0%{transform:scale(1);}35%{transform:scale(1.55);}100%{transform:scale(1);}}',
+      '.fc-toast-wrap{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:10002;display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:"Poppins",sans-serif;}',
+      '.fc-toast{pointer-events:auto;display:flex;align-items:center;gap:12px;max-width:92vw;background:linear-gradient(135deg,#2a1526 0%,#160610 100%);border:1px solid rgba(240,163,195,0.42);border-radius:40px;box-shadow:0 14px 40px rgba(0,0,0,0.55),0 0 22px rgba(156,76,109,0.35);padding:10px 12px 10px 16px;color:#f4e6ee;transform:translateY(26px) scale(.94);opacity:0;transition:transform .34s cubic-bezier(0.22,1,0.36,1),opacity .34s ease;}',
+      '.fc-toast.visible{transform:translateY(0) scale(1);opacity:1;}',
+      '.fc-toast .ic{font-size:17px;line-height:1;filter:drop-shadow(0 0 6px rgba(240,163,195,0.85));animation:fcTwinkle 1.4s ease-in-out infinite;}',
+      '@keyframes fcTwinkle{0%,100%{transform:scale(1) rotate(0);opacity:1;}50%{transform:scale(1.18) rotate(12deg);opacity:.82;}}',
+      '.fc-toast .tx{font-size:12.5px;line-height:1.35;}',
+      '.fc-toast .tx b{color:#F0A3C3;font-weight:700;}',
+      '.fc-toast .ver{flex-shrink:0;background:linear-gradient(145deg,#8a3d5e,#5f2740);border:1px solid rgba(240,163,195,0.4);color:#fff;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:30px;padding:7px 13px;cursor:pointer;white-space:nowrap;transition:transform .12s ease,box-shadow .12s ease;}',
+      '.fc-toast .ver:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(95,39,64,0.55);}',
+      '@media (prefers-reduced-motion: reduce){.fc-toast .ic{animation:none;}}',
     ].join('');
     var el = document.createElement('style');
     el.id = 'fresa-cart-css';
@@ -217,6 +240,117 @@
     refs.fab.classList.remove('pulso');
     void refs.fab.offsetWidth;
     refs.fab.classList.add('pulso');
+  }
+
+  function bumpBadge() {
+    if (!refs.badge) return;
+    refs.badge.classList.remove('bump');
+    void refs.badge.offsetWidth;
+    refs.badge.classList.add('bump');
+  }
+
+  function centroDe(el) {
+    var r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  // Crea una pequeña chispa que se desvanece. Si es "estallido", se dispersa
+  // en una dirección aleatoria mediante las variables --dx/--dy.
+  function chispa(x, y, estallido) {
+    var s = document.createElement('div');
+    s.className = 'fc-spark' + (estallido ? ' burst' : '');
+    s.style.left = x + 'px';
+    s.style.top = y + 'px';
+    if (estallido) {
+      var ang = Math.random() * Math.PI * 2;
+      var dist = 16 + Math.random() * 24;
+      s.style.setProperty('--dx', (Math.cos(ang) * dist).toFixed(1) + 'px');
+      s.style.setProperty('--dy', (Math.sin(ang) * dist).toFixed(1) + 'px');
+    }
+    document.body.appendChild(s);
+    setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); }, 760);
+  }
+
+  // Orbe mágico que vuela desde el botón hasta el carrito describiendo un arco,
+  // dejando un rastro de chispas y terminando con un pequeño estallido + pulso.
+  function volarAlCarrito(origen) {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var valido = origen && typeof origen.getBoundingClientRect === 'function';
+    if (!refs.fab || !valido || reduce) { pulso(); bumpBadge(); return; }
+
+    var ini = centroDe(origen);
+    var fin = centroDe(refs.fab);
+    var orb = document.createElement('div');
+    orb.className = 'fc-orb';
+    orb.innerHTML = '<span>\u2726</span>';
+    document.body.appendChild(orb);
+
+    var cx = (ini.x + fin.x) / 2;
+    var cy = Math.min(ini.y, fin.y) - 100;
+    var dur = 720;
+    var t0 = null;
+    var ultima = 0;
+
+    function frame(t) {
+      if (t0 === null) t0 = t;
+      var p = Math.min((t - t0) / dur, 1);
+      var e = 1 - Math.pow(1 - p, 3);
+      var mt = 1 - e;
+      var x = mt * mt * ini.x + 2 * mt * e * cx + e * e * fin.x;
+      var y = mt * mt * ini.y + 2 * mt * e * cy + e * e * fin.y;
+      var s = 1 - 0.6 * e;
+      orb.style.transform = 'translate(' + (x - 15) + 'px,' + (y - 15) + 'px) scale(' + s.toFixed(3) + ') rotate(' + (e * 240).toFixed(1) + 'deg)';
+      orb.style.opacity = p < 0.88 ? '1' : ((1 - p) / 0.12).toFixed(2);
+      if (t - ultima > 42) {
+        ultima = t;
+        chispa(x + (Math.random() * 14 - 7), y + (Math.random() * 14 - 7));
+      }
+      if (p < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        if (orb.parentNode) orb.parentNode.removeChild(orb);
+        pulso();
+        bumpBadge();
+        for (var i = 0; i < 7; i++) chispa(fin.x, fin.y, true);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  var toastTimer = null;
+  function mostrarToast(nombre) {
+    var wrap = document.getElementById('fc-toast-wrap');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.id = 'fc-toast-wrap';
+      wrap.className = 'fc-toast-wrap';
+      document.body.appendChild(wrap);
+    }
+    wrap.innerHTML = '';
+    var toast = document.createElement('div');
+    toast.className = 'fc-toast';
+    toast.innerHTML =
+      '<span class="ic">\u2728</span>' +
+      '<span class="tx"><b>' + esc(nombre || 'Servicio') + '</b><br>añadido al carrito</span>' +
+      '<button class="ver" type="button">Ver carrito</button>';
+    wrap.appendChild(toast);
+    toast.querySelector('.ver').addEventListener('click', function () {
+      ocultarToast();
+      abrirPanel();
+    });
+    void toast.offsetWidth;
+    toast.classList.add('visible');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(ocultarToast, 3800);
+  }
+
+  function ocultarToast() {
+    var wrap = document.getElementById('fc-toast-wrap');
+    if (!wrap) return;
+    var toast = wrap.querySelector('.fc-toast');
+    if (!toast) return;
+    toast.classList.remove('visible');
+    setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 340);
   }
 
   function cerrar() {

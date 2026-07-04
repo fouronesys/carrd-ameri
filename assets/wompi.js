@@ -773,7 +773,7 @@
           hechizo_clave: clave || '',
           es_extra: enAclaraciones,
           es_adelanto: false,
-        });
+        }, btnC);
       });
       span.appendChild(btnC);
     });
