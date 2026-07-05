@@ -241,9 +241,17 @@ async function calcularDescuentoHechizo(clave, codigoStr, base) {
 // Tipos de imagen permitidos (se excluye SVG para evitar XSS almacenado).
 const TIPOS_IMAGEN = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 
-/* ---------- Secreto de sesión (env o persistido en el volumen de datos) ---------- */
+/* ---------- Secreto de sesión ---------- */
+// En producción DEBE venir de la variable de entorno SESSION_SECRET: con varias
+// instancias detrás del balanceador todas tienen que firmar la cookie con el
+// mismo secreto, y un secreto por archivo/aleatorio invalidaría las sesiones al
+// reiniciar o entre instancias. El respaldo por archivo se permite solo en
+// desarrollo para no tener que configurar nada localmente.
 function obtenerSecretoSesion() {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET es obligatorio en producción; configúralo como variable de entorno.');
+  }
   const archivo = path.join(db.DATA_DIR, '.session_secret');
   try {
     return fs.readFileSync(archivo, 'utf8');

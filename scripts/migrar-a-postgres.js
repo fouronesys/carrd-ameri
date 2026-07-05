@@ -29,6 +29,24 @@ async function main() {
 
   console.log('Registros nuevos importados por tabla:');
   console.log(JSON.stringify(resumen, null, 2));
+
+  // Verificación de integridad: comprueba que TODOS los registros del JSON de
+  // origen estén en PostgreSQL (destino >= origen por entidad). Si falta alguno,
+  // aborta con código de salida distinto de cero para no dar por buena una
+  // migración con pérdida de datos.
+  console.log('\n== Verificación de integridad (origen JSON vs destino PostgreSQL) ==');
+  const verificacion = await db.verificarMigracion();
+  for (const tabla of Object.keys(verificacion.detalle)) {
+    const d = verificacion.detalle[tabla];
+    console.log(
+      '  ' + (d.ok ? 'OK ' : 'FALLA ') + tabla +
+      ': origen=' + d.origen + ' destino=' + d.destino
+    );
+  }
+  if (!verificacion.ok) {
+    throw new Error('Verificación fallida: alguna tabla tiene menos registros que el origen JSON (posible pérdida de datos).');
+  }
+  console.log('Verificación correcta: no hay pérdida de datos.');
   console.log('Migración completada. Los archivos JSON se conservan como respaldo.');
 }
 
