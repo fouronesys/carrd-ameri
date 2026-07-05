@@ -258,6 +258,29 @@
       '.fc-toast .ver{flex-shrink:0;background:linear-gradient(145deg,#8a3d5e,#5f2740);border:1px solid rgba(240,163,195,0.4);color:#fff;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:30px;padding:7px 13px;cursor:pointer;white-space:nowrap;transition:transform .12s ease,box-shadow .12s ease;}',
       '.fc-toast .ver:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(95,39,64,0.55);}',
       '@media (prefers-reduced-motion: reduce){.fc-toast .ic{animation:none;}}',
+      /* --- Beneficios de cuenta (modal de auth) --- */
+      '.fc-benes{list-style:none;margin:0 0 14px;padding:0;display:flex;flex-direction:column;gap:9px;}',
+      '.fc-bene{display:flex;align-items:flex-start;gap:10px;font-size:12px;color:#e0c0cf;line-height:1.4;}',
+      '.fc-bene .em{flex-shrink:0;font-size:15px;line-height:1.2;filter:drop-shadow(0 0 5px rgba(240,163,195,0.6));}',
+      '.fc-bene b{color:#F0A3C3;font-weight:700;}',
+      '.fc-benes-tit{font-size:12px;font-weight:800;color:#F0A3C3;letter-spacing:.02em;margin:2px 0 11px;}',
+      /* --- Momento ritual (confirmación de pago) --- */
+      '.fc-ritual-layer{position:fixed;inset:0;z-index:10010;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,4,10,0.95);backdrop-filter:blur(3px);}',
+      '.fc-ritual{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:54px 26px;min-height:280px;animation:fcRitualIn .5s ease;}',
+      '@keyframes fcRitualIn{0%{opacity:0;}100%{opacity:1;}}',
+      '.fc-ritual-orb{position:relative;width:96px;height:96px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#fff 0%,#F6B6D0 30%,#EC8FB6 56%,#7D3754 100%);box-shadow:0 0 26px 6px rgba(240,163,195,0.55),0 0 60px 18px rgba(156,76,109,0.4);display:flex;align-items:center;justify-content:center;font-size:38px;animation:fcRitualPulse 1.8s ease-in-out infinite;}',
+      '.fc-ritual-orb::before,.fc-ritual-orb::after{content:"";position:absolute;inset:-12px;border-radius:50%;border:1px solid rgba(240,163,195,0.4);animation:fcRitualRing 2.4s ease-out infinite;}',
+      '.fc-ritual-orb::after{animation-delay:1.2s;}',
+      '@keyframes fcRitualPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.07);}}',
+      '@keyframes fcRitualRing{0%{transform:scale(0.7);opacity:.7;}100%{transform:scale(1.5);opacity:0;}}',
+      '.fc-ritual-tit{font-size:16px;font-weight:900;color:#F0A3C3;margin:24px 0 6px;letter-spacing:.02em;}',
+      '.fc-ritual-sub{font-size:12.5px;color:#d8b6c6;line-height:1.5;max-width:280px;}',
+      '.fc-ritual-dots{margin-top:16px;display:flex;gap:7px;}',
+      '.fc-ritual-dots i{width:8px;height:8px;border-radius:50%;background:#F0A3C3;opacity:.35;animation:fcRitualDot 1.1s ease-in-out infinite;}',
+      '.fc-ritual-dots i:nth-child(2){animation-delay:.18s;}',
+      '.fc-ritual-dots i:nth-child(3){animation-delay:.36s;}',
+      '@keyframes fcRitualDot{0%,100%{opacity:.3;transform:translateY(0);}50%{opacity:1;transform:translateY(-4px);}}',
+      '@media (prefers-reduced-motion: reduce){.fc-ritual,.fc-ritual-orb,.fc-ritual-orb::before,.fc-ritual-orb::after,.fc-ritual-dots i{animation:none;}.fc-ritual-orb::before,.fc-ritual-orb::after{display:none;}}',
     ].join('');
     var el = document.createElement('style');
     el.id = 'fresa-cart-css';
@@ -620,7 +643,15 @@
       '<div class="fc-tab' + (esLogin ? ' sel' : '') + '" data-modo="login">Iniciar sesión</div>' +
       '<div class="fc-tab' + (!esLogin ? ' sel' : '') + '" data-modo="registro">Crear cuenta</div>' +
       '</div>' +
-      '<p class="fc-nota">Tener una cuenta es opcional. Sirve para guardar tu carrito entre visitas.</p>' +
+      (esLogin ?
+        '<p class="fc-nota">Entra para ver tus consultas, su avance y las evidencias de tus trabajos.</p>' :
+        '<p class="fc-benes-tit">✧ Al crear tu cuenta desbloqueas:</p>' +
+        '<ul class="fc-benes">' +
+        '<li class="fc-bene"><span class="em">🕯️</span><span><b>Seguimiento en vivo</b> del estado de cada consulta, paso a paso.</span></li>' +
+        '<li class="fc-bene"><span class="em">📸</span><span><b>Historial con evidencias</b> de tus trabajos, guardadas en tu perfil.</span></li>' +
+        '<li class="fc-bene"><span class="em">🔔</span><span><b>Avisos</b> cuando tu pago se confirma y cuando tu trabajo queda listo.</span></li>' +
+        '<li class="fc-bene"><span class="em">🌙</span><span><b>Círculo íntimo:</b> junta sellos por cada consulta y gana una recompensa.</span></li>' +
+        '</ul>') +
       (esLogin ? '' :
         '<label class="fc-label">Nombre</label>' +
         '<input class="fc-input" id="fc-nombre" type="text" placeholder="Tu nombre (opcional)">') +
@@ -1087,7 +1118,13 @@
     fd.append('metodo', esTransfer ? 'transferencia' : 'wompi');
 
     btn.disabled = true;
-    btn.textContent = 'Procesando...';
+    btn.textContent = 'Preparando…';
+    mostrarRitual(
+      esTransfer ? 'Recibiendo tu ofrenda' : 'Abriendo tu ritual',
+      esTransfer
+        ? 'Estamos registrando tu comprobante. En un instante verás el estado de tu consulta…'
+        : 'Te llevamos a la pasarela de pago segura. No cierres esta ventana…'
+    );
 
     fetch('/api/checkout', { method: 'POST', body: fd })
       .then(parseJson)
@@ -1112,10 +1149,35 @@
         window.location.href = url;
       })
       .catch(function (e) {
-        msgCheckout(e.message || 'No se pudo procesar. Intenta de nuevo.');
+        // Falló: quitamos el ritual y dejamos el checkout intacto para reintentar.
+        ocultarRitual();
         btn.disabled = false;
         btn.textContent = textoBtn;
+        msgCheckout(e.message || 'No se pudo procesar. Intenta de nuevo.');
       });
+  }
+
+  // Momento "ritual": capa inmersiva sobre el checkout mientras se confirma el
+  // pago / se redirige a la pasarela. Se dibuja ENCIMA (no reemplaza) para que,
+  // si algo falla, el formulario siga intacto. Respeta prefers-reduced-motion vía CSS.
+  function mostrarRitual(titulo, sub) {
+    ocultarRitual();
+    var layer = document.createElement('div');
+    layer.className = 'fc-ritual-layer';
+    layer.id = 'fc-ritual-layer';
+    layer.innerHTML =
+      '<div class="fc-ritual">' +
+      '<div class="fc-ritual-orb">🔮</div>' +
+      '<div class="fc-ritual-tit">' + titulo + '</div>' +
+      '<div class="fc-ritual-sub">' + sub + '</div>' +
+      '<div class="fc-ritual-dots"><i></i><i></i><i></i></div>' +
+      '</div>';
+    document.body.appendChild(layer);
+  }
+
+  function ocultarRitual() {
+    var el = document.getElementById('fc-ritual-layer');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
   }
 
   /* ---------- Helpers de red ---------- */
