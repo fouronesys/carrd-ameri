@@ -281,6 +281,26 @@
       '.fc-ritual-dots i:nth-child(3){animation-delay:.36s;}',
       '@keyframes fcRitualDot{0%,100%{opacity:.3;transform:translateY(0);}50%{opacity:1;transform:translateY(-4px);}}',
       '@media (prefers-reduced-motion: reduce){.fc-ritual,.fc-ritual-orb,.fc-ritual-orb::before,.fc-ritual-orb::after,.fc-ritual-dots i{animation:none;}.fc-ritual-orb::before,.fc-ritual-orb::after{display:none;}}',
+      /* --- Invitación a registrarse (invitados) --- */
+      '.fc-promo-back{position:fixed;inset:0;z-index:10006;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(9,3,7,0.66);backdrop-filter:blur(4px);opacity:0;animation:fcPromoBack .45s ease forwards;}',
+      '@keyframes fcPromoBack{0%{opacity:0;}100%{opacity:1;}}',
+      '.fc-promo{position:relative;width:100%;max-width:380px;box-sizing:border-box;background:linear-gradient(160deg,#2a1526 0%,#160610 78%);border:1px solid rgba(240,163,195,0.45);border-radius:20px;padding:30px 26px 24px;text-align:center;box-shadow:0 24px 70px rgba(0,0,0,0.6),0 0 46px rgba(156,76,109,0.4);overflow:hidden;transform:translateY(34px) scale(0.9);opacity:0;animation:fcPromoIn .62s cubic-bezier(0.16,1,0.3,1) .08s forwards;}',
+      '@keyframes fcPromoIn{0%{opacity:0;transform:translateY(34px) scale(0.9);}60%{opacity:1;}100%{opacity:1;transform:translateY(0) scale(1);}}',
+      '.fc-promo::before{content:"";position:absolute;top:-70px;left:50%;width:220px;height:220px;transform:translateX(-50%);background:radial-gradient(circle,rgba(240,163,195,0.28) 0%,rgba(240,163,195,0) 68%);pointer-events:none;}',
+      '.fc-promo-close{position:absolute;top:12px;right:14px;z-index:2;background:none;border:none;color:#c9a9ba;font-size:24px;line-height:1;cursor:pointer;padding:2px 6px;transition:color .15s ease;}',
+      '.fc-promo-close:hover{color:#F0A3C3;}',
+      '.fc-promo-badge{position:relative;z-index:1;width:76px;height:76px;margin:0 auto 16px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#fff 0%,#F6B6D0 30%,#EC8FB6 56%,#7D3754 100%);box-shadow:0 0 22px 5px rgba(240,163,195,0.55),0 0 48px 14px rgba(156,76,109,0.4);display:flex;align-items:center;justify-content:center;font-size:34px;animation:fcRitualPulse 2s ease-in-out infinite;}',
+      '.fc-promo-tit{position:relative;z-index:1;font-size:19px;font-weight:900;color:#F0A3C3;letter-spacing:.02em;margin:0 0 6px;}',
+      '.fc-promo-sub{position:relative;z-index:1;font-size:12.5px;color:#d8b6c6;line-height:1.5;margin:0 auto 18px;max-width:300px;}',
+      '.fc-promo .fc-benes{position:relative;z-index:1;text-align:left;margin:0 0 20px;}',
+      '.fc-promo-cta{position:relative;z-index:1;width:100%;margin:0 0 10px;font-size:14px;padding:13px;}',
+      '.fc-promo-skip{position:relative;z-index:1;display:block;margin:0 auto;color:#9c7788;text-decoration:none;font-size:11.5px;}',
+      '.fc-promo-skip:hover{color:#c9a9ba;}',
+      '.fc-promo-star{position:absolute;z-index:0;color:#F0A3C3;pointer-events:none;text-shadow:0 0 8px rgba(240,163,195,0.9);animation:fcTwinkle 2.2s ease-in-out infinite;}',
+      '.fc-promo-star.s1{top:22px;left:24px;font-size:13px;}',
+      '.fc-promo-star.s2{top:60px;right:30px;font-size:16px;animation-delay:.6s;}',
+      '.fc-promo-star.s3{bottom:70px;left:34px;font-size:15px;animation-delay:1.1s;}',
+      '@media (prefers-reduced-motion: reduce){.fc-promo-back,.fc-promo{animation:none;opacity:1;transform:none;}.fc-promo-badge,.fc-promo-star{animation:none;}}',
     ].join('');
     var el = document.createElement('style');
     el.id = 'fresa-cart-css';
@@ -632,6 +652,59 @@
     });
   }
 
+  // Lista de beneficios de tener cuenta (reutilizada en el modal y en la
+  // invitación a invitados).
+  function beneficiosHtml() {
+    return '<li class="fc-bene"><span class="em">🕯️</span><span><b>Seguimiento en vivo</b> del estado de cada consulta, paso a paso.</span></li>' +
+      '<li class="fc-bene"><span class="em">📸</span><span><b>Historial con evidencias</b> de tus trabajos, guardadas en tu perfil.</span></li>' +
+      '<li class="fc-bene"><span class="em">🔔</span><span><b>Avisos</b> cuando tu pago se confirma y cuando tu trabajo queda listo.</span></li>' +
+      '<li class="fc-bene"><span class="em">🌙</span><span><b>Círculo íntimo:</b> junta sellos por cada consulta y gana una recompensa.</span></li>';
+  }
+
+  // Invitación animada a registrarse, solo para invitados. Aparece una vez por
+  // sesión (sessionStorage) para no resultar molesta.
+  function mostrarPromoRegistro() {
+    if (estado.cliente) return;
+    try { if (sessionStorage.getItem('fc_promo_visto')) return; } catch (e) {}
+    if (document.getElementById('fc-promo-back')) return;
+
+    var back = document.createElement('div');
+    back.className = 'fc-promo-back';
+    back.id = 'fc-promo-back';
+    back.innerHTML =
+      '<div class="fc-promo" role="dialog" aria-modal="true" aria-label="Crear cuenta">' +
+      '<button class="fc-promo-close" id="fc-promo-close" aria-label="Cerrar">×</button>' +
+      '<span class="fc-promo-star s1">✦</span>' +
+      '<span class="fc-promo-star s2">✧</span>' +
+      '<span class="fc-promo-star s3">✦</span>' +
+      '<div class="fc-promo-badge">🌙</div>' +
+      '<div class="fc-promo-tit">Únete al Círculo íntimo</div>' +
+      '<div class="fc-promo-sub">Crea tu cuenta gratis y acompaña cada ritual de cerca.</div>' +
+      '<ul class="fc-benes">' + beneficiosHtml() + '</ul>' +
+      '<button class="fc-btn primario fc-promo-cta" id="fc-promo-cta">✧ Crear mi cuenta gratis</button>' +
+      '<a href="#" class="fc-promo-skip" id="fc-promo-skip">Seguir como invitado</a>' +
+      '</div>';
+    document.body.appendChild(back);
+    try { sessionStorage.setItem('fc_promo_visto', '1'); } catch (e) {}
+
+    function onKey(e) { if (e.key === 'Escape' || e.keyCode === 27) cerrarPromo(); }
+    function cerrarPromo() {
+      document.removeEventListener('keydown', onKey);
+      if (back.parentNode) back.parentNode.removeChild(back);
+    }
+    document.getElementById('fc-promo-close').addEventListener('click', cerrarPromo);
+    document.getElementById('fc-promo-skip').addEventListener('click', function (e) {
+      e.preventDefault(); cerrarPromo();
+    });
+    document.getElementById('fc-promo-cta').addEventListener('click', function () {
+      cerrarPromo(); vistaAuth('registro');
+    });
+    back.addEventListener('click', function (e) { if (e.target === back) cerrarPromo(); });
+    document.addEventListener('keydown', onKey);
+    var cta = document.getElementById('fc-promo-cta');
+    if (cta) { try { cta.focus(); } catch (e) {} }
+  }
+
   function vistaAuth(modo) {
     var esLogin = modo !== 'registro';
     var html =
@@ -646,12 +719,7 @@
       (esLogin ?
         '<p class="fc-nota">Entra para ver tus consultas, su avance y las evidencias de tus trabajos.</p>' :
         '<p class="fc-benes-tit">✧ Al crear tu cuenta desbloqueas:</p>' +
-        '<ul class="fc-benes">' +
-        '<li class="fc-bene"><span class="em">🕯️</span><span><b>Seguimiento en vivo</b> del estado de cada consulta, paso a paso.</span></li>' +
-        '<li class="fc-bene"><span class="em">📸</span><span><b>Historial con evidencias</b> de tus trabajos, guardadas en tu perfil.</span></li>' +
-        '<li class="fc-bene"><span class="em">🔔</span><span><b>Avisos</b> cuando tu pago se confirma y cuando tu trabajo queda listo.</span></li>' +
-        '<li class="fc-bene"><span class="em">🌙</span><span><b>Círculo íntimo:</b> junta sellos por cada consulta y gana una recompensa.</span></li>' +
-        '</ul>') +
+        '<ul class="fc-benes">' + beneficiosHtml() + '</ul>') +
       (esLogin ? '' :
         '<label class="fc-label">Nombre</label>' +
         '<input class="fc-input" id="fc-nombre" type="text" placeholder="Tu nombre (opcional)">') +
@@ -1211,6 +1279,9 @@
               sincronizarServidor();
             }
             render();
+          } else {
+            // Invitado confirmado: invítalo a registrarse tras una breve pausa.
+            setTimeout(mostrarPromoRegistro, 1400);
           }
         }).catch(function () {});
     } catch (e) {}
