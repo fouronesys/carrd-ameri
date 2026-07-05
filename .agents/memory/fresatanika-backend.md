@@ -5,11 +5,17 @@ description: Environment quirks and deployment constraints for the Fresatanika N
 
 # Fresatanika (Carrd-based catalog → Node/Express)
 
-- **better-sqlite3 does NOT compile in this Replit environment** (native build fails). Use a JSON-file DB instead. **Why:** repeated build failures wasted time; the JSON store also satisfied the client's "un archivo" (a single file) requirement.
+- **Data layer is now PostgreSQL (`lib/db.js` = pg Pool, JSONB `data` column per table), NOT JSON files.** All `db.*` are async and MUST be awaited (every route handler + inner multer callback is async). Sessions are Postgres-backed via `connect-pg-simple` (`session` table, `createTableIfMissing`). The JSON files under `DATA_DIR` are kept only as a one-time migration source + backup. **Why:** enables zero-downtime multi-instance CapRover rolling updates (JSON-file locking couldn't). **How to apply:** never reintroduce a sync JSON read/write for live data; add new tables in `crearEsquema` with a JSONB `data` column.
 
-- **All persistent state lives under `DATA_DIR`** (bookings JSON, uploaded photos, session secret). In dev this defaults to a local `data/` dir; in the Dockerfile it is `/data`.
+- **JSON→PG migration is marker-based idempotent (`meta` table, one `migracion_<tabla>` row per table).** `migrarDesdeJSON({soloSiVacio})`: on startup (`soloSiVacio=true`) it imports a table only if unmarked, then marks it; the manual script `npm run migrar` (`scripts/migrar-a-postgres.js`) forces `soloSiVacio=false` to retry all. ALL inserts use `ON CONFLICT DO NOTHING` (accesos has a UNIQUE index on `(data->>'id')`), so re-runs never duplicate and a deleted row is never resurrected. **Why:** count-based skip risked partial-import data loss + accesos duplication on re-run. **How to apply:** any new migrated table needs its own `ON CONFLICT` target + `marcarMigracion` call.
 
-- **CapRover deploy requires a persistent volume mounted at `/data`.** **Why:** without it, every redeploy wipes all bookings, uploaded photos, and the session secret. This is the single most important deploy step and is easy to forget.
+- **`/healthz` (checks `db.verificarConexion`) + graceful shutdown enable rolling updates.** SIGTERM/SIGINT → `apagar()`: clearInterval, `server.close`, await in-flight background jobs (`tareaLimpieza`/`tareaSeguimientos` — launched via `lanzarLimpieza`/`lanzarSeguimientos` so the latest promise is always awaitable), then `db.cerrar()`, with a 10s force-exit timeout. Startup is wrapped in async `iniciar()` (awaits `db.init()` then `app.listen`). Dockerfile has a `HEALTHCHECK` hitting `/healthz`. **How to apply:** any new setInterval background job must store its promise and be awaited in `apagar()` before the pool closes; CapRover start-first order + parallelism are set in the dashboard Service Update Override (not in repo).
+
+- **better-sqlite3 does NOT compile in this Replit environment** (native build fails). Postgres (pg, pure JS) is used instead. **Why:** repeated native build failures wasted time.
+
+- **Uploaded photos still live under `DATA_DIR`/uploads** (only the structured data moved to Postgres; sessions moved to PG too). In dev `DATA_DIR` defaults to a local `data/` dir; in the Dockerfile it is `/data`.
+
+- **CapRover deploy requires a persistent volume mounted at `/data` (for uploaded photos) AND a PostgreSQL database (`DATABASE_URL`).** **Why:** without the volume, redeploys wipe uploaded photos; without Postgres the app won't start. Structured data + sessions are now in Postgres, so those survive redeploys independently of the volume.
 
 - **Secrets are required, not defaulted.** `ADMIN_PASSWORD` (admin panel at `/admin`) and `SMTP_PASS` (Zoho `admin@fourone.com.do`) must be set as env/secrets. The admin password fallback was intentionally removed so a missing env fails safe instead of exposing a predictable password.
 

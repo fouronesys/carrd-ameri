@@ -2,6 +2,7 @@
 
 const express = require('express');
 const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -177,10 +178,11 @@ function aplicarDescuento(base, pct) {
 }
 
 // Descuento por promociones de fecha activas para un hechizo (auto-aplicadas).
-function descuentoFechaPara(clave) {
+async function descuentoFechaPara(clave) {
   const hoy = hoyBogota();
   let mejor = 0;
-  db.listarPromos().forEach(function (p) {
+  const promos = await db.listarPromos();
+  promos.forEach(function (p) {
     if (p.activa === false) return;
     if (!enVentana(p.desde, p.hasta, hoy)) return;
     if (!objetivoIncluye(p.objetivo, clave)) return;
@@ -191,12 +193,13 @@ function descuentoFechaPara(clave) {
 }
 
 // Valida un código para un hechizo y devuelve su porcentaje (0 si no aplica).
-function codigoDescuentoPara(clave, codigoStr) {
+async function codigoDescuentoPara(clave, codigoStr) {
   const cod = String(codigoStr || '').trim().toLowerCase();
   if (!cod) return { pct: 0, valido: false, codigo: '' };
   const hoy = hoyBogota();
   let encontrado = null;
-  db.listarCodigos().forEach(function (c) {
+  const codigos = await db.listarCodigos();
+  codigos.forEach(function (c) {
     if (String(c.codigo || '').trim().toLowerCase() !== cod) return;
     if (c.activo === false) return;
     if (!enVentana(c.desde, c.hasta, hoy)) return;
@@ -205,7 +208,7 @@ function codigoDescuentoPara(clave, codigoStr) {
   });
   if (!encontrado) return { pct: 0, valido: false, codigo: '' };
   const limite = Number(encontrado.limite_usos) || 0;
-  if (limite > 0 && db.contarUsosCodigo(encontrado.codigo) >= limite) {
+  if (limite > 0 && (await db.contarUsosCodigo(encontrado.codigo)) >= limite) {
     return { pct: 0, valido: false, codigo: '', agotado: true };
   }
   return { pct: Number(encontrado.porcentaje) || 0, valido: true, codigo: encontrado.codigo };
@@ -214,14 +217,14 @@ function codigoDescuentoPara(clave, codigoStr) {
 // Calcula el mejor descuento aplicable a un hechizo (no se acumulan: se toma el mayor).
 // `base` es el precio base validado (algunos hechizos comparten nombre con precios
 // distintos, por eso se usa el precio base recibido y no un mapa fijo).
-function calcularDescuentoHechizo(clave, codigoStr, base) {
+async function calcularDescuentoHechizo(clave, codigoStr, base) {
   const h = HECHIZOS.mapa[clave];
   if (!h) return null;
   // El precio base debe corresponder realmente a este hechizo; así se evita
   // que un servicio que no es hechizo obtenga descuento enviando una clave válida.
   if (Array.isArray(h.precios) && h.precios.indexOf(base) === -1) return null;
-  const pctFecha = descuentoFechaPara(clave);
-  const cod = codigoDescuentoPara(clave, codigoStr);
+  const pctFecha = await descuentoFechaPara(clave);
+  const cod = await codigoDescuentoPara(clave, codigoStr);
   const pct = Math.max(pctFecha, cod.pct);
   const usaCodigo = cod.valido && cod.pct >= pctFecha && cod.pct > 0;
   const final = pct > 0 ? aplicarDescuento(base, pct) : base;
@@ -287,10 +290,10 @@ function baseUrlDe(req) {
 }
 
 // Correo del cliente registrado dueño de un agendamiento (vacío si es invitado).
-function emailDelCliente(reg) {
+async function emailDelCliente(reg) {
   if (!reg || !reg.cliente_id) return '';
   try {
-    const c = db.obtenerClientePorId(reg.cliente_id);
+    const c = await db.obtenerClientePorId(reg.cliente_id);
     return (c && c.email) || '';
   } catch (e) {
     return '';
@@ -300,9 +303,9 @@ function emailDelCliente(reg) {
 // Aviso automático de estado a un cliente registrado (un solo servicio).
 // Usa una bandera por estado para no repetir el mismo aviso.
 async function notificarEstadoCliente(ref, estado) {
-  const reg = db.obtenerPorRef(ref);
+  const reg = await db.obtenerPorRef(ref);
   if (!reg) return;
-  const to = emailDelCliente(reg);
+  const to = await emailDelCliente(reg);
   if (!to) return;
   const bandera = 'cliente_aviso_' + estado;
   if (reg[bandera]) return;
@@ -311,7 +314,7 @@ async function notificarEstadoCliente(ref, estado) {
     if (r && r.enviado) {
       const cambios = {};
       cambios[bandera] = new Date().toISOString();
-      db.actualizarPorRef(ref, cambios);
+      await db.actualizarPorRef(ref, cambios);
     }
   } catch (e) {
     console.error('[mailer] Falló el aviso de estado al cliente:', e.message);
@@ -321,10 +324,10 @@ async function notificarEstadoCliente(ref, estado) {
 // Aviso automático de estado para un pedido completo (carrito, varios servicios).
 // Envía un único correo al cliente y marca todos los servicios del pedido.
 async function notificarEstadoPedido(pedidoRef, estado) {
-  const registros = db.obtenerPorPedido(pedidoRef);
+  const registros = await db.obtenerPorPedido(pedidoRef);
   if (!registros.length) return;
   const primero = registros[0];
-  const to = emailDelCliente(primero);
+  const to = await emailDelCliente(primero);
   if (!to) return;
   const bandera = 'cliente_aviso_' + estado;
   if (primero[bandera]) return;
@@ -338,7 +341,7 @@ async function notificarEstadoPedido(pedidoRef, estado) {
     if (r && r.enviado) {
       const cambios = {};
       cambios[bandera] = new Date().toISOString();
-      db.actualizarPorPedido(pedidoRef, cambios);
+      await db.actualizarPorPedido(pedidoRef, cambios);
     }
   } catch (e) {
     console.error('[mailer] Falló el aviso de estado (pedido) al cliente:', e.message);
@@ -386,6 +389,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(session({
   name: 'fresa.sid',
+  store: new pgSession({ pool: db.pool, tableName: 'session', createTableIfMissing: true }),
   secret: obtenerSecretoSesion(),
   resave: false,
   saveUninitialized: false,
@@ -434,24 +438,24 @@ app.get('/api/config', function (req, res) {
 });
 
 /* ---------- Promociones activas por fecha (para mostrar precios rebajados) ---------- */
-app.get('/api/promociones', function (req, res) {
+app.get('/api/promociones', async function (req, res) {
   const descuentos = {};
-  HECHIZOS.lista.forEach(function (h) {
-    const pct = descuentoFechaPara(h.clave);
+  for (const h of HECHIZOS.lista) {
+    const pct = await descuentoFechaPara(h.clave);
     if (pct > 0) descuentos[h.clave] = pct;
-  });
+  }
   res.json({ descuentos: descuentos });
 });
 
 /* ---------- Validar un código promocional para un hechizo ---------- */
-app.post('/api/codigo', function (req, res) {
+app.post('/api/codigo', async function (req, res) {
   const b = req.body || {};
   const clave = (b.hechizo_clave || '').toString().trim().toLowerCase();
   const codigo = (b.codigo || '').toString().trim();
   if (!clave || !HECHIZOS.mapa[clave]) {
     return res.status(400).json({ ok: false, error: 'Los códigos solo aplican a los hechizos.' });
   }
-  const cod = codigoDescuentoPara(clave, codigo);
+  const cod = await codigoDescuentoPara(clave, codigo);
   if (!cod.valido || cod.pct <= 0) {
     const msg = cod.agotado
       ? 'Este código ya alcanzó su límite de usos.'
@@ -464,10 +468,10 @@ app.post('/api/codigo', function (req, res) {
 /* ---------- Cuentas de cliente (correo + contraseña) ---------- */
 // Estado de la sesión del cliente (para que el frontend sepa si hay sesión y
 // recupere el carrito guardado en el servidor).
-app.get('/api/cuenta', function (req, res) {
+app.get('/api/cuenta', async function (req, res) {
   const sesion = clienteSesion(req);
   if (!sesion) return res.json({ autenticado: false });
-  const cliente = db.obtenerClientePorId(sesion.id);
+  const cliente = await db.obtenerClientePorId(sesion.id);
   if (!cliente) {
     delete req.session.cliente;
     return res.json({ autenticado: false });
@@ -475,7 +479,7 @@ app.get('/api/cuenta', function (req, res) {
   res.json({ autenticado: true, cliente: clientePublico(cliente) });
 });
 
-app.post('/api/cuenta/registro', mismoOrigen, function (req, res) {
+app.post('/api/cuenta/registro', mismoOrigen, async function (req, res) {
   const b = req.body || {};
   const email = db.normalizarEmail(b.email);
   const password = (b.password || '').toString();
@@ -486,13 +490,13 @@ app.post('/api/cuenta/registro', mismoOrigen, function (req, res) {
   if (password.length < 6) {
     return res.status(400).json({ ok: false, error: 'La contraseña debe tener al menos 6 caracteres.' });
   }
-  if (db.obtenerClientePorEmail(email)) {
+  if (await db.obtenerClientePorEmail(email)) {
     return res.status(409).json({ ok: false, error: 'Ya existe una cuenta con este correo. Inicia sesión.' });
   }
   const cred = hashearPassword(password);
   // El carrito enviado por el navegador (invitado) se conserva al crear la cuenta.
   const carrito = sanitizarCarrito(b.carrito);
-  const cliente = db.crearCliente({
+  const cliente = await db.crearCliente({
     id: 'cli-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
     email: email,
     nombre: nombre,
@@ -505,11 +509,11 @@ app.post('/api/cuenta/registro', mismoOrigen, function (req, res) {
   res.json({ ok: true, cliente: clientePublico(cliente) });
 });
 
-app.post('/api/cuenta/login', mismoOrigen, function (req, res) {
+app.post('/api/cuenta/login', mismoOrigen, async function (req, res) {
   const b = req.body || {};
   const email = db.normalizarEmail(b.email);
   const password = (b.password || '').toString();
-  const cliente = db.obtenerClientePorEmail(email);
+  const cliente = await db.obtenerClientePorEmail(email);
   if (!cliente || !verificarPassword(password, cliente.pass_salt, cliente.pass_hash)) {
     return res.status(401).json({ ok: false, error: 'Correo o contraseña incorrectos.' });
   }
@@ -526,7 +530,7 @@ app.post('/api/cuenta/login', mismoOrigen, function (req, res) {
   delNavegador.forEach(function (it) {
     if (!vistos[firma(it)]) { fusion.push(it); vistos[firma(it)] = true; }
   });
-  const actualizado = db.guardarCarritoCliente(cliente.id, fusion) || cliente;
+  const actualizado = (await db.guardarCarritoCliente(cliente.id, fusion)) || cliente;
   req.session.cliente = { id: cliente.id, email: cliente.email, nombre: cliente.nombre };
   res.json({ ok: true, cliente: clientePublico(actualizado) });
 });
@@ -538,11 +542,11 @@ app.post('/api/cuenta/logout', mismoOrigen, function (req, res) {
 });
 
 // Guarda (reemplaza) el carrito del cliente autenticado en el servidor.
-app.put('/api/carrito', mismoOrigen, function (req, res) {
+app.put('/api/carrito', mismoOrigen, async function (req, res) {
   const sesion = clienteSesion(req);
   if (!sesion) return res.status(401).json({ ok: false, error: 'Inicia sesión para guardar tu carrito.' });
   const carrito = sanitizarCarrito((req.body || {}).carrito);
-  const actualizado = db.guardarCarritoCliente(sesion.id, carrito);
+  const actualizado = await db.guardarCarritoCliente(sesion.id, carrito);
   if (!actualizado) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada.' });
   res.json({ ok: true, carrito: actualizado.carrito || [] });
 });
@@ -554,7 +558,7 @@ const subirArchivos = upload.fields([
 ]);
 
 app.post('/api/booking', function (req, res) {
-  subirArchivos(req, res, function (err) {
+  subirArchivos(req, res, async function (err) {
     if (err) {
       const msg = err.code === 'LIMIT_FILE_SIZE'
         ? 'La imagen es demasiado grande (máximo 8 MB).'
@@ -663,7 +667,7 @@ app.post('/api/booking', function (req, res) {
           creado_en: new Date().toISOString(),
           pagado_en: '',
         };
-        db.crearAgendamiento(registroA);
+        await db.crearAgendamiento(registroA);
         return res.json({
           ok: true, ref: refA, precio_cop: totalExtra, precio_texto: registroA.precio_texto,
           signature: esManual ? '' : firmaIntegridadWompi(refA, totalExtra * 100, 'COP'),
@@ -684,7 +688,7 @@ app.post('/api/booking', function (req, res) {
       // fecha o código) sobre el precio base, recalculado siempre en el servidor.
       const claveEnviada = (b.hechizo_clave || '').toString().trim().toLowerCase();
       const codigoEnviado = (b.codigo || '').toString().trim();
-      const info = claveEnviada ? calcularDescuentoHechizo(claveEnviada, codigoEnviado, base) : null;
+      const info = claveEnviada ? await calcularDescuentoHechizo(claveEnviada, codigoEnviado, base) : null;
 
       // El precio en USD se recalcula en paralelo al COP para reflejar el descuento
       // y el adelanto. Es el monto cobrado si se paga en dólares por transferencia
@@ -793,7 +797,7 @@ app.post('/api/booking', function (req, res) {
         creado_en: new Date().toISOString(),
         pagado_en: '',
       };
-      db.crearAgendamiento(registro);
+      await db.crearAgendamiento(registro);
       res.json({
         ok: true, ref: ref, precio_cop: totalCop, precio_texto: registro.precio_texto,
         signature: esManual ? '' : firmaIntegridadWompi(ref, totalCop * 100, 'COP'),
@@ -808,7 +812,7 @@ app.post('/api/booking', function (req, res) {
 /* ---------- Regreso desde Wompi: verifica pago, agenda y notifica ---------- */
 app.get('/gracias/:ref', async function (req, res) {
   const ref = req.params.ref;
-  const registro = db.obtenerPorRef(ref);
+  const registro = await db.obtenerPorRef(ref);
   if (!registro) {
     return res.status(404).send(templates.paginaGracias({ estado: 'no_encontrado' }));
   }
@@ -826,7 +830,7 @@ app.get('/gracias/:ref', async function (req, res) {
       const monedaOk = tx && tx.currency === 'COP';
       const refOk = tx && tx.reference === ref;
       if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
-        const actualizado = db.actualizarPorRef(ref, {
+        const actualizado = await db.actualizarPorRef(ref, {
           estado: 'agendado',
           wompi_tx: txId,
           pagado_en: new Date().toISOString(),
@@ -835,7 +839,7 @@ app.get('/gracias/:ref', async function (req, res) {
         if (!registro.correo_enviado) {
           try {
             const r = await mailer.enviarNotificacion(actualizado);
-            if (r.enviado) db.actualizarPorRef(ref, { correo_enviado: true });
+            if (r.enviado) await db.actualizarPorRef(ref, { correo_enviado: true });
           } catch (e) {
             console.error('[mailer] Falló el envío de la notificación:', e.message);
           }
@@ -849,7 +853,7 @@ app.get('/gracias/:ref', async function (req, res) {
     }
   }
 
-  const regActual = db.obtenerPorRef(ref) || registro;
+  const regActual = (await db.obtenerPorRef(ref)) || registro;
   res.send(templates.paginaGracias({ estado: estado, reg: regActual }));
 });
 
@@ -858,7 +862,7 @@ app.get('/gracias/:ref', async function (req, res) {
 const subirArchivosCheckout = upload.any();
 
 app.post('/api/checkout', function (req, res) {
-  subirArchivosCheckout(req, res, function (err) {
+  subirArchivosCheckout(req, res, async function (err) {
     if (err) {
       const msg = err.code === 'LIMIT_FILE_SIZE'
         ? 'Una de las imágenes es demasiado grande (máximo 8 MB).'
@@ -940,7 +944,7 @@ app.post('/api/checkout', function (req, res) {
         let descuentoPct = 0;
         let precioOriginal = 0;
         if (!esExtra && it.es_hechizo && it.hechizo_clave) {
-          const info = calcularDescuentoHechizo(
+          const info = await calcularDescuentoHechizo(
             it.hechizo_clave.toString().trim().toLowerCase(), '', base);
           if (info && info.pct > 0) {
             precioNeto = info.final;
@@ -996,7 +1000,8 @@ app.post('/api/checkout', function (req, res) {
       const sesionCheckout = clienteSesion(req);
       const clienteId = sesionCheckout ? sesionCheckout.id : '';
 
-      preparados.forEach(function (p, i) {
+      for (let i = 0; i < preparados.length; i++) {
+        const p = preparados[i];
         const registro = {
           ref: pedidoRef + '-' + (i + 1),
           pedido_ref: pedidoRef,
@@ -1025,8 +1030,8 @@ app.post('/api/checkout', function (req, res) {
           creado_en: creadoEn,
           pagado_en: '',
         };
-        db.crearAgendamiento(registro);
-      });
+        await db.crearAgendamiento(registro);
+      }
 
       // NO se vacía el carrito aquí: el pedido aún no está pagado. Se vacía solo
       // cuando el pago queda confirmado (Wompi APROBADO en /pedido o aprobación
@@ -1049,7 +1054,7 @@ app.post('/api/checkout', function (req, res) {
 /* ---------- Regreso desde Wompi para un pedido: verifica y agenda todo ---------- */
 app.get('/pedido/:pedidoRef', async function (req, res) {
   const pedidoRef = req.params.pedidoRef;
-  let registros = db.obtenerPorPedido(pedidoRef);
+  let registros = await db.obtenerPorPedido(pedidoRef);
   if (!registros.length) {
     return res.status(404).send(templates.paginaGracias({ estado: 'no_encontrado' }));
   }
@@ -1069,7 +1074,7 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
       const monedaOk = tx && tx.currency === 'COP';
       const refOk = tx && tx.reference === pedidoRef;
       if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
-        db.actualizarPorPedido(pedidoRef, {
+        await db.actualizarPorPedido(pedidoRef, {
           estado: 'agendado',
           wompi_tx: txId,
           pagado_en: new Date().toISOString(),
@@ -1077,13 +1082,13 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
         estado = 'agendado';
         // Pago confirmado: recién ahora se vacía el carrito guardado del cliente.
         if (primero.cliente_id) {
-          try { db.guardarCarritoCliente(primero.cliente_id, []); } catch (e) { /* noop */ }
+          try { await db.guardarCarritoCliente(primero.cliente_id, []); } catch (e) { /* noop */ }
         }
-        registros = db.obtenerPorPedido(pedidoRef);
+        registros = await db.obtenerPorPedido(pedidoRef);
         if (!primero.correo_enviado) {
           try {
             const r = await mailer.enviarNotificacionPedido(registros, totalPedido);
-            if (r.enviado) db.actualizarPorPedido(pedidoRef, { correo_enviado: true });
+            if (r.enviado) await db.actualizarPorPedido(pedidoRef, { correo_enviado: true });
           } catch (e) {
             console.error('[mailer] Falló la notificación del pedido:', e.message);
           }
@@ -1097,7 +1102,7 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
     }
   }
 
-  registros = db.obtenerPorPedido(pedidoRef);
+  registros = await db.obtenerPorPedido(pedidoRef);
   res.send(templates.paginaGraciasPedido({
     estado: estado,
     registros: registros,
@@ -1145,7 +1150,7 @@ function mismoOrigen(req, res, next) {
 
 // Guarda el acceso en la auditoría y envía la alerta por correo en segundo plano
 // (sin bloquear el inicio de sesión). Se llama en cada intento, correcto o no.
-function registrarYalertarAcceso(req, info) {
+async function registrarYalertarAcceso(req, info) {
   const evento = {
     id: 'acc-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
     usuario: (info.usuario || '').toString().slice(0, 120),
@@ -1155,38 +1160,46 @@ function registrarYalertarAcceso(req, info) {
     agente: (req.get('user-agent') || '').toString().slice(0, 300),
     cuando: new Date().toISOString(),
   };
-  try { db.registrarAcceso(evento); } catch (e) { console.error('[auditoria]', e.message); }
+  try { await db.registrarAcceso(evento); } catch (e) { console.error('[auditoria]', e.message); }
   mailer.enviarAlertaLogin(evento).catch(function (e) {
     console.error('[mailer] Falló la alerta de inicio de sesión:', e.message);
   });
   return evento;
 }
 
-app.get('/admin', function (req, res) {
+app.get('/admin', async function (req, res) {
   if (req.session && req.session.admin) {
-    const registros = db.listarAgendamientos().map(function (r) {
-      return Object.assign({}, r, { cliente_email: emailDelCliente(r) });
-    });
+    const listaAg = await db.listarAgendamientos();
+    const registros = [];
+    for (const r of listaAg) {
+      registros.push(Object.assign({}, r, { cliente_email: await emailDelCliente(r) }));
+    }
     const esAdmin = req.session.rol === 'admin';
+    const promos = await db.listarPromos();
+    const listaCod = await db.listarCodigos();
+    const codigos = [];
+    for (const c of listaCod) {
+      codigos.push(Object.assign({}, c, { usos: await db.contarUsosCodigo(c.codigo) }));
+    }
+    const usuarios = esAdmin ? await db.listarUsuariosAdmin() : [];
+    const accesos = esAdmin ? await db.listarAccesos(80) : [];
     return res.send(templates.adminDashboard({
       registros: registros,
       rol: req.session.rol || 'admin',
       baseUrl: baseUrlDe(req),
       hechizos: HECHIZOS.lista,
-      promos: db.listarPromos(),
-      codigos: db.listarCodigos().map(function (c) {
-        return Object.assign({}, c, { usos: db.contarUsosCodigo(c.codigo) });
-      }),
+      promos: promos,
+      codigos: codigos,
       usuario: req.session.usuario || '',
       usuarioId: req.session.usuario_id || '',
-      usuarios: esAdmin ? db.listarUsuariosAdmin() : [],
-      accesos: esAdmin ? db.listarAccesos(80) : [],
+      usuarios: usuarios,
+      accesos: accesos,
     }));
   }
   res.send(templates.adminLogin({ noConfig: !ADMIN_PASSWORD }));
 });
 
-app.post('/admin/login', mismoOrigen, function (req, res) {
+app.post('/admin/login', mismoOrigen, async function (req, res) {
   if (!ADMIN_PASSWORD) {
     return res.status(500).send(templates.adminLogin({ noConfig: true }));
   }
@@ -1196,17 +1209,17 @@ app.post('/admin/login', mismoOrigen, function (req, res) {
 
   // 1) Usuario con nombre creado por el administrador (verificación con hash).
   if (usuarioIngresado) {
-    const u = db.obtenerUsuarioAdmin(usuarioIngresado);
+    const u = await db.obtenerUsuarioAdmin(usuarioIngresado);
     if (u && verificarPassword(password, u.salt, u.hash)) {
       req.session.admin = true;
       req.session.rol = u.rol;
       req.session.usuario = u.usuario;
       req.session.usuario_id = u.id;
-      try { db.actualizarUsuarioAdmin(u.id, { ultimo_acceso: new Date().toISOString() }); } catch (e) { /* no crítico */ }
-      registrarYalertarAcceso(req, { usuario: u.usuario, rol: u.rol, exito: true });
+      try { await db.actualizarUsuarioAdmin(u.id, { ultimo_acceso: new Date().toISOString() }); } catch (e) { /* no crítico */ }
+      await registrarYalertarAcceso(req, { usuario: u.usuario, rol: u.rol, exito: true });
       return res.redirect('/admin');
     }
-    registrarYalertarAcceso(req, { usuario: usuarioIngresado, rol: '', exito: false });
+    await registrarYalertarAcceso(req, { usuario: usuarioIngresado, rol: '', exito: false });
     return res.status(401).send(templates.adminLogin({ error: 'Usuario o contraseña incorrectos.' }));
   }
 
@@ -1216,10 +1229,10 @@ app.post('/admin/login', mismoOrigen, function (req, res) {
     req.session.admin = true;
     req.session.rol = rol;
     req.session.usuario = rol === 'admin' ? 'administrador' : 'asistente';
-    registrarYalertarAcceso(req, { usuario: req.session.usuario, rol: rol, exito: true });
+    await registrarYalertarAcceso(req, { usuario: req.session.usuario, rol: rol, exito: true });
     return res.redirect('/admin');
   }
-  registrarYalertarAcceso(req, { usuario: '(contraseña directa)', rol: '', exito: false });
+  await registrarYalertarAcceso(req, { usuario: '(contraseña directa)', rol: '', exito: false });
   res.status(401).send(templates.adminLogin({ error: 'Usuario o contraseña incorrectos.' }));
 });
 
@@ -1227,9 +1240,9 @@ app.post('/admin/logout', mismoOrigen, function (req, res) {
   req.session.destroy(function () { res.redirect('/admin'); });
 });
 
-app.get('/admin/exportar/excel', requiereAdmin, function (req, res) {
+app.get('/admin/exportar/excel', requiereAdmin, async function (req, res) {
   try {
-    const registros = db.listarAgendamientos();
+    const registros = await db.listarAgendamientos();
     const buf = exportar.generarExcel(registros);
     const nombre = 'fresatanika-agendamientos-' + new Date().toISOString().slice(0, 10) + '.xlsx';
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1241,9 +1254,9 @@ app.get('/admin/exportar/excel', requiereAdmin, function (req, res) {
   }
 });
 
-app.get('/admin/exportar/pdf', requiereAdmin, function (req, res) {
+app.get('/admin/exportar/pdf', requiereAdmin, async function (req, res) {
   try {
-    const registros = db.listarAgendamientos();
+    const registros = await db.listarAgendamientos();
     const nombre = 'fresatanika-agendamientos-' + new Date().toISOString().slice(0, 10) + '.pdf';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="' + nombre + '"');
@@ -1255,10 +1268,10 @@ app.get('/admin/exportar/pdf', requiereAdmin, function (req, res) {
 });
 
 app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+  const reg = await db.obtenerPorRef(req.params.ref);
   if (reg) {
     const hecho = !reg.trabajo_hecho;
-    db.actualizarPorRef(req.params.ref, {
+    await db.actualizarPorRef(req.params.ref, {
       trabajo_hecho: hecho,
       trabajo_hecho_en: hecho ? new Date().toISOString() : '',
     });
@@ -1269,33 +1282,33 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
 });
 
 app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+  const reg = await db.obtenerPorRef(req.params.ref);
   if (reg && reg.estado === 'pendiente_verificacion') {
     const pagadoEn = new Date().toISOString();
     if (reg.pedido_ref) {
       // Pedido de carrito: se aprueban todos los servicios del pedido a la vez.
-      db.actualizarPorPedido(reg.pedido_ref, { estado: 'agendado', pagado_en: pagadoEn });
+      await db.actualizarPorPedido(reg.pedido_ref, { estado: 'agendado', pagado_en: pagadoEn });
       // Pago confirmado manualmente: recién ahora se vacía el carrito del cliente.
       if (reg.cliente_id) {
-        try { db.guardarCarritoCliente(reg.cliente_id, []); } catch (e) { /* noop */ }
+        try { await db.guardarCarritoCliente(reg.cliente_id, []); } catch (e) { /* noop */ }
       }
       if (!reg.correo_enviado) {
         try {
-          const registros = db.obtenerPorPedido(reg.pedido_ref);
+          const registros = await db.obtenerPorPedido(reg.pedido_ref);
           const total = parseInt(reg.pedido_total_cop, 10) || 0;
           const r = await mailer.enviarNotificacionPedido(registros, total);
-          if (r.enviado) db.actualizarPorPedido(reg.pedido_ref, { correo_enviado: true });
+          if (r.enviado) await db.actualizarPorPedido(reg.pedido_ref, { correo_enviado: true });
         } catch (e) {
           console.error('[mailer] Falló la notificación del pedido:', e.message);
         }
       }
       await notificarEstadoPedido(reg.pedido_ref, 'agendado');
     } else {
-      const actualizado = db.actualizarPorRef(req.params.ref, { estado: 'agendado', pagado_en: pagadoEn });
+      const actualizado = await db.actualizarPorRef(req.params.ref, { estado: 'agendado', pagado_en: pagadoEn });
       if (actualizado && !actualizado.correo_enviado) {
         try {
           const r = await mailer.enviarNotificacion(actualizado);
-          if (r.enviado) db.actualizarPorRef(req.params.ref, { correo_enviado: true });
+          if (r.enviado) await db.actualizarPorRef(req.params.ref, { correo_enviado: true });
         } catch (e) {
           console.error('[mailer] Falló el envío de la notificación:', e.message);
         }
@@ -1307,26 +1320,26 @@ app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fun
 });
 
 app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+  const reg = await db.obtenerPorRef(req.params.ref);
   if (reg && reg.estado === 'pendiente_verificacion') {
     if (reg.pedido_ref) {
-      db.actualizarPorPedido(reg.pedido_ref, { estado: 'rechazado' });
+      await db.actualizarPorPedido(reg.pedido_ref, { estado: 'rechazado' });
       await notificarEstadoPedido(reg.pedido_ref, 'rechazado');
     } else {
-      db.actualizarPorRef(req.params.ref, { estado: 'rechazado' });
+      await db.actualizarPorRef(req.params.ref, { estado: 'rechazado' });
       await notificarEstadoCliente(req.params.ref, 'rechazado');
     }
   }
   res.redirect('/admin');
 });
 
-app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
+  const reg = await db.obtenerPorRef(req.params.ref);
   // Las asistentes no pueden eliminar agendamientos ya marcados como realizados.
   if (reg && reg.trabajo_hecho && req.session.rol !== 'admin') {
     return res.status(403).send('Solo el administrador puede eliminar un agendamiento marcado como realizado.');
   }
-  db.eliminarPorRef(req.params.ref);
+  await db.eliminarPorRef(req.params.ref);
   res.redirect('/admin');
 });
 
@@ -1334,17 +1347,17 @@ app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, function (req, res)
 const ESTADOS_VALIDOS = ['pendiente_pago', 'pendiente_verificacion', 'agendado', 'rechazado'];
 
 // Recalcula el total de un pedido como la suma de los precios de sus servicios.
-function recalcularTotalPedido(pedidoRef) {
+async function recalcularTotalPedido(pedidoRef) {
   if (!pedidoRef) return 0;
-  const registros = db.obtenerPorPedido(pedidoRef);
+  const registros = await db.obtenerPorPedido(pedidoRef);
   const total = registros.reduce(function (s, r) { return s + (parseInt(r.precio_cop, 10) || 0); }, 0);
-  db.actualizarPorPedido(pedidoRef, { pedido_total_cop: total });
+  await db.actualizarPorPedido(pedidoRef, { pedido_total_cop: total });
   return total;
 }
 
 // El administrador puede corregir el servicio, su precio y el estado de pago.
-app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const reg = await db.obtenerPorRef(req.params.ref);
   if (!reg) return res.status(404).send('Agendamiento no encontrado.');
   const b = req.body || {};
   const cambios = {};
@@ -1363,18 +1376,18 @@ app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (
   const estado = (b.estado || '').toString().trim();
   if (estado && ESTADOS_VALIDOS.indexOf(estado) !== -1) cambios.estado = estado;
 
-  db.actualizarPorRef(req.params.ref, cambios);
+  await db.actualizarPorRef(req.params.ref, cambios);
 
   // Si el servicio pertenece a un pedido, se recalcula el total del pedido.
-  if (reg.pedido_ref) recalcularTotalPedido(reg.pedido_ref);
+  if (reg.pedido_ref) await recalcularTotalPedido(reg.pedido_ref);
 
   res.redirect('/admin');
 });
 
 // Agrega un servicio a un agendamiento. Si era individual, lo convierte en un
 // pedido para poder agrupar varios servicios bajo una misma referencia.
-app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const reg = await db.obtenerPorRef(req.params.ref);
   if (!reg) return res.status(404).send('Agendamiento no encontrado.');
   const b = req.body || {};
   const producto = (b.producto || '').toString().trim();
@@ -1386,11 +1399,11 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, function
   let pedidoRef = reg.pedido_ref;
   if (!pedidoRef) {
     pedidoRef = 'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
-    db.actualizarPorRef(reg.ref, { pedido_ref: pedidoRef });
+    await db.actualizarPorRef(reg.ref, { pedido_ref: pedidoRef });
   }
 
   const nuevoRef = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
-  db.crearAgendamiento({
+  await db.crearAgendamiento({
     ref: nuevoRef,
     producto: producto.slice(0, 200),
     precio_cop: precio,
@@ -1417,12 +1430,12 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, function
     creado_en: new Date().toISOString(),
     pagado_en: reg.pagado_en || '',
   });
-  recalcularTotalPedido(pedidoRef);
+  await recalcularTotalPedido(pedidoRef);
   res.redirect('/admin');
 });
 
 /* ---------- Gestión de usuarios del panel (solo administrador) ---------- */
-app.post('/admin/usuarios', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+app.post('/admin/usuarios', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const b = req.body || {};
   const nombre = (b.nombre || '').toString().trim().slice(0, 120);
   const usuario = (b.usuario || '').toString().trim().toLowerCase();
@@ -1435,11 +1448,11 @@ app.post('/admin/usuarios', mismoOrigen, requiereAdmin, soloAdmin, function (req
   if (password.length < 6) {
     return res.status(400).send('La contraseña debe tener al menos 6 caracteres.');
   }
-  if (db.obtenerUsuarioAdmin(usuario)) {
+  if (await db.obtenerUsuarioAdmin(usuario)) {
     return res.status(400).send('Ya existe un usuario con ese nombre.');
   }
   const cred = hashearPassword(password);
-  db.crearUsuarioAdmin({
+  await db.crearUsuarioAdmin({
     id: 'usr-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
     usuario: usuario,
     nombre: nombre || usuario,
@@ -1452,12 +1465,12 @@ app.post('/admin/usuarios', mismoOrigen, requiereAdmin, soloAdmin, function (req
   res.redirect('/admin');
 });
 
-app.post('/admin/usuarios/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+app.post('/admin/usuarios/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   // Un administrador no puede eliminar la propia cuenta con la que inició sesión.
   if (req.session.usuario_id && req.session.usuario_id === req.params.id) {
     return res.status(400).send('No puedes eliminar tu propia cuenta mientras la usas.');
   }
-  db.eliminarUsuarioAdmin(req.params.id);
+  await db.eliminarUsuarioAdmin(req.params.id);
   res.redirect('/admin');
 });
 
@@ -1474,7 +1487,7 @@ function leerObjetivo(body) {
   return 'todos';
 }
 
-app.post('/admin/promo', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+app.post('/admin/promo', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const b = req.body || {};
   const pct = parseInt(b.porcentaje, 10);
   const desde = (b.desde || '').toString().trim();
@@ -1482,7 +1495,7 @@ app.post('/admin/promo', mismoOrigen, requiereAdmin, soloAdmin, function (req, r
   if (!pct || pct < 1 || pct > 100 || !desde || !hasta) {
     return res.status(400).send('Datos de la promoción incompletos.');
   }
-  db.crearPromo({
+  await db.crearPromo({
     id: 'promo-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
     porcentaje: pct,
     desde: desde,
@@ -1494,13 +1507,13 @@ app.post('/admin/promo', mismoOrigen, requiereAdmin, soloAdmin, function (req, r
   res.redirect('/admin');
 });
 
-app.post('/admin/promo/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
-  db.eliminarPromo(req.params.id);
+app.post('/admin/promo/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  await db.eliminarPromo(req.params.id);
   res.redirect('/admin');
 });
 
 // Solo el administrador puede generar/eliminar códigos promocionales.
-app.post('/admin/codigo', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
+app.post('/admin/codigo', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const b = req.body || {};
   const codigo = (b.codigo || '').toString().trim();
   const pct = parseInt(b.porcentaje, 10);
@@ -1510,7 +1523,7 @@ app.post('/admin/codigo', mismoOrigen, requiereAdmin, soloAdmin, function (req, 
     return res.status(400).send('Datos del código incompletos.');
   }
   const limiteUsos = Math.max(0, parseInt(b.limite_usos, 10) || 0);
-  db.crearCodigo({
+  await db.crearCodigo({
     id: 'cod-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
     codigo: codigo,
     porcentaje: pct,
@@ -1524,8 +1537,8 @@ app.post('/admin/codigo', mismoOrigen, requiereAdmin, soloAdmin, function (req, 
   res.redirect('/admin');
 });
 
-app.post('/admin/codigo/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
-  db.eliminarCodigo(req.params.id);
+app.post('/admin/codigo/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  await db.eliminarCodigo(req.params.id);
   res.redirect('/admin');
 });
 
@@ -1551,35 +1564,40 @@ app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, soloAdmin, functio
       console.error('[evidencia] Error al subir:', err.message);
       return res.status(400).send('No se pudo subir la evidencia: ' + templates.escaparHtml(err.message));
     }
-    const ref = req.params.ref;
-    const reg = db.obtenerPorRef(ref);
-    if (!reg) return res.redirect('/admin');
-    const nuevas = (req.files || []).map(function (f) { return f.filename; });
-    const fotos = (Array.isArray(reg.evidencia_fotos) ? reg.evidencia_fotos : []).concat(nuevas);
-    const notas = ((req.body && req.body.notas) || '').toString().trim().slice(0, 2000);
-    const token = reg.evidencia_token || crypto.randomBytes(16).toString('hex');
-    const actualizado = db.actualizarPorRef(ref, {
-      evidencia_fotos: fotos,
-      evidencia_notas: notas,
-      evidencia_en: new Date().toISOString(),
-      evidencia_token: token,
-    });
-    const to = emailDelCliente(actualizado);
-    if (to) {
-      try {
-        const rutasNuevas = nuevas.map(function (n) { return path.join(db.UPLOADS_DIR, n); });
-        await mailer.enviarEvidenciaCliente(actualizado, to, rutasNuevas, baseUrlDe(req));
-      } catch (e) {
-        console.error('[mailer] Falló el envío de la evidencia:', e.message);
+    try {
+      const ref = req.params.ref;
+      const reg = await db.obtenerPorRef(ref);
+      if (!reg) return res.redirect('/admin');
+      const nuevas = (req.files || []).map(function (f) { return f.filename; });
+      const fotos = (Array.isArray(reg.evidencia_fotos) ? reg.evidencia_fotos : []).concat(nuevas);
+      const notas = ((req.body && req.body.notas) || '').toString().trim().slice(0, 2000);
+      const token = reg.evidencia_token || crypto.randomBytes(16).toString('hex');
+      const actualizado = await db.actualizarPorRef(ref, {
+        evidencia_fotos: fotos,
+        evidencia_notas: notas,
+        evidencia_en: new Date().toISOString(),
+        evidencia_token: token,
+      });
+      const to = await emailDelCliente(actualizado);
+      if (to) {
+        try {
+          const rutasNuevas = nuevas.map(function (n) { return path.join(db.UPLOADS_DIR, n); });
+          await mailer.enviarEvidenciaCliente(actualizado, to, rutasNuevas, baseUrlDe(req));
+        } catch (e) {
+          console.error('[mailer] Falló el envío de la evidencia:', e.message);
+        }
       }
+      res.redirect('/admin');
+    } catch (e) {
+      console.error('[evidencia]', e);
+      res.status(500).send('No se pudo guardar la evidencia.');
     }
-    res.redirect('/admin');
   });
 });
 
 // Página pública de la evidencia (protegida por un token en la URL).
-app.get('/evidencia/:ref/:token', function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+app.get('/evidencia/:ref/:token', async function (req, res) {
+  const reg = await db.obtenerPorRef(req.params.ref);
   if (!reg || !reg.evidencia_token || reg.evidencia_token !== req.params.token) {
     return res.status(404).send('Evidencia no encontrada.');
   }
@@ -1587,8 +1605,8 @@ app.get('/evidencia/:ref/:token', function (req, res) {
 });
 
 // Imagen de evidencia servida públicamente solo con el token correcto.
-app.get('/evidencia-foto/:ref/:token/:nombre', function (req, res) {
-  const reg = db.obtenerPorRef(req.params.ref);
+app.get('/evidencia-foto/:ref/:token/:nombre', async function (req, res) {
+  const reg = await db.obtenerPorRef(req.params.ref);
   if (!reg || !reg.evidencia_token || reg.evidencia_token !== req.params.token) {
     return res.status(404).send('No encontrada');
   }
@@ -1603,6 +1621,19 @@ app.get('/evidencia-foto/:ref/:token/:nombre', function (req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
   res.sendFile(ruta);
+});
+
+/* ---------- Salud del servicio (para CapRover / balanceador) ---------- */
+// Comprueba que la conexión a PostgreSQL responde. Se usa en el health check
+// del contenedor para las actualizaciones sin downtime (rolling update).
+app.get('/healthz', async function (req, res) {
+  try {
+    await db.verificarConexion();
+    res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error('[healthz]', e.message);
+    res.status(503).json({ ok: false });
+  }
 });
 
 /* ---------- Sitio estático ---------- */
@@ -1626,9 +1657,9 @@ app.use(function (req, res) {
 });
 
 /* ---------- Limpieza automática de agendamientos sin pago (>48h) ---------- */
-function limpiarPendientes() {
+async function limpiarPendientes() {
   try {
-    const n = db.eliminarPendientesAntiguos(48);
+    const n = await db.eliminarPendientesAntiguos(48);
     if (n > 0) console.log('[limpieza] ' + n + ' agendamiento(s) sin pago eliminados (>48h).');
   } catch (e) {
     console.error('[limpieza]', e.message);
@@ -1651,7 +1682,7 @@ async function procesarSeguimientos() {
   seguimientoEnCurso = true;
   try {
     const ahora = Date.now();
-    const registros = db.listarAgendamientos();
+    const registros = await db.listarAgendamientos();
     for (const reg of registros) {
       if (!reg.trabajo_hecho || !reg.trabajo_hecho_en) continue;
       const base = new Date(reg.trabajo_hecho_en).getTime();
@@ -1660,7 +1691,7 @@ async function procesarSeguimientos() {
       if (!reg.seguimiento_5s_en && ahora >= sumarSemanas(reg.trabajo_hecho_en, 5)) {
         try {
           const r = await mailer.enviarSeguimiento(reg, '5semanas');
-          if (r.enviado) db.actualizarPorRef(reg.ref, { seguimiento_5s_en: new Date().toISOString() });
+          if (r.enviado) await db.actualizarPorRef(reg.ref, { seguimiento_5s_en: new Date().toISOString() });
         } catch (e) {
           console.error('[seguimiento 5s]', reg.ref, e.message);
         }
@@ -1669,7 +1700,7 @@ async function procesarSeguimientos() {
       if (!reg.seguimiento_4m_en && ahora >= sumarMeses(reg.trabajo_hecho_en, 4)) {
         try {
           const r = await mailer.enviarSeguimiento(reg, '4meses');
-          if (r.enviado) db.actualizarPorRef(reg.ref, { seguimiento_4m_en: new Date().toISOString() });
+          if (r.enviado) await db.actualizarPorRef(reg.ref, { seguimiento_4m_en: new Date().toISOString() });
         } catch (e) {
           console.error('[seguimiento 4m]', reg.ref, e.message);
         }
@@ -1682,12 +1713,82 @@ async function procesarSeguimientos() {
   }
 }
 
-app.listen(PORT, '0.0.0.0', function () {
-  console.log('Fresatanika escuchando en el puerto ' + PORT);
-  console.log('Datos en: ' + db.DATA_DIR);
-  if (!process.env.SMTP_PASS) console.warn('Aviso: SMTP_PASS no está configurado; las notificaciones por correo están desactivadas.');
-  limpiarPendientes();
-  setInterval(limpiarPendientes, 60 * 60 * 1000);
-  procesarSeguimientos();
-  setInterval(procesarSeguimientos, 6 * 60 * 60 * 1000);
+// Referencias que se limpian durante el apagado ordenado (graceful shutdown).
+let servidor = null;
+let intervaloLimpieza = null;
+let intervaloSeguimientos = null;
+let apagando = false;
+// Promesas de las tareas en segundo plano en curso; el apagado las espera para
+// no cortar una escritura a PostgreSQL a mitad de camino.
+let tareaLimpieza = Promise.resolve();
+let tareaSeguimientos = Promise.resolve();
+
+function lanzarLimpieza() {
+  tareaLimpieza = limpiarPendientes().catch(function (e) { console.error('[limpieza]', e.message); });
+  return tareaLimpieza;
+}
+function lanzarSeguimientos() {
+  tareaSeguimientos = procesarSeguimientos().catch(function (e) { console.error('[seguimiento]', e.message); });
+  return tareaSeguimientos;
+}
+
+async function iniciar() {
+  // 1) Prepara el esquema en PostgreSQL y migra los datos del JSON solo si las
+  //    tablas están vacías (idempotente: no duplica ni sobrescribe nada).
+  await db.init();
+
+  // 2) Levanta el servidor HTTP.
+  servidor = app.listen(PORT, '0.0.0.0', function () {
+    console.log('Fresatanika escuchando en el puerto ' + PORT);
+    console.log('Datos en: ' + db.DATA_DIR);
+    if (!process.env.SMTP_PASS) console.warn('Aviso: SMTP_PASS no está configurado; las notificaciones por correo están desactivadas.');
+    lanzarLimpieza();
+    intervaloLimpieza = setInterval(lanzarLimpieza, 60 * 60 * 1000);
+    lanzarSeguimientos();
+    intervaloSeguimientos = setInterval(lanzarSeguimientos, 6 * 60 * 60 * 1000);
+  });
+}
+
+// Apagado ordenado: deja de aceptar conexiones nuevas, termina las tareas
+// programadas y cierra el pool de PostgreSQL. Permite actualizaciones sin
+// downtime (rolling update) con varias instancias detrás del balanceador.
+async function apagar(senal) {
+  if (apagando) return;
+  apagando = true;
+  console.log('[apagado] Señal ' + senal + ' recibida; cerrando ordenadamente...');
+  if (intervaloLimpieza) clearInterval(intervaloLimpieza);
+  if (intervaloSeguimientos) clearInterval(intervaloSeguimientos);
+
+  const cerrarHttp = new Promise(function (resolve) {
+    if (!servidor) return resolve();
+    servidor.close(function () { resolve(); });
+  });
+  // Si algo se queda colgado, se fuerza la salida a los 10 s.
+  const limite = setTimeout(function () {
+    console.error('[apagado] Tiempo de espera agotado; salida forzada.');
+    process.exit(1);
+  }, 10000);
+  limite.unref();
+
+  try {
+    await cerrarHttp;
+    // Espera a que terminen las tareas en segundo plano ya en curso antes de
+    // cerrar el pool, para no cortar una escritura a mitad.
+    await Promise.allSettled([tareaLimpieza, tareaSeguimientos]);
+    await db.cerrar();
+    console.log('[apagado] Cierre completo.');
+    clearTimeout(limite);
+    process.exit(0);
+  } catch (e) {
+    console.error('[apagado]', e.message);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', function () { apagar('SIGTERM'); });
+process.on('SIGINT', function () { apagar('SIGINT'); });
+
+iniciar().catch(function (e) {
+  console.error('[inicio] No se pudo arrancar el servidor:', e);
+  process.exit(1);
 });
