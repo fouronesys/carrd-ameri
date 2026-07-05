@@ -289,7 +289,11 @@
       '.fc-promo::before{content:"";position:absolute;top:-70px;left:50%;width:220px;height:220px;transform:translateX(-50%);background:radial-gradient(circle,rgba(240,163,195,0.28) 0%,rgba(240,163,195,0) 68%);pointer-events:none;}',
       '.fc-promo-close{position:absolute;top:12px;right:14px;z-index:2;background:none;border:none;color:#c9a9ba;font-size:24px;line-height:1;cursor:pointer;padding:2px 6px;transition:color .15s ease;}',
       '.fc-promo-close:hover{color:#F0A3C3;}',
-      '.fc-promo-badge{position:relative;z-index:1;width:76px;height:76px;margin:0 auto 16px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#fff 0%,#F6B6D0 30%,#EC8FB6 56%,#7D3754 100%);box-shadow:0 0 22px 5px rgba(240,163,195,0.55),0 0 48px 14px rgba(156,76,109,0.4);display:flex;align-items:center;justify-content:center;font-size:34px;animation:fcRitualPulse 2s ease-in-out infinite;}',
+      '.fc-promo-badge{position:relative;z-index:1;width:88px;height:88px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;animation:fcMoonFloat 6s ease-in-out infinite;}',
+      '.fc-promo-badge::before{content:"";position:absolute;inset:4px;border-radius:50%;background:radial-gradient(circle at 50% 45%,rgba(246,182,208,0.5) 0%,rgba(240,163,195,0.16) 52%,rgba(240,163,195,0) 72%);filter:blur(3px);animation:fcMoonGlow 5s ease-in-out infinite;}',
+      '.fc-promo-badge svg{position:relative;z-index:1;filter:drop-shadow(0 0 9px rgba(240,163,195,0.55));}',
+      '@keyframes fcMoonFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-6px);}}',
+      '@keyframes fcMoonGlow{0%,100%{opacity:.65;transform:scale(1);}50%{opacity:1;transform:scale(1.09);}}',
       '.fc-promo-tit{position:relative;z-index:1;font-size:19px;font-weight:900;color:#F0A3C3;letter-spacing:.02em;margin:0 0 6px;}',
       '.fc-promo-sub{position:relative;z-index:1;font-size:12.5px;color:#d8b6c6;line-height:1.5;margin:0 auto 18px;max-width:300px;}',
       '.fc-promo .fc-benes{position:relative;z-index:1;text-align:left;margin:0 0 20px;}',
@@ -300,7 +304,7 @@
       '.fc-promo-star.s1{top:22px;left:24px;font-size:13px;}',
       '.fc-promo-star.s2{top:60px;right:30px;font-size:16px;animation-delay:.6s;}',
       '.fc-promo-star.s3{bottom:70px;left:34px;font-size:15px;animation-delay:1.1s;}',
-      '@media (prefers-reduced-motion: reduce){.fc-promo-back,.fc-promo{animation:none;opacity:1;transform:none;}.fc-promo-badge,.fc-promo-star{animation:none;}}',
+      '@media (prefers-reduced-motion: reduce){.fc-promo-back,.fc-promo{animation:none;opacity:1;transform:none;}.fc-promo-badge,.fc-promo-badge::before,.fc-promo-star{animation:none;}}',
     ].join('');
     var el = document.createElement('style');
     el.id = 'fresa-cart-css';
@@ -677,7 +681,7 @@
       '<span class="fc-promo-star s1">✦</span>' +
       '<span class="fc-promo-star s2">✧</span>' +
       '<span class="fc-promo-star s3">✦</span>' +
-      '<div class="fc-promo-badge"></div>' +
+      '<div class="fc-promo-badge"><svg width="54" height="54" viewBox="0 0 56 56" aria-hidden="true"><defs><linearGradient id="fcMoonGrad" x1="0.15" y1="0" x2="0.9" y2="1"><stop offset="0" stop-color="#FDE6F0"/><stop offset="0.55" stop-color="#F0A3C3"/><stop offset="1" stop-color="#C86E96"/></linearGradient><mask id="fcMoonMask"><rect width="56" height="56" fill="#000"/><circle cx="26" cy="28" r="20" fill="#fff"/><circle cx="38" cy="23" r="18.5" fill="#000"/></mask></defs><circle cx="28" cy="28" r="22" fill="url(#fcMoonGrad)" mask="url(#fcMoonMask)"/><circle cx="43" cy="16" r="1.8" fill="#FDE6F0"/><circle cx="47" cy="25" r="1.1" fill="#FBD3E4"/></svg></div>' +
       '<div class="fc-promo-tit">Crea tu cuenta gratis</div>' +
       '<div class="fc-promo-sub">Guarda tus consultas y sigue el avance de cada trabajo de cerca.</div>' +
       '<ul class="fc-benes">' + beneficiosHtml() + '</ul>' +
