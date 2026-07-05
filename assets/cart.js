@@ -261,7 +261,7 @@
       /* --- Beneficios de cuenta (modal de auth) --- */
       '.fc-benes{list-style:none;margin:0 0 14px;padding:0;display:flex;flex-direction:column;gap:9px;}',
       '.fc-bene{display:flex;align-items:flex-start;gap:10px;font-size:12px;color:#e0c0cf;line-height:1.4;}',
-      '.fc-bene .em{flex-shrink:0;font-size:15px;line-height:1.2;filter:drop-shadow(0 0 5px rgba(240,163,195,0.6));}',
+      '.fc-bene .em{flex-shrink:0;width:7px;height:7px;margin:6px 3px 0 0;background:linear-gradient(145deg,#F6B6D0,#EC8FB6);transform:rotate(45deg);border-radius:1px;box-shadow:0 0 6px rgba(240,163,195,0.6);}',
       '.fc-bene b{color:#F0A3C3;font-weight:700;}',
       '.fc-benes-tit{font-size:12px;font-weight:800;color:#F0A3C3;letter-spacing:.02em;margin:2px 0 11px;}',
       /* --- Momento ritual (confirmación de pago) --- */
@@ -490,7 +490,7 @@
 
     var html =
       '<div class="fc-panel">' +
-      '<div class="fc-head"><h3>🛒 Tu carrito</h3><button class="fc-x" id="fc-close">×</button></div>' +
+      '<div class="fc-head"><h3>Tu carrito</h3><button class="fc-x" id="fc-close">×</button></div>' +
       '<div class="fc-body">' +
       (vacio
         ? '<div class="fc-vacio">Tu carrito está vacío.<br>Agrega servicios desde el catálogo con “＋ Carrito”.</div>'
@@ -529,7 +529,7 @@
   function vistaSesion() {
     var html =
       '<div class="fc-panel">' +
-      '<div class="fc-head"><h3>👤 Mi cuenta</h3><button class="fc-x" id="fc-close">×</button></div>' +
+      '<div class="fc-head"><h3>Mi cuenta</h3><button class="fc-x" id="fc-close">×</button></div>' +
       '<div class="fc-body">' +
       '<p class="fc-sesion">Sesión iniciada como <strong>' + esc(estado.cliente.email) + '</strong>' +
       (estado.cliente.nombre ? ' (' + esc(estado.cliente.nombre) + ')' : '') + '.</p>' +
@@ -596,7 +596,7 @@
     var fotos = (evidencia.fotos || []).map(function (u) {
       return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" alt="Evidencia" loading="lazy"></a>';
     }).join('');
-    return '<div class="fc-ev"><div class="fc-ev-tit">🖼️ Evidencia de tu trabajo</div>' +
+    return '<div class="fc-ev"><div class="fc-ev-tit">Evidencia de tu trabajo</div>' +
       (fotos ? '<div class="fc-ev-fotos">' + fotos + '</div>' : '') +
       (evidencia.notas ? '<p class="fc-ev-notas">' + esc(evidencia.notas) + '</p>' : '') +
       (evidencia.enlace ? '<p class="fc-ev-notas"><a href="' + esc(evidencia.enlace) + '" target="_blank" rel="noopener">Ver evidencia completa →</a></p>' : '') +
@@ -655,10 +655,10 @@
   // Lista de beneficios de tener cuenta (reutilizada en el modal y en la
   // invitación a invitados).
   function beneficiosHtml() {
-    return '<li class="fc-bene"><span class="em">🕯️</span><span><b>Seguimiento en vivo</b> del estado de cada consulta, paso a paso.</span></li>' +
-      '<li class="fc-bene"><span class="em">📸</span><span><b>Historial con evidencias</b> de tus trabajos, guardadas en tu perfil.</span></li>' +
-      '<li class="fc-bene"><span class="em">🔔</span><span><b>Avisos</b> cuando tu pago se confirma y cuando tu trabajo queda listo.</span></li>' +
-      '<li class="fc-bene"><span class="em">🌙</span><span><b>Círculo íntimo:</b> junta sellos por cada consulta y gana una recompensa.</span></li>';
+    return '<li class="fc-bene"><span class="em" aria-hidden="true"></span><span><b>Seguimiento en vivo</b> del estado de cada consulta, paso a paso.</span></li>' +
+      '<li class="fc-bene"><span class="em" aria-hidden="true"></span><span><b>Historial con evidencias</b> de tus trabajos, guardadas en tu perfil.</span></li>' +
+      '<li class="fc-bene"><span class="em" aria-hidden="true"></span><span><b>Avisos</b> cuando tu pago se confirma y cuando tu trabajo queda listo.</span></li>' +
+      '<li class="fc-bene"><span class="em" aria-hidden="true"></span><span><b>Círculo íntimo:</b> junta sellos por cada consulta y gana una recompensa.</span></li>';
   }
 
   // Invitación animada a registrarse, solo para invitados. Aparece una vez por
@@ -677,11 +677,11 @@
       '<span class="fc-promo-star s1">✦</span>' +
       '<span class="fc-promo-star s2">✧</span>' +
       '<span class="fc-promo-star s3">✦</span>' +
-      '<div class="fc-promo-badge">🌙</div>' +
-      '<div class="fc-promo-tit">Únete al Círculo íntimo</div>' +
-      '<div class="fc-promo-sub">Crea tu cuenta gratis y acompaña cada ritual de cerca.</div>' +
+      '<div class="fc-promo-badge"></div>' +
+      '<div class="fc-promo-tit">Crea tu cuenta gratis</div>' +
+      '<div class="fc-promo-sub">Guarda tus consultas y sigue el avance de cada trabajo de cerca.</div>' +
       '<ul class="fc-benes">' + beneficiosHtml() + '</ul>' +
-      '<button class="fc-btn primario fc-promo-cta" id="fc-promo-cta">✧ Crear mi cuenta gratis</button>' +
+      '<button class="fc-btn primario fc-promo-cta" id="fc-promo-cta">Crear mi cuenta</button>' +
       '<a href="#" class="fc-promo-skip" id="fc-promo-skip">Seguir como invitado</a>' +
       '</div>';
     document.body.appendChild(back);
@@ -709,7 +709,7 @@
     var esLogin = modo !== 'registro';
     var html =
       '<div class="fc-panel">' +
-      '<div class="fc-head"><h3>👤 ' + (esLogin ? 'Iniciar sesión' : 'Crear cuenta') + '</h3>' +
+      '<div class="fc-head"><h3>' + (esLogin ? 'Iniciar sesión' : 'Crear cuenta') + '</h3>' +
       '<button class="fc-x" id="fc-close">×</button></div>' +
       '<div class="fc-body">' +
       '<div class="fc-cuenta-tabs">' +
@@ -718,7 +718,7 @@
       '</div>' +
       (esLogin ?
         '<p class="fc-nota">Entra para ver tus consultas, su avance y las evidencias de tus trabajos.</p>' :
-        '<p class="fc-benes-tit">✧ Al crear tu cuenta desbloqueas:</p>' +
+        '<p class="fc-benes-tit">Al crear tu cuenta desbloqueas:</p>' +
         '<ul class="fc-benes">' + beneficiosHtml() + '</ul>') +
       (esLogin ? '' :
         '<label class="fc-label">Nombre</label>' +
@@ -1235,7 +1235,7 @@
     layer.id = 'fc-ritual-layer';
     layer.innerHTML =
       '<div class="fc-ritual">' +
-      '<div class="fc-ritual-orb">🔮</div>' +
+      '<div class="fc-ritual-orb"></div>' +
       '<div class="fc-ritual-tit">' + titulo + '</div>' +
       '<div class="fc-ritual-sub">' + sub + '</div>' +
       '<div class="fc-ritual-dots"><i></i><i></i><i></i></div>' +
