@@ -30,6 +30,15 @@ function firmaIntegridadWompi(referencia, montoCentavos, moneda) {
   return crypto.createHash('sha256').update(cadena).digest('hex');
 }
 
+// Contacto directo por WhatsApp (solo dígitos, con código de país). Se usa en la
+// página de gracias y en "Mis consultas" para acompañar al cliente tras la compra.
+const CONTACTO_WHATSAPP = (process.env.WHATSAPP || '18492472516').replace(/[^0-9]/g, '');
+
+// Programa de fidelidad "Círculo íntimo": cada consulta pagada suma un sello y,
+// al alcanzar el objetivo, el cliente desbloquea una recompensa.
+const FIDELIDAD_OBJETIVO = 5;
+const FIDELIDAD_RECOMPENSA = 'Una lectura corta de regalo ✦';
+
 // Adelanto (urgencia): recargo fijo para entrega en un máximo de 2 días.
 // Debe coincidir con el valor mostrado en el catálogo y en assets/wompi.js.
 const ADELANTO_COP = 28000;
@@ -392,6 +401,85 @@ function clientePublico(cliente) {
   };
 }
 
+// Evidencia visible para el dueño del agendamiento (fotos + notas + enlace
+// público). Devuelve null si aún no hay evidencia cargada.
+function evidenciaPublica(reg, baseUrl) {
+  if (!reg || !reg.evidencia_en || !reg.evidencia_token) return null;
+  const fotos = (Array.isArray(reg.evidencia_fotos) ? reg.evidencia_fotos : []).map(function (nombre) {
+    return baseUrl + '/evidencia-foto/' + encodeURIComponent(reg.ref) + '/' + reg.evidencia_token + '/' + encodeURIComponent(nombre);
+  });
+  return {
+    fotos: fotos,
+    notas: reg.evidencia_notas || '',
+    enlace: baseUrl + '/evidencia/' + encodeURIComponent(reg.ref) + '/' + reg.evidencia_token,
+    en: reg.evidencia_en,
+  };
+}
+
+// Construye el historial "Mis consultas" del cliente: agrupa los agendamientos
+// por pedido (o por referencia individual), resume estado, trabajo realizado y
+// evidencias, y calcula el progreso del programa de fidelidad "Círculo íntimo".
+async function construirConsultas(clienteId, baseUrl) {
+  const registros = await db.listarPorCliente(clienteId);
+  const grupos = [];
+  const indicePorClave = {};
+
+  registros.forEach(function (reg) {
+    const clave = reg.pedido_ref || reg.ref;
+    let grupo = indicePorClave[clave];
+    if (!grupo) {
+      grupo = {
+        clave: clave,
+        pedido_ref: reg.pedido_ref || '',
+        ref: reg.ref,
+        creado_en: reg.creado_en || '',
+        estado: reg.estado || 'agendado',
+        metodo: reg.metodo || '',
+        total_cop: reg.pedido_ref ? (parseInt(reg.pedido_total_cop, 10) || 0) : (parseInt(reg.precio_cop, 10) || 0),
+        servicios: [],
+      };
+      indicePorClave[clave] = grupo;
+      grupos.push(grupo);
+    }
+    grupo.servicios.push({
+      producto: reg.producto || 'Servicio',
+      precio_texto: reg.precio_texto || ('$' + (reg.precio_cop || 0).toLocaleString('es-CO') + ' COP'),
+      trabajo_hecho: !!reg.trabajo_hecho,
+      evidencia: evidenciaPublica(reg, baseUrl),
+    });
+  });
+
+  // Estado y "trabajo realizado" a nivel de grupo: realizado solo cuando TODOS
+  // los servicios del pedido están hechos.
+  grupos.forEach(function (g) {
+    g.trabajo_hecho = g.servicios.length > 0 && g.servicios.every(function (s) { return s.trabajo_hecho; });
+    g.tiene_evidencia = g.servicios.some(function (s) { return s.evidencia; });
+  });
+
+  // Fidelidad: un sello por cada servicio con el pago confirmado (agendado).
+  const sellos = registros.filter(function (r) { return r.estado === 'agendado'; }).length;
+  const objetivo = FIDELIDAD_OBJETIVO;
+  const desbloqueada = sellos >= objetivo;
+  const fidelidad = {
+    sellos: sellos,
+    objetivo: objetivo,
+    faltan: Math.max(0, objetivo - sellos),
+    desbloqueada: desbloqueada,
+    recompensa: FIDELIDAD_RECOMPENSA,
+  };
+
+  // Persiste el progreso en el registro del cliente (para tenerlo a mano y poder
+  // reconocer la recompensa desde el panel si hiciera falta).
+  try {
+    await db.actualizarClientePorId(clienteId, {
+      sellos: sellos,
+      recompensa_desbloqueada: desbloqueada,
+    });
+  } catch (e) { /* el progreso es informativo; un fallo aquí no rompe la vista */ }
+
+  return { grupos: grupos, fidelidad: fidelidad };
+}
+
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -442,6 +530,7 @@ app.get('/api/config', function (req, res) {
   res.json({
     wompiPublicKey: WOMPI_PUBLIC_KEY,
     comision: { pct: WOMPI_COM_PCT, fijo: WOMPI_COM_FIJO, iva: WOMPI_IVA },
+    whatsapp: CONTACTO_WHATSAPP,
   });
 });
 
@@ -557,6 +646,20 @@ app.put('/api/carrito', mismoOrigen, async function (req, res) {
   const actualizado = await db.guardarCarritoCliente(sesion.id, carrito);
   if (!actualizado) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada.' });
   res.json({ ok: true, carrito: actualizado.carrito || [] });
+});
+
+// Historial "Mis consultas" del cliente autenticado: pedidos con su estado,
+// evidencias y el progreso del programa de fidelidad.
+app.get('/api/cuenta/consultas', async function (req, res) {
+  const sesion = clienteSesion(req);
+  if (!sesion) return res.status(401).json({ ok: false, error: 'Inicia sesión para ver tus consultas.' });
+  try {
+    const datos = await construirConsultas(sesion.id, baseUrlDe(req));
+    res.json({ ok: true, grupos: datos.grupos, fidelidad: datos.fidelidad });
+  } catch (e) {
+    console.error('[consultas]', e.message);
+    res.status(500).json({ ok: false, error: 'No se pudieron cargar tus consultas.' });
+  }
 });
 
 /* ---------- Registrar agendamiento (antes de pagar) ---------- */
@@ -862,7 +965,7 @@ app.get('/gracias/:ref', async function (req, res) {
   }
 
   const regActual = (await db.obtenerPorRef(ref)) || registro;
-  res.send(templates.paginaGracias({ estado: estado, reg: regActual }));
+  res.send(templates.paginaGracias({ estado: estado, reg: regActual, whatsapp: CONTACTO_WHATSAPP }));
 });
 
 /* ---------- Checkout combinado del carrito (varios servicios, un solo pago) ---------- */
@@ -1117,6 +1220,7 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
     pedidoRef: pedidoRef,
     total: totalPedido,
     metodo: primero.metodo,
+    whatsapp: CONTACTO_WHATSAPP,
   }));
 });
 

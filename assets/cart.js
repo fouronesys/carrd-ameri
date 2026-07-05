@@ -192,6 +192,53 @@
       '.fc-sesion{font-size:12px;color:#c9a9ba;padding:8px 0;}',
       '.fc-sesion strong{color:#F0A3C3;}',
       '.fc-transfer-info{font-size:11.5px;color:#e0c0cf;line-height:1.5;background:rgba(125,55,84,0.14);border:1px solid rgba(194,167,183,0.25);border-radius:8px;padding:10px 12px;margin-top:8px;}',
+      '.fc-link{background:none;border:none;color:#F0A3C3;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0;text-decoration:underline;}',
+      /* --- Programa de fidelidad "Círculo íntimo" --- */
+      '.fc-fid{background:linear-gradient(135deg,rgba(240,163,195,0.12),rgba(125,55,84,0.14));border:1px solid rgba(240,163,195,0.34);border-radius:12px;padding:14px 15px;margin:0 0 16px;}',
+      '.fc-fid-tit{font-size:13px;font-weight:900;color:#F0A3C3;margin:0 0 3px;letter-spacing:.02em;}',
+      '.fc-fid-sub{font-size:11.5px;color:#d8b6c6;line-height:1.4;margin:0 0 10px;}',
+      '.fc-sellos{display:flex;flex-wrap:wrap;gap:8px;}',
+      '.fc-sello{width:30px;height:30px;border-radius:50%;border:1px dashed rgba(240,163,195,0.5);display:flex;align-items:center;justify-content:center;font-size:14px;color:#9c7788;background:rgba(15,4,10,0.4);}',
+      '.fc-sello.on{border-style:solid;border-color:#F0A3C3;background:linear-gradient(145deg,#F6B6D0,#EC8FB6);color:#3a0a1f;box-shadow:0 0 10px rgba(240,163,195,0.5);}',
+      '.fc-fid-goal{margin-top:10px;font-size:11.5px;font-weight:700;color:#e8c9d8;}',
+      '.fc-fid-goal.win{color:#bfe8cf;}',
+      /* --- Tarjetas de consulta + línea de tiempo --- */
+      '.fc-consulta{background:rgba(125,55,84,0.1);border:1px solid rgba(194,167,183,0.24);border-radius:12px;padding:13px 15px;margin:0 0 12px;}',
+      '.fc-consulta-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:2px;}',
+      '.fc-consulta-ref{font-size:11px;color:#9c7788;}',
+      '.fc-consulta-total{font-size:13px;font-weight:700;color:#F0A3C3;white-space:nowrap;}',
+      '.fc-consulta-svc{font-size:12.5px;color:#e0c0cf;padding:3px 0;}',
+      '.fc-tl{display:flex;justify-content:space-between;align-items:flex-start;gap:4px;margin:12px 0 4px;}',
+      '.fc-tl-paso{flex:1;position:relative;text-align:center;}',
+      '.fc-tl-paso::before{content:"";position:absolute;top:12px;left:-50%;width:100%;height:2px;background:rgba(194,167,183,0.28);z-index:0;}',
+      '.fc-tl-paso:first-child::before{display:none;}',
+      '.fc-tl-paso.hecho::before,.fc-tl-paso.activo::before{background:#F0A3C3;}',
+      '.fc-tl-dot{position:relative;z-index:1;width:26px;height:26px;line-height:24px;margin:0 auto 6px;border-radius:50%;border:1px solid rgba(194,167,183,0.4);background:rgba(125,55,84,0.18);color:#9c7788;font-size:12px;font-weight:700;}',
+      '.fc-tl-paso.hecho .fc-tl-dot{background:#F0A3C3;border-color:#F0A3C3;color:#3a0a1f;}',
+      '.fc-tl-paso.activo .fc-tl-dot{border-color:#F0A3C3;color:#F0A3C3;}',
+      '.fc-tl-paso.fallido .fc-tl-dot{background:rgba(229,123,160,0.2);border-color:#e57ba0;color:#f3b6cd;}',
+      '.fc-tl-label{font-size:9.5px;line-height:1.25;color:#9c7788;}',
+      '.fc-tl-paso.hecho .fc-tl-label,.fc-tl-paso.activo .fc-tl-label{color:#e8c9d8;}',
+      '.fc-ev{margin-top:10px;padding-top:10px;border-top:1px dashed rgba(194,167,183,0.2);}',
+      '.fc-ev-tit{font-size:11px;font-weight:700;color:#F0A3C3;margin:0 0 6px;}',
+      '.fc-ev-fotos{display:flex;flex-wrap:wrap;gap:6px;}',
+      '.fc-ev-fotos a{display:block;width:46px;height:46px;border-radius:8px;overflow:hidden;border:1px solid rgba(240,163,195,0.35);}',
+      '.fc-ev-fotos img{width:100%;height:100%;object-fit:cover;display:block;}',
+      '.fc-ev-notas{font-size:11.5px;color:#d8b6c6;line-height:1.4;margin:6px 0 0;}',
+      /* --- Checkout por pasos --- */
+      '.fc-stepper{display:flex;align-items:center;gap:6px;margin:0 0 16px;}',
+      '.fc-step-dot{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;}',
+      '.fc-step-dot::before{content:"";position:absolute;top:12px;left:-50%;width:100%;height:2px;background:rgba(194,167,183,0.28);z-index:0;}',
+      '.fc-step-dot:first-child::before{display:none;}',
+      '.fc-step-dot.hecho::before,.fc-step-dot.activo::before{background:#F0A3C3;}',
+      '.fc-step-num{position:relative;z-index:1;width:26px;height:26px;line-height:24px;text-align:center;border-radius:50%;border:1px solid rgba(194,167,183,0.4);background:rgba(125,55,84,0.2);color:#c9a9ba;font-size:12px;font-weight:700;transition:all .2s ease;}',
+      '.fc-step-dot.activo .fc-step-num{border-color:#F0A3C3;color:#fff;background:#7D3754;}',
+      '.fc-step-dot.hecho .fc-step-num{border-color:#F0A3C3;background:#F0A3C3;color:#3a0a1f;}',
+      '.fc-step-cap{font-size:9.5px;color:#9c7788;text-align:center;line-height:1.2;}',
+      '.fc-step-dot.activo .fc-step-cap,.fc-step-dot.hecho .fc-step-cap{color:#e8c9d8;}',
+      '.fc-step{animation:fcStepIn .32s cubic-bezier(0.22,1,0.36,1);}',
+      '@keyframes fcStepIn{0%{opacity:0;transform:translateX(14px);}100%{opacity:1;transform:translateX(0);}}',
+      '@media (prefers-reduced-motion: reduce){.fc-step{animation:none;}}',
       /* --- Animación "añadir al carrito" (estilo místico del catálogo) --- */
       '.fc-orb{position:fixed;left:0;top:0;width:30px;height:30px;z-index:10001;pointer-events:none;display:flex;align-items:center;justify-content:center;border-radius:50%;background:radial-gradient(circle at 34% 28%,#fff 0%,#F6B6D0 32%,#EC8FB6 58%,#7D3754 100%);box-shadow:0 0 12px 3px rgba(240,163,195,0.75),0 0 28px 9px rgba(156,76,109,0.45);will-change:transform,opacity;}',
       '.fc-orb span{color:#fff;font-size:15px;line-height:1;text-shadow:0 0 7px rgba(255,255,255,0.9);}',
@@ -445,12 +492,121 @@
       (estado.cliente.nombre ? ' (' + esc(estado.cliente.nombre) + ')' : '') + '.</p>' +
       '<p class="fc-nota">Tu carrito se guarda en tu cuenta y estará disponible cuando vuelvas a iniciar sesión.</p>' +
       '</div>' +
-      '<div class="fc-foot"><button class="fc-btn sec" id="fc-logout">Cerrar sesión</button></div>' +
+      '<div class="fc-foot">' +
+      '<button class="fc-btn primario" id="fc-consultas">✦ Mis consultas</button>' +
+      '<button class="fc-btn sec" id="fc-logout">Cerrar sesión</button>' +
+      '</div>' +
       '</div>';
     refs.overlay.innerHTML = html;
     refs.overlay.classList.add('activo');
     document.getElementById('fc-close').addEventListener('click', cerrar);
+    document.getElementById('fc-consultas').addEventListener('click', vistaConsultas);
     document.getElementById('fc-logout').addEventListener('click', hacerLogout);
+  }
+
+  /* ---------- Vista "Mis consultas" (historial + fidelidad + evidencias) ---------- */
+  // Línea de tiempo de un pedido a partir del estado de la base de datos y de si
+  // el trabajo ya fue realizado.
+  function timelineHtml(estadoPedido, trabajoHecho) {
+    var rechazado = estadoPedido === 'rechazado';
+    var pagado = estadoPedido === 'agendado';
+    var enRevision = estadoPedido === 'pendiente_verificacion';
+    var pasos = [
+      { label: 'Pedido recibido', clase: 'hecho', icono: '\u2713' },
+      {
+        label: rechazado ? 'Pago rechazado' : (pagado ? 'Pago confirmado' : (enRevision ? 'Comprobante en revisión' : 'Esperando pago')),
+        clase: rechazado ? 'fallido' : (pagado ? 'hecho' : (enRevision ? 'activo' : 'pendiente')),
+        icono: rechazado ? '\u2715' : (pagado ? '\u2713' : '2'),
+      },
+      {
+        label: trabajoHecho ? 'Trabajo realizado' : 'Trabajo por realizar',
+        clase: trabajoHecho ? 'hecho' : (pagado ? 'activo' : 'pendiente'),
+        icono: trabajoHecho ? '\u273f' : '3',
+      },
+    ];
+    return '<div class="fc-tl">' + pasos.map(function (p) {
+      return '<div class="fc-tl-paso ' + p.clase + '"><div class="fc-tl-dot">' + p.icono + '</div>' +
+        '<div class="fc-tl-label">' + esc(p.label) + '</div></div>';
+    }).join('') + '</div>';
+  }
+
+  function bloqueFidelidad(fid) {
+    if (!fid) return '';
+    var total = Math.max(fid.objetivo, fid.sellos);
+    var sellos = '';
+    for (var i = 0; i < total; i++) {
+      var on = i < fid.sellos;
+      sellos += '<div class="fc-sello' + (on ? ' on' : '') + '">' + (on ? '\u2726' : (i + 1)) + '</div>';
+    }
+    var meta = fid.desbloqueada
+      ? '<div class="fc-fid-goal win">\u2728 ¡Desbloqueaste tu recompensa! ' + esc(fid.recompensa) + '</div>'
+      : '<div class="fc-fid-goal">Te ' + (fid.faltan === 1 ? 'falta' : 'faltan') + ' <b>' + fid.faltan + '</b> ' +
+        (fid.faltan === 1 ? 'consulta' : 'consultas') + ' para tu recompensa: ' + esc(fid.recompensa) + '</div>';
+    return '<div class="fc-fid">' +
+      '<div class="fc-fid-tit">\u2726 Círculo íntimo</div>' +
+      '<div class="fc-fid-sub">Suma un sello por cada consulta confirmada y desbloquea un regalo.</div>' +
+      '<div class="fc-sellos">' + sellos + '</div>' + meta + '</div>';
+  }
+
+  function evidenciaHtml(evidencia) {
+    if (!evidencia) return '';
+    var fotos = (evidencia.fotos || []).map(function (u) {
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" alt="Evidencia" loading="lazy"></a>';
+    }).join('');
+    return '<div class="fc-ev"><div class="fc-ev-tit">🖼️ Evidencia de tu trabajo</div>' +
+      (fotos ? '<div class="fc-ev-fotos">' + fotos + '</div>' : '') +
+      (evidencia.notas ? '<p class="fc-ev-notas">' + esc(evidencia.notas) + '</p>' : '') +
+      (evidencia.enlace ? '<p class="fc-ev-notas"><a href="' + esc(evidencia.enlace) + '" target="_blank" rel="noopener">Ver evidencia completa →</a></p>' : '') +
+      '</div>';
+  }
+
+  function tarjetaConsulta(g) {
+    var svcs = (g.servicios || []).map(function (s) {
+      return '<div class="fc-consulta-svc">• ' + esc(s.producto) +
+        (s.trabajo_hecho ? ' <span style="color:#bfe8cf">✓ realizado</span>' : '') +
+        '<span style="float:right;color:#c9a9ba">' + esc(s.precio_texto) + '</span></div>';
+    }).join('');
+    var evid = (g.servicios || []).map(function (s) { return evidenciaHtml(s.evidencia); }).join('');
+    var refTxt = g.pedido_ref ? ('Pedido ' + g.pedido_ref) : ('Ref ' + g.ref);
+    return '<div class="fc-consulta">' +
+      '<div class="fc-consulta-top"><span class="fc-consulta-ref">' + esc(refTxt) + '</span>' +
+      '<span class="fc-consulta-total">' + fmtCOP(g.total_cop) + '</span></div>' +
+      svcs +
+      timelineHtml(g.estado, g.trabajo_hecho) +
+      evid +
+      '</div>';
+  }
+
+  function vistaConsultas() {
+    var html =
+      '<div class="fc-panel ancho">' +
+      '<div class="fc-head"><h3>✦ Mis consultas</h3><button class="fc-x" id="fc-close">×</button></div>' +
+      '<div class="fc-body" id="fc-consultas-body">' +
+      '<div class="fc-vacio">Cargando tus consultas…</div>' +
+      '</div>' +
+      '<div class="fc-foot"><button class="fc-btn sec" id="fc-volver-cuenta">← Volver a mi cuenta</button></div>' +
+      '</div>';
+    refs.overlay.innerHTML = html;
+    refs.overlay.classList.add('activo');
+    document.getElementById('fc-close').addEventListener('click', cerrar);
+    document.getElementById('fc-volver-cuenta').addEventListener('click', vistaSesion);
+
+    fetch('/api/cuenta/consultas').then(parseJson).then(function (res) {
+      if (!res.ok || !res.data.ok) throw new Error(res.data.error || 'No se pudieron cargar tus consultas.');
+      var cont = document.getElementById('fc-consultas-body');
+      if (!cont) return;
+      var grupos = res.data.grupos || [];
+      var cuerpo = bloqueFidelidad(res.data.fidelidad);
+      if (grupos.length === 0) {
+        cuerpo += '<div class="fc-vacio">Todavía no tienes consultas.<br>Cuando hagas tu primera compra aparecerá aquí con su estado y evidencias.</div>';
+      } else {
+        cuerpo += grupos.map(tarjetaConsulta).join('');
+      }
+      cont.innerHTML = cuerpo;
+    }).catch(function (e) {
+      var cont = document.getElementById('fc-consultas-body');
+      if (cont) cont.innerHTML = '<div class="fc-msg err" style="display:block">' + esc(e.message) + '</div>';
+    });
   }
 
   function vistaAuth(modo) {
@@ -610,20 +766,25 @@
     var neto = totalNeto();
     var estWompi = conComisionWompi(neto);
 
-    var html =
-      '<div class="fc-panel ancho">' +
-      '<div class="fc-head"><h3>Finalizar compra</h3><button class="fc-x" id="fc-close">×</button></div>' +
-      '<div class="fc-body">' +
+    var stepperHtml =
+      '<div class="fc-stepper">' +
+      '<div class="fc-step-dot" data-dot="1"><div class="fc-step-num">1</div><div class="fc-step-cap">Contacto</div></div>' +
+      '<div class="fc-step-dot" data-dot="2"><div class="fc-step-num">2</div><div class="fc-step-cap">Servicios</div></div>' +
+      '<div class="fc-step-dot" data-dot="3"><div class="fc-step-num">3</div><div class="fc-step-cap">Pago</div></div>' +
+      '</div>';
+
+    var paso1 =
       '<label class="fc-label">Tu nombre y apellido <span class="fc-req">*</span></label>' +
       '<input class="fc-input" id="fc-cliente-nombre" type="text" placeholder="Tu nombre completo"' +
       (estado.cliente && estado.cliente.nombre ? ' value="' + esc(estado.cliente.nombre) + '"' : '') + '>' +
       (hayNormal
         ? '<label class="fc-label">WhatsApp o red social <span class="fc-req">*</span></label>' +
           '<input class="fc-input" id="fc-contacto" type="text" placeholder="Para entregarte la evidencia">'
-        : '') +
-      '<div style="height:6px"></div>' +
-      mismosHtml +
-      bloques +
+        : '');
+
+    var paso2 = mismosHtml + bloques;
+
+    var paso3 =
       '<label class="fc-label">Método de pago</label>' +
       '<div class="fc-metodos">' +
       '<div class="fc-metodo sel" data-metodo="wompi">Tarjeta / Wompi</div>' +
@@ -631,20 +792,25 @@
       '</div>' +
       '<div id="fc-transfer-box"></div>' +
       '<div class="fc-total"><span>Total estimado</span><span id="fc-total-est">' + fmtCOP(estWompi) + '</span></div>' +
-      '<p class="fc-nota">El servidor recalcula y confirma el total al procesar el pago.</p>' +
+      '<p class="fc-nota">El servidor recalcula y confirma el total al procesar el pago.</p>';
+
+    var html =
+      '<div class="fc-panel ancho">' +
+      '<div class="fc-head"><h3>Finalizar compra</h3><button class="fc-x" id="fc-close">×</button></div>' +
+      '<div class="fc-body">' +
+      stepperHtml +
+      '<div class="fc-step" id="fc-paso-1">' + paso1 + '</div>' +
+      '<div class="fc-step" id="fc-paso-2" style="display:none">' + paso2 + '</div>' +
+      '<div class="fc-step" id="fc-paso-3" style="display:none">' + paso3 + '</div>' +
       '<div class="fc-msg" id="fc-checkout-msg"></div>' +
       '</div>' +
-      '<div class="fc-foot">' +
-      '<button class="fc-btn primario" id="fc-pagar">Pagar ' + fmtCOP(estWompi) + '</button>' +
-      '<button class="fc-btn sec" id="fc-volver">← Volver al carrito</button>' +
-      '</div></div>';
+      '<div class="fc-foot" id="fc-checkout-foot"></div>' +
+      '</div>';
 
     refs.overlay.innerHTML = html;
     refs.overlay.classList.add('activo');
 
     document.getElementById('fc-close').addEventListener('click', cerrar);
-    document.getElementById('fc-volver').addEventListener('click', abrirPanel);
-    document.getElementById('fc-pagar').addEventListener('click', enviarCheckout);
 
     var chkMismos = document.getElementById('fc-mismos');
     if (chkMismos) {
@@ -662,7 +828,110 @@
         actualizarTotalYTransfer(neto);
       });
     });
-    actualizarTotalYTransfer(neto);
+
+    // Con solo servicios sin datos (adelanto/extra) el paso "Servicios" se omite.
+    var hayServiciosConDatos = estado.items.some(function (it) { return !it.es_adelanto; });
+    pasoCheckout = 1;
+    mostrarPasoCheckout(1, neto, hayServiciosConDatos);
+  }
+
+  // Estado y navegación del checkout por pasos (1 Contacto → 2 Servicios → 3 Pago).
+  var pasoCheckout = 1;
+
+  function mostrarPasoCheckout(n, neto, hayServiciosConDatos) {
+    pasoCheckout = n;
+    [1, 2, 3].forEach(function (i) {
+      var sec = document.getElementById('fc-paso-' + i);
+      if (sec) sec.style.display = (i === n) ? '' : 'none';
+      // Reinicia la animación de entrada al mostrar el paso activo.
+      if (sec && i === n) { sec.style.animation = 'none'; void sec.offsetWidth; sec.style.animation = ''; }
+      var dot = refs.overlay.querySelector('.fc-step-dot[data-dot="' + i + '"]');
+      if (dot) {
+        dot.classList.toggle('activo', i === n);
+        dot.classList.toggle('hecho', i < n);
+      }
+    });
+    msgCheckout('', 'ok');
+    var msgEl = document.getElementById('fc-checkout-msg');
+    if (msgEl) msgEl.className = 'fc-msg';
+    renderFootCheckout(neto, hayServiciosConDatos);
+    if (n === 3) actualizarTotalYTransfer(neto);
+  }
+
+  function renderFootCheckout(neto, hayServiciosConDatos) {
+    var foot = document.getElementById('fc-checkout-foot');
+    if (!foot) return;
+    var n = pasoCheckout;
+    var total = metodoCheckout === 'transferencia' ? neto : conComisionWompi(neto);
+    if (n === 3) {
+      foot.innerHTML =
+        '<button class="fc-btn primario" id="fc-pagar">' +
+        (metodoCheckout === 'transferencia' ? 'Confirmar ' : 'Pagar ') + fmtCOP(total) + '</button>' +
+        '<button class="fc-btn sec" id="fc-atras">← Atrás</button>';
+      document.getElementById('fc-pagar').addEventListener('click', enviarCheckout);
+      document.getElementById('fc-atras').addEventListener('click', function () {
+        mostrarPasoCheckout(hayServiciosConDatos ? 2 : 1, neto, hayServiciosConDatos);
+      });
+    } else {
+      foot.innerHTML =
+        '<button class="fc-btn primario" id="fc-siguiente">Siguiente →</button>' +
+        '<button class="fc-btn sec" id="fc-atras">' + (n === 1 ? '← Volver al carrito' : '← Atrás') + '</button>';
+      document.getElementById('fc-siguiente').addEventListener('click', function () {
+        avanzarCheckout(neto, hayServiciosConDatos);
+      });
+      document.getElementById('fc-atras').addEventListener('click', function () {
+        if (n === 1) abrirPanel();
+        else mostrarPasoCheckout(1, neto, hayServiciosConDatos);
+      });
+    }
+  }
+
+  function avanzarCheckout(neto, hayServiciosConDatos) {
+    if (pasoCheckout === 1) {
+      if (!validarPaso1()) return;
+      mostrarPasoCheckout(hayServiciosConDatos ? 2 : 3, neto, hayServiciosConDatos);
+    } else if (pasoCheckout === 2) {
+      if (!validarPaso2()) return;
+      mostrarPasoCheckout(3, neto, hayServiciosConDatos);
+    }
+  }
+
+  // Paso 1: nombre siempre; contacto solo si hay servicios que requieren datos.
+  function validarPaso1() {
+    var nombre = (document.getElementById('fc-cliente-nombre') || {}).value || '';
+    if (!nombre.trim()) { msgCheckout('Escribe tu nombre y apellido.'); return false; }
+    var contactoEl = document.getElementById('fc-contacto');
+    if (contactoEl && !contactoEl.value.trim()) { msgCheckout('Escribe tu WhatsApp o red social.'); return false; }
+    return true;
+  }
+
+  // Paso 2: valida los datos por servicio (misma lógica que el envío final).
+  function validarPaso2() {
+    var idxNormales = [];
+    estado.items.forEach(function (it, i) { if (!it.es_extra && !it.es_adelanto) idxNormales.push(i); });
+    var refIdx = idxNormales.length ? idxNormales[0] : -1;
+    var mismos = idxNormales.length >= 2 && !!(document.getElementById('fc-mismos') || {}).checked;
+    for (var i = 0; i < estado.items.length; i++) {
+      var it = estado.items[i];
+      if (it.es_adelanto) continue;
+      var srcIdx = (mismos && !it.es_extra) ? refIdx : i;
+      var bloque = refs.overlay.querySelector('.fc-svc[data-svc="' + srcIdx + '"]');
+      if (!bloque) continue;
+      var val = {}; var hasFoto = false;
+      Array.prototype.forEach.call(bloque.querySelectorAll('[data-campo]'), function (c) {
+        var campo = c.getAttribute('data-campo');
+        if (campo === 'foto') { if (c.files && c.files[0]) hasFoto = true; }
+        else val[campo] = (c.value || '').trim();
+      });
+      if (it.es_extra) {
+        if (!val.info_extra) { msgCheckout('Indica a cuál(es) hechizo(s) se aplica: ' + it.nombre + '.'); return false; }
+      } else {
+        if (!val.objetivo_nombre && !val.objetivo_fecha_nac && !hasFoto) {
+          msgCheckout('Faltan los datos de la persona para: ' + it.nombre + '.'); return false;
+        }
+      }
+    }
+    return true;
   }
 
   function actualizarTotalYTransfer(neto) {
