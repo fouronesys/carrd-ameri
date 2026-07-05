@@ -204,6 +204,10 @@ function codigoDescuentoPara(clave, codigoStr) {
     encontrado = c;
   });
   if (!encontrado) return { pct: 0, valido: false, codigo: '' };
+  const limite = Number(encontrado.limite_usos) || 0;
+  if (limite > 0 && db.contarUsosCodigo(encontrado.codigo) >= limite) {
+    return { pct: 0, valido: false, codigo: '', agotado: true };
+  }
   return { pct: Number(encontrado.porcentaje) || 0, valido: true, codigo: encontrado.codigo };
 }
 
@@ -449,7 +453,10 @@ app.post('/api/codigo', function (req, res) {
   }
   const cod = codigoDescuentoPara(clave, codigo);
   if (!cod.valido || cod.pct <= 0) {
-    return res.status(400).json({ ok: false, error: 'El código no es válido o no aplica a este hechizo.' });
+    const msg = cod.agotado
+      ? 'Este código ya alcanzó su límite de usos.'
+      : 'El código no es válido o no aplica a este hechizo.';
+    return res.status(400).json({ ok: false, error: msg });
   }
   res.json({ ok: true, porcentaje: cod.pct });
 });
@@ -1167,7 +1174,9 @@ app.get('/admin', function (req, res) {
       baseUrl: baseUrlDe(req),
       hechizos: HECHIZOS.lista,
       promos: db.listarPromos(),
-      codigos: db.listarCodigos(),
+      codigos: db.listarCodigos().map(function (c) {
+        return Object.assign({}, c, { usos: db.contarUsosCodigo(c.codigo) });
+      }),
       usuario: req.session.usuario || '',
       usuarioId: req.session.usuario_id || '',
       usuarios: esAdmin ? db.listarUsuariosAdmin() : [],
@@ -1500,6 +1509,7 @@ app.post('/admin/codigo', mismoOrigen, requiereAdmin, soloAdmin, function (req, 
   if (!codigo || !pct || pct < 1 || pct > 100 || !desde || !hasta) {
     return res.status(400).send('Datos del código incompletos.');
   }
+  const limiteUsos = Math.max(0, parseInt(b.limite_usos, 10) || 0);
   db.crearCodigo({
     id: 'cod-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
     codigo: codigo,
@@ -1507,6 +1517,7 @@ app.post('/admin/codigo', mismoOrigen, requiereAdmin, soloAdmin, function (req, 
     desde: desde,
     hasta: hasta,
     objetivo: leerObjetivo(b),
+    limite_usos: limiteUsos,
     activo: true,
     creado_en: new Date().toISOString(),
   });
