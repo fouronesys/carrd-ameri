@@ -42,6 +42,7 @@ async function main() {
 
   console.log('');
   console.log('Pagos recuperados y agendados en esta pasada: ' + res.agendados);
+  console.log('Pagos fallidos marcados como rechazados: ' + (res.rechazados || 0));
   if (res.huboFallos) {
     console.warn(
       'ATENCIÓN: alguna consulta a Wompi no se pudo resolver (API caída, red, ' +

@@ -586,7 +586,21 @@ async function confirmarPagoRef(ref, txId) {
     await notificarEstadoCliente(ref, 'agendado');
     return { encontrado: true, agendado: true };
   }
-  if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+  // Pago fallido definitivo (rechazado, error o anulado): se marca como
+  // 'rechazado' para que NO quede como "pendiente_pago" (donde, además, la
+  // limpieza de 48h lo borraría). Se exige refOk para no marcar el registro por
+  // una transacción ajena. No bloquea un reintento posterior: si más tarde llega
+  // una transacción APROBADA con la misma referencia, el guardado de arriba
+  // permite pasar de 'rechazado' a 'agendado'.
+  if (tx && refOk && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+    if (registro.estado !== 'rechazado') {
+      await db.actualizarPorRef(ref, {
+        estado: 'rechazado',
+        wompi_tx: txId,
+        wompi_estado: tx.status,
+        pago_rechazado_en: new Date().toISOString(),
+      });
+    }
     return { encontrado: true, rechazado: true };
   }
   return { encontrado: true };
@@ -628,7 +642,17 @@ async function confirmarPagoPedido(pedidoRef, txId) {
     await notificarEstadoPedido(pedidoRef, 'agendado');
     return { encontrado: true, agendado: true, registros: registros };
   }
-  if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+  // Pago fallido definitivo del pedido: se marca 'rechazado' (ver confirmarPagoRef).
+  if (tx && refOk && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+    if (primero.estado !== 'rechazado') {
+      await db.actualizarPorPedido(pedidoRef, {
+        estado: 'rechazado',
+        wompi_tx: txId,
+        wompi_estado: tx.status,
+        pago_rechazado_en: new Date().toISOString(),
+      });
+      registros = await db.obtenerPorPedido(pedidoRef);
+    }
     return { encontrado: true, rechazado: true, registros: registros };
   }
   return { encontrado: true, registros: registros };
@@ -1041,6 +1065,7 @@ app.get('/gracias/:ref', async function (req, res) {
   let estado;
   if (registro.estado === 'agendado') estado = 'agendado';
   else if (registro.estado === 'pendiente_verificacion') estado = 'comprobante_recibido';
+  else if (registro.estado === 'rechazado') estado = 'rechazado';
   else estado = 'verificando';
 
   if (txId && registro.estado !== 'agendado' && registro.estado !== 'pendiente_verificacion') {
@@ -1265,9 +1290,10 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
   let estado;
   if (primero.estado === 'agendado') estado = 'agendado';
   else if (primero.estado === 'pendiente_verificacion') estado = 'comprobante_recibido';
+  else if (primero.estado === 'rechazado') estado = 'rechazado';
   else estado = 'verificando';
 
-  if (txId && primero.estado === 'pendiente_pago') {
+  if (txId && primero.estado !== 'agendado' && primero.estado !== 'pendiente_verificacion') {
     try {
       const r = await confirmarPagoPedido(pedidoRef, txId);
       if (r.agendado || r.yaAgendado) estado = 'agendado';
@@ -1907,6 +1933,25 @@ async function agendarDesdeTransacciones(referencia, txs, esPedido) {
   return false;
 }
 
+// Marca 'rechazado' un pendiente cuyo(s) intento(s) de pago terminaron en fallo
+// definitivo. Solo lo hace si NINGÚN intento fue aprobado ni sigue pendiente:
+// así no descarta un pago que aún podría completarse (PENDING) ni uno aprobado
+// con monto anómalo (ese se deja para revisión manual). Reutiliza confirmarPago*,
+// que reverifica la transacción contra Wompi antes de marcar nada.
+async function marcarRechazadoDesdeTransacciones(referencia, txs, esPedido) {
+  const estados = txs.map(function (t) { return t && t.status; });
+  const hayAprobada = estados.indexOf('APPROVED') !== -1;
+  const hayPendiente = estados.indexOf('PENDING') !== -1;
+  const fallida = txs.find(function (t) {
+    return t && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(t.status) !== -1;
+  });
+  if (hayAprobada || hayPendiente || !fallida) return false;
+  const r = esPedido
+    ? await confirmarPagoPedido(referencia, fallida.id)
+    : await confirmarPagoRef(referencia, fallida.id);
+  return !!r.rechazado;
+}
+
 // Guarda la promesa de la pasada en curso (no un booleano): si otra tarea llama
 // mientras se ejecuta, recibe la MISMA promesa y espera a que termine de verdad,
 // para que la limpieza no borre antes de que la reconciliación complete.
@@ -1919,11 +1964,11 @@ function reconciliarPagosPendientes() {
   return reconciliacionEnCurso;
 }
 
-// Devuelve { agendados, huboFallos }. huboFallos=true si alguna consulta a Wompi
-// no se pudo resolver (estado "no se sabe"): en ese caso la limpieza NO debe
-// borrar, para no perder un pago real durante una caída de Wompi.
+// Devuelve { agendados, rechazados, huboFallos }. huboFallos=true si alguna
+// consulta a Wompi no se pudo resolver (estado "no se sabe"): en ese caso la
+// limpieza NO debe borrar, para no perder un pago real durante una caída de Wompi.
 async function ejecutarReconciliacion() {
-  const resultado = { agendados: 0, huboFallos: false };
+  const resultado = { agendados: 0, rechazados: 0, huboFallos: false };
   try {
     const pendientes = await db.listarPendientesPagoWompi();
     const pedidosVistos = {};
@@ -1938,7 +1983,11 @@ async function ejecutarReconciliacion() {
         const txs = await buscarTransaccionesPorReferencia(referencia);
         if (txs === null) { resultado.huboFallos = true; continue; }
         const agendado = await agendarDesdeTransacciones(referencia, txs, esPedido);
-        if (agendado) resultado.agendados++;
+        if (agendado) { resultado.agendados++; continue; }
+        // No hubo pago aprobado: si el/los intento(s) terminaron en fallo
+        // definitivo, se marca 'rechazado' para que no quede en "pendiente_pago".
+        const rechazado = await marcarRechazadoDesdeTransacciones(referencia, txs, esPedido);
+        if (rechazado) resultado.rechazados++;
       } catch (e) {
         resultado.huboFallos = true;
         console.error('[reconciliacion]', referencia, e.message);
@@ -1946,6 +1995,9 @@ async function ejecutarReconciliacion() {
     }
     if (resultado.agendados > 0) {
       console.log('[reconciliacion] ' + resultado.agendados + ' pago(s) recuperado(s) y agendado(s).');
+    }
+    if (resultado.rechazados > 0) {
+      console.log('[reconciliacion] ' + resultado.rechazados + ' pago(s) fallido(s) marcado(s) como rechazado(s).');
     }
   } catch (e) {
     resultado.huboFallos = true;
