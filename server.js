@@ -22,6 +22,10 @@ const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZM
 // Secreto de integridad de Wompi (dashboard → Desarrolladores). Necesario para
 // firmar el checkout: Wompi rechaza la transacción sin `signature:integrity`.
 const WOMPI_INTEGRITY_SECRET = process.env.WOMPI_INTEGRITY_SECRET || '';
+// Secreto de eventos de Wompi (dashboard → Desarrolladores → Eventos). Sirve para
+// validar la firma de los webhooks. Es opcional: aunque no esté, el webhook
+// reverifica cada transacción contra la API de Wompi antes de agendar.
+const WOMPI_EVENTS_SECRET = process.env.WOMPI_EVENTS_SECRET || '';
 
 // Firma de integridad Wompi = SHA256(referencia + montoEnCentavos + moneda + secreto).
 function firmaIntegridadWompi(referencia, montoCentavos, moneda) {
@@ -525,6 +529,86 @@ async function verificarTransaccionWompi(txId) {
   return json && json.data ? json.data : null;
 }
 
+/* ---------- Confirmación de pago (compartida por el regreso web y el webhook) ---------- */
+// Reverifica la transacción contra Wompi y, si está aprobada y coincide con el
+// registro (referencia, monto, moneda), lo agenda y notifica. Es idempotente:
+// si ya está agendado o es un pago manual en verificación, no hace nada.
+async function confirmarPagoRef(ref, txId) {
+  const registro = await db.obtenerPorRef(ref);
+  if (!registro) return { encontrado: false };
+  if (registro.estado === 'agendado') return { encontrado: true, yaAgendado: true };
+  if (registro.estado === 'pendiente_verificacion') return { encontrado: true, manual: true };
+  if (!txId) return { encontrado: true };
+
+  const tx = await verificarTransaccionWompi(txId);
+  const montoOk = tx && Number(tx.amount_in_cents) === registro.precio_cop * 100;
+  const monedaOk = tx && tx.currency === 'COP';
+  const refOk = tx && tx.reference === ref;
+  if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
+    const actualizado = await db.actualizarPorRef(ref, {
+      estado: 'agendado',
+      wompi_tx: txId,
+      pagado_en: new Date().toISOString(),
+    });
+    if (!registro.correo_enviado) {
+      try {
+        const r = await mailer.enviarNotificacion(actualizado);
+        if (r.enviado) await db.actualizarPorRef(ref, { correo_enviado: true });
+      } catch (e) {
+        console.error('[mailer] Falló el envío de la notificación:', e.message);
+      }
+    }
+    await notificarEstadoCliente(ref, 'agendado');
+    return { encontrado: true, agendado: true };
+  }
+  if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+    return { encontrado: true, rechazado: true };
+  }
+  return { encontrado: true };
+}
+
+// Igual que confirmarPagoRef pero para un pedido completo (varios servicios, un
+// solo pago). Al confirmarse, vacía el carrito guardado del cliente.
+async function confirmarPagoPedido(pedidoRef, txId) {
+  let registros = await db.obtenerPorPedido(pedidoRef);
+  if (!registros.length) return { encontrado: false };
+  const primero = registros[0];
+  if (primero.estado === 'agendado') return { encontrado: true, yaAgendado: true, registros: registros };
+  if (primero.estado === 'pendiente_verificacion') return { encontrado: true, manual: true, registros: registros };
+  if (!txId) return { encontrado: true, registros: registros };
+
+  const totalPedido = parseInt(primero.pedido_total_cop, 10) || 0;
+  const tx = await verificarTransaccionWompi(txId);
+  const montoOk = tx && Number(tx.amount_in_cents) === totalPedido * 100;
+  const monedaOk = tx && tx.currency === 'COP';
+  const refOk = tx && tx.reference === pedidoRef;
+  if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
+    await db.actualizarPorPedido(pedidoRef, {
+      estado: 'agendado',
+      wompi_tx: txId,
+      pagado_en: new Date().toISOString(),
+    });
+    if (primero.cliente_id) {
+      try { await db.guardarCarritoCliente(primero.cliente_id, []); } catch (e) { /* noop */ }
+    }
+    registros = await db.obtenerPorPedido(pedidoRef);
+    if (!primero.correo_enviado) {
+      try {
+        const r = await mailer.enviarNotificacionPedido(registros, totalPedido);
+        if (r.enviado) await db.actualizarPorPedido(pedidoRef, { correo_enviado: true });
+      } catch (e) {
+        console.error('[mailer] Falló la notificación del pedido:', e.message);
+      }
+    }
+    await notificarEstadoPedido(pedidoRef, 'agendado');
+    return { encontrado: true, agendado: true, registros: registros };
+  }
+  if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+    return { encontrado: true, rechazado: true, registros: registros };
+  }
+  return { encontrado: true, registros: registros };
+}
+
 /* ---------- Config pública para el frontend ---------- */
 app.get('/api/config', function (req, res) {
   res.json({
@@ -936,29 +1020,9 @@ app.get('/gracias/:ref', async function (req, res) {
 
   if (txId && registro.estado !== 'agendado' && registro.estado !== 'pendiente_verificacion') {
     try {
-      const tx = await verificarTransaccionWompi(txId);
-      const montoOk = tx && Number(tx.amount_in_cents) === registro.precio_cop * 100;
-      const monedaOk = tx && tx.currency === 'COP';
-      const refOk = tx && tx.reference === ref;
-      if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
-        const actualizado = await db.actualizarPorRef(ref, {
-          estado: 'agendado',
-          wompi_tx: txId,
-          pagado_en: new Date().toISOString(),
-        });
-        estado = 'agendado';
-        if (!registro.correo_enviado) {
-          try {
-            const r = await mailer.enviarNotificacion(actualizado);
-            if (r.enviado) await db.actualizarPorRef(ref, { correo_enviado: true });
-          } catch (e) {
-            console.error('[mailer] Falló el envío de la notificación:', e.message);
-          }
-        }
-        await notificarEstadoCliente(ref, 'agendado');
-      } else if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
-        estado = 'rechazado';
-      }
+      const r = await confirmarPagoRef(ref, txId);
+      if (r.agendado || r.yaAgendado) estado = 'agendado';
+      else if (r.rechazado) estado = 'rechazado';
     } catch (e) {
       console.error('[wompi] Falló la verificación:', e.message);
     }
@@ -1180,34 +1244,9 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
 
   if (txId && primero.estado === 'pendiente_pago') {
     try {
-      const tx = await verificarTransaccionWompi(txId);
-      const montoOk = tx && Number(tx.amount_in_cents) === totalPedido * 100;
-      const monedaOk = tx && tx.currency === 'COP';
-      const refOk = tx && tx.reference === pedidoRef;
-      if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
-        await db.actualizarPorPedido(pedidoRef, {
-          estado: 'agendado',
-          wompi_tx: txId,
-          pagado_en: new Date().toISOString(),
-        });
-        estado = 'agendado';
-        // Pago confirmado: recién ahora se vacía el carrito guardado del cliente.
-        if (primero.cliente_id) {
-          try { await db.guardarCarritoCliente(primero.cliente_id, []); } catch (e) { /* noop */ }
-        }
-        registros = await db.obtenerPorPedido(pedidoRef);
-        if (!primero.correo_enviado) {
-          try {
-            const r = await mailer.enviarNotificacionPedido(registros, totalPedido);
-            if (r.enviado) await db.actualizarPorPedido(pedidoRef, { correo_enviado: true });
-          } catch (e) {
-            console.error('[mailer] Falló la notificación del pedido:', e.message);
-          }
-        }
-        await notificarEstadoPedido(pedidoRef, 'agendado');
-      } else if (tx && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
-        estado = 'rechazado';
-      }
+      const r = await confirmarPagoPedido(pedidoRef, txId);
+      if (r.agendado || r.yaAgendado) estado = 'agendado';
+      else if (r.rechazado) estado = 'rechazado';
     } catch (e) {
       console.error('[wompi] Falló la verificación del pedido:', e.message);
     }
@@ -1222,6 +1261,56 @@ app.get('/pedido/:pedidoRef', async function (req, res) {
     metodo: primero.metodo,
     whatsapp: CONTACTO_WHATSAPP,
   }));
+});
+
+/* ---------- Webhook de eventos de Wompi (confirmación asíncrona) ---------- */
+// Wompi llama aquí cuando una transacción cambia de estado, aunque el cliente no
+// regrese al sitio tras pagar (cierra la pestaña, pierde conexión, etc.). Así el
+// pedido se agenda igual. La seguridad se garantiza reverificando la transacción
+// contra la API de Wompi (servidor a servidor) antes de agendar cualquier cosa.
+function firmaEventoValida(evento) {
+  try {
+    if (!WOMPI_EVENTS_SECRET) return false;
+    const sig = (evento && evento.signature) || {};
+    const props = sig.properties || [];
+    let concat = '';
+    props.forEach(function (ruta) {
+      const val = String(ruta).split('.').reduce(function (obj, clave) {
+        return (obj == null) ? undefined : obj[clave];
+      }, evento.data);
+      concat += (val == null ? '' : String(val));
+    });
+    concat += String(evento.timestamp) + WOMPI_EVENTS_SECRET;
+    const hash = crypto.createHash('sha256').update(concat).digest('hex');
+    return hash === String(sig.checksum || '').toLowerCase();
+  } catch (e) {
+    return false;
+  }
+}
+
+app.post('/wompi/webhook', async function (req, res) {
+  try {
+    const evento = req.body || {};
+    // Si hay secreto de eventos configurado, exige una firma válida.
+    if (WOMPI_EVENTS_SECRET && !firmaEventoValida(evento)) {
+      console.error('[wompi webhook] Firma de evento inválida');
+      return res.status(401).json({ ok: false });
+    }
+    const tx = evento.data && evento.data.transaction;
+    if (!tx || !tx.id) return res.status(200).json({ ok: true });
+
+    const referencia = tx.reference || '';
+    if (/^FRESA-PED-/.test(referencia)) {
+      await confirmarPagoPedido(referencia, tx.id);
+    } else if (referencia) {
+      await confirmarPagoRef(referencia, tx.id);
+    }
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error('[wompi webhook]', e.message);
+    // 500 → Wompi reintentará el evento más tarde.
+    return res.status(500).json({ ok: false });
+  }
 });
 
 /* ---------- Autenticación del panel ---------- */
