@@ -2104,10 +2104,22 @@ async function apagar(senal) {
   }
 }
 
-process.on('SIGTERM', function () { apagar('SIGTERM'); });
-process.on('SIGINT', function () { apagar('SIGINT'); });
+// Solo arranca el servidor HTTP cuando este archivo se ejecuta directamente
+// (node server.js). Si se importa desde otro proceso (p. ej. el script de
+// conciliación scripts/conciliar-pendientes.js), NO levanta el servidor ni las
+// tareas programadas: solo expone las funciones reutilizables.
+if (require.main === module) {
+  process.on('SIGTERM', function () { apagar('SIGTERM'); });
+  process.on('SIGINT', function () { apagar('SIGINT'); });
 
-iniciar().catch(function (e) {
-  console.error('[inicio] No se pudo arrancar el servidor:', e);
-  process.exit(1);
-});
+  iniciar().catch(function (e) {
+    console.error('[inicio] No se pudo arrancar el servidor:', e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  reconciliarPagosPendientes,
+  confirmarPagoRef,
+  confirmarPagoPedido,
+};

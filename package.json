@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "migrar": "node scripts/migrar-a-postgres.js"
+    "migrar": "node scripts/migrar-a-postgres.js",
+    "conciliar": "node scripts/conciliar-pendientes.js"
   },
   "keywords": [],
   "author": "",
