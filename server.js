@@ -519,14 +519,34 @@ const upload = multer({
 });
 
 /* ---------- Verificación de la transacción en Wompi ---------- */
-async function verificarTransaccionWompi(txId) {
-  const base = WOMPI_PUBLIC_KEY.indexOf('pub_prod') === 0
+function baseApiWompi() {
+  return WOMPI_PUBLIC_KEY.indexOf('pub_prod') === 0
     ? 'https://production.wompi.co/v1'
     : 'https://sandbox.wompi.co/v1';
-  const resp = await fetch(base + '/transactions/' + encodeURIComponent(txId));
+}
+
+async function verificarTransaccionWompi(txId) {
+  const resp = await fetch(baseApiWompi() + '/transactions/' + encodeURIComponent(txId));
   if (!resp.ok) return null;
   const json = await resp.json();
   return json && json.data ? json.data : null;
+}
+
+// Busca transacciones por REFERENCIA (sin conocer el id). Sirve para
+// reconciliar pagos que el cliente completó en Wompi pero cuyo regreso al
+// sitio o cuyo webhook nunca llegaron (pestaña cerrada, red caída, webhook no
+// entregado): así se agendan igual, en vez de quedar "pendiente_pago" para
+// siempre y terminar borrados por la limpieza automática.
+async function buscarTransaccionesPorReferencia(referencia) {
+  try {
+    const resp = await fetch(baseApiWompi() + '/transactions?reference=' + encodeURIComponent(referencia));
+    if (!resp.ok) return [];
+    const json = await resp.json();
+    return Array.isArray(json && json.data) ? json.data : [];
+  } catch (e) {
+    console.error('[wompi] Falló la búsqueda por referencia:', referencia, e.message);
+    return [];
+  }
 }
 
 /* ---------- Confirmación de pago (compartida por el regreso web y el webhook) ---------- */
@@ -1857,9 +1877,58 @@ app.use(function (req, res) {
   res.status(404).sendFile(path.join(ROOT, 'index.html'));
 });
 
+/* ---------- Reconciliación de pagos Wompi "huérfanos" ---------- */
+// Un pago puede quedar en pendiente_pago sin agendarse si el cliente cerró la
+// pestaña antes de volver a /gracias o /pedido, o si el webhook de Wompi no
+// llegó (caída de red, endpoint no configurado en el dashboard, etc.). Este
+// job busca esos pendientes por REFERENCIA en la API de Wompi (sin depender de
+// un id de transacción que nunca se guardó) y los agenda si ya fueron
+// aprobados. Corre periódicamente y también justo antes de la limpieza por
+// antigüedad, para no borrar jamás un pedido que en realidad sí fue pagado.
+let reconciliacionEnCurso = false;
+async function reconciliarPagosPendientes() {
+  if (reconciliacionEnCurso) return;
+  reconciliacionEnCurso = true;
+  try {
+    const pendientes = await db.listarPendientesPagoWompi();
+    const pedidosVistos = {};
+    let agendados = 0;
+    for (const reg of pendientes) {
+      try {
+        if (reg.pedido_ref) {
+          if (pedidosVistos[reg.pedido_ref]) continue;
+          pedidosVistos[reg.pedido_ref] = true;
+          const txs = await buscarTransaccionesPorReferencia(reg.pedido_ref);
+          const aprobada = txs.find(function (t) { return t.status === 'APPROVED'; });
+          if (aprobada) {
+            const r = await confirmarPagoPedido(reg.pedido_ref, aprobada.id);
+            if (r.agendado) agendados++;
+          }
+        } else {
+          const txs = await buscarTransaccionesPorReferencia(reg.ref);
+          const aprobada = txs.find(function (t) { return t.status === 'APPROVED'; });
+          if (aprobada) {
+            const r = await confirmarPagoRef(reg.ref, aprobada.id);
+            if (r.agendado) agendados++;
+          }
+        }
+      } catch (e) {
+        console.error('[reconciliacion]', reg.ref, e.message);
+      }
+    }
+    if (agendados > 0) console.log('[reconciliacion] ' + agendados + ' pago(s) recuperado(s) y agendado(s).');
+  } catch (e) {
+    console.error('[reconciliacion]', e.message);
+  } finally {
+    reconciliacionEnCurso = false;
+  }
+}
+
 /* ---------- Limpieza automática de agendamientos sin pago (>48h) ---------- */
 async function limpiarPendientes() {
   try {
+    // Reconcilia primero: nunca se debe borrar un pedido que Wompi ya aprobó.
+    await reconciliarPagosPendientes();
     const n = await db.eliminarPendientesAntiguos(48);
     if (n > 0) console.log('[limpieza] ' + n + ' agendamiento(s) sin pago eliminados (>48h).');
   } catch (e) {
@@ -1918,11 +1987,13 @@ async function procesarSeguimientos() {
 let servidor = null;
 let intervaloLimpieza = null;
 let intervaloSeguimientos = null;
+let intervaloReconciliacion = null;
 let apagando = false;
 // Promesas de las tareas en segundo plano en curso; el apagado las espera para
 // no cortar una escritura a PostgreSQL a mitad de camino.
 let tareaLimpieza = Promise.resolve();
 let tareaSeguimientos = Promise.resolve();
+let tareaReconciliacion = Promise.resolve();
 
 function lanzarLimpieza() {
   tareaLimpieza = limpiarPendientes().catch(function (e) { console.error('[limpieza]', e.message); });
@@ -1931,6 +2002,10 @@ function lanzarLimpieza() {
 function lanzarSeguimientos() {
   tareaSeguimientos = procesarSeguimientos().catch(function (e) { console.error('[seguimiento]', e.message); });
   return tareaSeguimientos;
+}
+function lanzarReconciliacion() {
+  tareaReconciliacion = reconciliarPagosPendientes().catch(function (e) { console.error('[reconciliacion]', e.message); });
+  return tareaReconciliacion;
 }
 
 async function iniciar() {
@@ -1947,6 +2022,11 @@ async function iniciar() {
     intervaloLimpieza = setInterval(lanzarLimpieza, 60 * 60 * 1000);
     lanzarSeguimientos();
     intervaloSeguimientos = setInterval(lanzarSeguimientos, 6 * 60 * 60 * 1000);
+    // Reconciliación de pagos Wompi cada 15 minutos: agenda cualquier pago
+    // aprobado que se haya quedado sin confirmar por el regreso web o el
+    // webhook, mucho antes de que la limpieza de 48h pudiera borrarlo.
+    lanzarReconciliacion();
+    intervaloReconciliacion = setInterval(lanzarReconciliacion, 15 * 60 * 1000);
   });
 }
 
@@ -1959,6 +2039,7 @@ async function apagar(senal) {
   console.log('[apagado] Señal ' + senal + ' recibida; cerrando ordenadamente...');
   if (intervaloLimpieza) clearInterval(intervaloLimpieza);
   if (intervaloSeguimientos) clearInterval(intervaloSeguimientos);
+  if (intervaloReconciliacion) clearInterval(intervaloReconciliacion);
 
   const cerrarHttp = new Promise(function (resolve) {
     if (!servidor) return resolve();
@@ -1975,7 +2056,7 @@ async function apagar(senal) {
     await cerrarHttp;
     // Espera a que terminen las tareas en segundo plano ya en curso antes de
     // cerrar el pool, para no cortar una escritura a mitad.
-    await Promise.allSettled([tareaLimpieza, tareaSeguimientos]);
+    await Promise.allSettled([tareaLimpieza, tareaSeguimientos, tareaReconciliacion]);
     await db.cerrar();
     console.log('[apagado] Cierre completo.');
     clearTimeout(limite);
