@@ -537,15 +537,20 @@ async function verificarTransaccionWompi(txId) {
 // sitio o cuyo webhook nunca llegaron (pestaña cerrada, red caída, webhook no
 // entregado): así se agendan igual, en vez de quedar "pendiente_pago" para
 // siempre y terminar borrados por la limpieza automática.
+// Devuelve un array de transacciones (posiblemente vacío) si la consulta a
+// Wompi tuvo éxito, o `null` si falló (API caída, red, respuesta no OK). La
+// distinción es CRÍTICA: un array vacío significa "no hay pago"; `null` significa
+// "no se sabe". Nunca se debe borrar un pendiente cuando el estado es "no se
+// sabe", para no perder un pago real durante una caída de Wompi.
 async function buscarTransaccionesPorReferencia(referencia) {
   try {
     const resp = await fetch(baseApiWompi() + '/transactions?reference=' + encodeURIComponent(referencia));
-    if (!resp.ok) return [];
+    if (!resp.ok) return null;
     const json = await resp.json();
     return Array.isArray(json && json.data) ? json.data : [];
   } catch (e) {
     console.error('[wompi] Falló la búsqueda por referencia:', referencia, e.message);
-    return [];
+    return null;
   }
 }
 
@@ -1885,50 +1890,82 @@ app.use(function (req, res) {
 // un id de transacción que nunca se guardó) y los agenda si ya fueron
 // aprobados. Corre periódicamente y también justo antes de la limpieza por
 // antigüedad, para no borrar jamás un pedido que en realidad sí fue pagado.
-let reconciliacionEnCurso = false;
-async function reconciliarPagosPendientes() {
-  if (reconciliacionEnCurso) return;
-  reconciliacionEnCurso = true;
+// Intenta agendar una referencia probando TODAS sus transacciones aprobadas (no
+// solo la primera): si hubiera una aprobada anómala con monto distinto,
+// confirmarPago* la rechaza por monto y se sigue con la siguiente aprobada
+// válida, en vez de quedarse atascado en la primera. Devuelve true solo si el
+// pago quedó recién agendado en esta pasada.
+async function agendarDesdeTransacciones(referencia, txs, esPedido) {
+  const aprobadas = txs.filter(function (t) { return t && t.status === 'APPROVED'; });
+  for (const tx of aprobadas) {
+    const r = esPedido
+      ? await confirmarPagoPedido(referencia, tx.id)
+      : await confirmarPagoRef(referencia, tx.id);
+    if (r.yaAgendado) return false; // ya estaba agendado; nada nuevo que contar
+    if (r.agendado) return true;    // recuperado en esta pasada
+  }
+  return false;
+}
+
+// Guarda la promesa de la pasada en curso (no un booleano): si otra tarea llama
+// mientras se ejecuta, recibe la MISMA promesa y espera a que termine de verdad,
+// para que la limpieza no borre antes de que la reconciliación complete.
+let reconciliacionEnCurso = null;
+function reconciliarPagosPendientes() {
+  if (reconciliacionEnCurso) return reconciliacionEnCurso;
+  reconciliacionEnCurso = ejecutarReconciliacion().finally(function () {
+    reconciliacionEnCurso = null;
+  });
+  return reconciliacionEnCurso;
+}
+
+// Devuelve { agendados, huboFallos }. huboFallos=true si alguna consulta a Wompi
+// no se pudo resolver (estado "no se sabe"): en ese caso la limpieza NO debe
+// borrar, para no perder un pago real durante una caída de Wompi.
+async function ejecutarReconciliacion() {
+  const resultado = { agendados: 0, huboFallos: false };
   try {
     const pendientes = await db.listarPendientesPagoWompi();
     const pedidosVistos = {};
-    let agendados = 0;
     for (const reg of pendientes) {
+      const esPedido = !!reg.pedido_ref;
+      const referencia = esPedido ? reg.pedido_ref : reg.ref;
+      if (esPedido) {
+        if (pedidosVistos[referencia]) continue;
+        pedidosVistos[referencia] = true;
+      }
       try {
-        if (reg.pedido_ref) {
-          if (pedidosVistos[reg.pedido_ref]) continue;
-          pedidosVistos[reg.pedido_ref] = true;
-          const txs = await buscarTransaccionesPorReferencia(reg.pedido_ref);
-          const aprobada = txs.find(function (t) { return t.status === 'APPROVED'; });
-          if (aprobada) {
-            const r = await confirmarPagoPedido(reg.pedido_ref, aprobada.id);
-            if (r.agendado) agendados++;
-          }
-        } else {
-          const txs = await buscarTransaccionesPorReferencia(reg.ref);
-          const aprobada = txs.find(function (t) { return t.status === 'APPROVED'; });
-          if (aprobada) {
-            const r = await confirmarPagoRef(reg.ref, aprobada.id);
-            if (r.agendado) agendados++;
-          }
-        }
+        const txs = await buscarTransaccionesPorReferencia(referencia);
+        if (txs === null) { resultado.huboFallos = true; continue; }
+        const agendado = await agendarDesdeTransacciones(referencia, txs, esPedido);
+        if (agendado) resultado.agendados++;
       } catch (e) {
-        console.error('[reconciliacion]', reg.ref, e.message);
+        resultado.huboFallos = true;
+        console.error('[reconciliacion]', referencia, e.message);
       }
     }
-    if (agendados > 0) console.log('[reconciliacion] ' + agendados + ' pago(s) recuperado(s) y agendado(s).');
+    if (resultado.agendados > 0) {
+      console.log('[reconciliacion] ' + resultado.agendados + ' pago(s) recuperado(s) y agendado(s).');
+    }
   } catch (e) {
+    resultado.huboFallos = true;
     console.error('[reconciliacion]', e.message);
-  } finally {
-    reconciliacionEnCurso = false;
   }
+  return resultado;
 }
 
 /* ---------- Limpieza automática de agendamientos sin pago (>48h) ---------- */
 async function limpiarPendientes() {
   try {
     // Reconcilia primero: nunca se debe borrar un pedido que Wompi ya aprobó.
-    await reconciliarPagosPendientes();
+    const rec = await reconciliarPagosPendientes();
+    // Si no se pudo verificar todo contra Wompi, se aborta el borrado de este
+    // ciclo (se reintenta en el siguiente): mejor conservar un pendiente de más
+    // una hora que borrar un pago real durante una caída de la API de Wompi.
+    if (rec && rec.huboFallos) {
+      console.warn('[limpieza] Borrado omitido: no se pudo verificar todos los pagos en Wompi; se reintentará en el próximo ciclo.');
+      return;
+    }
     const n = await db.eliminarPendientesAntiguos(48);
     if (n > 0) console.log('[limpieza] ' + n + ' agendamiento(s) sin pago eliminados (>48h).');
   } catch (e) {
