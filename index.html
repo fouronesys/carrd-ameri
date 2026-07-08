@@ -45,6 +45,7 @@
                                                                         </div>
                                                                         <div class="fs-catalogo-wrap">
                                                                                 <a href="#hechizos" class="fs-catalogo-btn" role="button"><span class="fs-catalogo-orn">✦</span> VER CATÁLOGO <span class="fs-catalogo-orn">✦</span></a>
+                                                                                <a href="#hechizos" class="fs-catalogo-btn fs-premium-link premium" role="button"><span class="fs-catalogo-orn">✿</span> PREMIUM <span class="fs-catalogo-orn">✿</span></a>
                                                                         </div>
                                                                 </div>
                                                         </div>
@@ -83,6 +84,9 @@
                                                                                         </li>
                                                                                         <li>
                                                                                                 <a href="#promos" class="n01" role="button">MENSUALIDAD ツ !</a>
+                                                                                        </li>
+                                                                                        <li>
+                                                                                                <a href="#hechizos" class="n01 fs-premium-link" role="button">PREMIUM ✦ !</a>
                                                                                         </li>
                                                                                 </ul>
                                                                         </div>
@@ -485,6 +489,39 @@
                                 wa.addEventListener('mouseenter', function () {
                                         clearTimeout(t);
                                         wa.classList.remove('wa-colapsado');
+                                });
+                        })();
+                </script>
+                <script>
+                        // Acceso directo a la categoría Premium del catálogo: cambia a la
+                        // sección de hechizos y baja hasta el encabezado Premium.
+                        (function () {
+                                function irAPremium(e) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        var destino = document.getElementById('text210');
+                                        var seccion = document.getElementById('hechizos-section');
+                                        if (!destino || !seccion) return;
+                                        var bajar = function () {
+                                                destino.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                        };
+                                        if (!seccion.classList.contains('inactive')) { bajar(); return; }
+                                        location.hash = '#hechizos';
+                                        var inicio = Date.now();
+                                        (function esperar() {
+                                                if (!seccion.classList.contains('inactive')) {
+                                                        // Pequeña pausa para que termine la animación de cambio de sección.
+                                                        setTimeout(bajar, 500);
+                                                } else if (Date.now() - inicio < 4000) {
+                                                        setTimeout(esperar, 100);
+                                                }
+                                        })();
+                                }
+                                document.addEventListener('DOMContentLoaded', function () {
+                                        var enlaces = document.querySelectorAll('.fs-premium-link');
+                                        for (var i = 0; i < enlaces.length; i++) {
+                                                enlaces[i].addEventListener('click', irAPremium);
+                                        }
                                 });
                         })();
                 </script>

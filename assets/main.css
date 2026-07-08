@@ -9526,3 +9526,22 @@ filter: drop-shadow(0 2px 1px rgba(0,0,0,0.06));
 @media (prefers-reduced-motion: reduce) {
 	.fs-catalogo-btn { transition: none; }
 }
+
+/* Variante Premium del botón de catálogo */
+.fs-catalogo-btn.premium {
+	color: #F0A3C3;
+	background-color: #100109;
+	background-image: linear-gradient(120deg, rgba(16, 1, 9, 0.95) 0%, rgba(125, 55, 84, 0.55) 50%, rgba(16, 1, 9, 0.95) 100%);
+	border-color: #7D3754;
+	margin-left: 0.6rem;
+}
+
+.fs-catalogo-btn.premium:hover {
+	color: #FFE3F0;
+	border-color: #F0A3C3;
+}
+
+@media (max-width: 480px) {
+	.fs-catalogo-btn.premium { margin-left: 0; margin-top: 0.5rem; }
+	.fs-catalogo-wrap { display: flex; flex-direction: column; align-items: center; }
+}
