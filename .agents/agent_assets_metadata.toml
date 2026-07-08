@@ -6,8 +6,68 @@ uri = "file://assets/og-image.png"
 type = "image"
 title = "generated_image"
 
+[[generated]]
+id = "Dl_qc-SS01Q0dU5eaz0Ky"
+uri = "file://attached_assets/generated_images/fresatanika_icono.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "PlFms0DbVhxtXvs8Tk1Yz"
+uri = "file://attached_assets/generated_images/fresatanika_logo.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "86QeJFzPY-UN9SeVaUkbZ"
+uri = "file://attached_assets/generated_images/fresatanika_banner_horizontal.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "Mx-xNHCUTxjFmvGcMeHih"
+uri = "file://attached_assets/generated_images/fresatanika_banner_story.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "tM9esDWL3qjETBk11YawY"
+uri = "file://attached_assets/generated_images/fresatanika_og.png"
+type = "image"
+title = "generated_image"
+
 [[outputs]]
 id = "sJH72w8PbveTB5zNvWnmB"
 uri = "file://assets/og-image.png"
 type = "image"
 title = "Preview image del enlace (OG Image)"
+
+[[outputs]]
+id = "8SqJTCfDR8nRZXB8R16qB"
+uri = "file://attached_assets/generated_images/fresatanika_icono.png"
+type = "image"
+title = "Icono / emblema (fresa y luna)"
+
+[[outputs]]
+id = "vBiyz6MIUjVnD0HXIsKtz"
+uri = "file://attached_assets/generated_images/fresatanika_logo.png"
+type = "image"
+title = "Logo wordmark Fresatanika"
+
+[[outputs]]
+id = "x76Q7qo1VP0jIbRWxj0QM"
+uri = "file://attached_assets/generated_images/fresatanika_banner_horizontal.png"
+type = "image"
+title = "Banner horizontal (web / redes)"
+
+[[outputs]]
+id = "qcxIPEpxJ6t5LnXAEHO16"
+uri = "file://attached_assets/generated_images/fresatanika_banner_story.png"
+type = "image"
+title = "Banner vertical (historias de Instagram)"
+
+[[outputs]]
+id = "4o25R5kprD1-IPrJX3v8s"
+uri = "file://attached_assets/generated_images/fresatanika_og.png"
+type = "image"
+title = "Imagen para compartir enlaces (Open Graph)"
