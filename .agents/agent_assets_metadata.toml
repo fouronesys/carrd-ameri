@@ -36,6 +36,30 @@ uri = "file://attached_assets/generated_images/fresatanika_og.png"
 type = "image"
 title = "generated_image"
 
+[[generated]]
+id = "Ghf2oz-7_p9F3lx8qYFvn"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_portada.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "rYEG23GxqLiMgLIRuXE2B"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_tarot.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "ErFy7ukd-oKcrx0hd3BIP"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_rituales.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "hqaZp6wrrWpq9339dmrWC"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_flatlay.png"
+type = "image"
+title = "generated_image"
+
 [[outputs]]
 id = "sJH72w8PbveTB5zNvWnmB"
 uri = "file://assets/og-image.png"
@@ -71,3 +95,27 @@ id = "4o25R5kprD1-IPrJX3v8s"
 uri = "file://attached_assets/generated_images/fresatanika_og.png"
 type = "image"
 title = "Imagen para compartir enlaces (Open Graph)"
+
+[[outputs]]
+id = "JjSg2ee4I-_oAP1Vjfnuh"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_portada.png"
+type = "image"
+title = "Portada del perfil (altar con marca)"
+
+[[outputs]]
+id = "hFj8qoXhQ4wNLxqQlFNDd"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_tarot.png"
+type = "image"
+title = "Rincón de lecturas (bola de cristal y tarot)"
+
+[[outputs]]
+id = "7AAR5Ok8z0VXHCltHV5mK"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_rituales.png"
+type = "image"
+title = "Rituales y endulzamientos (velas, miel, manzana)"
+
+[[outputs]]
+id = "YrPDmoho8qSxEsmusZ0pH"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_flatlay.png"
+type = "image"
+title = "Mesa de trabajo espiritual (vista superior)"
