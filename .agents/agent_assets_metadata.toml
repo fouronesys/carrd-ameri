@@ -60,6 +60,12 @@ uri = "file://attached_assets/generated_images/fresatanika_gbp_flatlay.png"
 type = "image"
 title = "generated_image"
 
+[[generated]]
+id = "gUT9BmbrncVm0617AArDe"
+uri = "file://attached_assets/generated_images/fresatanika_ad_cuadrado.png"
+type = "image"
+title = "generated_image"
+
 [[outputs]]
 id = "sJH72w8PbveTB5zNvWnmB"
 uri = "file://assets/og-image.png"
@@ -119,3 +125,9 @@ id = "YrPDmoho8qSxEsmusZ0pH"
 uri = "file://attached_assets/generated_images/fresatanika_gbp_flatlay.png"
 type = "image"
 title = "Mesa de trabajo espiritual (vista superior)"
+
+[[outputs]]
+id = "0SJ5WPw_L-Sz7keCwA4p-"
+uri = "file://attached_assets/generated_images/fresatanika_ad_cuadrado.png"
+type = "image"
+title = "Imagen cuadrada para anuncios (1:1)"
