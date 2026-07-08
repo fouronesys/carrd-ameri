@@ -1900,12 +1900,67 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 app.use('/assets', express.static(path.join(ROOT, 'assets')));
+
+/* ---------- SEO: URL base, index con canónica, robots.txt y sitemap.xml ---------- */
+// La URL base se toma de PUBLIC_URL si está definida; si no, del host de la
+// petición. Se usa para la etiqueta canónica, Open Graph y datos estructurados.
+// Para evitar envenenamiento de cabeceras (Host / X-Forwarded-Proto) en las
+// URLs canónicas y del sitemap, se valida el host y el protocolo; en
+// producción lo recomendado es fijar PUBLIC_URL (p. ej. https://midominio.com).
+function urlBase(req) {
+  const fija = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  if (fija) return fija;
+  let proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https')
+    .split(',')[0].trim().toLowerCase();
+  if (proto !== 'http' && proto !== 'https') proto = 'https';
+  const host = String(req.get('host') || '').trim();
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/i.test(host)) {
+    return proto + '://localhost:' + (process.env.PORT || 5000);
+  }
+  return proto + '://' + host;
+}
+
+let indexCache = null;
+function enviarIndex(req, res, status) {
+  try {
+    if (indexCache === null || process.env.NODE_ENV !== 'production') {
+      indexCache = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    }
+    const html = indexCache.split('__BASE_URL__').join(urlBase(req));
+    res.status(status || 200).type('html').send(html);
+  } catch (e) {
+    res.status(status || 200).sendFile(path.join(ROOT, 'index.html'));
+  }
+}
+
 app.get('/', function (req, res) {
-  res.sendFile(path.join(ROOT, 'index.html'));
+  enviarIndex(req, res, 200);
+});
+
+app.get('/robots.txt', function (req, res) {
+  res.type('text/plain').send(
+    'User-agent: *\n' +
+    'Allow: /\n' +
+    'Disallow: /admin\n' +
+    'Disallow: /api/\n' +
+    '\n' +
+    'Sitemap: ' + urlBase(req) + '/sitemap.xml\n'
+  );
+});
+
+app.get('/sitemap.xml', function (req, res) {
+  const base = urlBase(req);
+  const hoy = new Date().toISOString().slice(0, 10);
+  res.type('application/xml').send(
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    '  <url><loc>' + base + '/</loc><lastmod>' + hoy + '</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>\n' +
+    '</urlset>\n'
+  );
 });
 
 app.use(function (req, res) {
-  res.status(404).sendFile(path.join(ROOT, 'index.html'));
+  enviarIndex(req, res, 404);
 });
 
 /* ---------- Reconciliación de pagos Wompi "huérfanos" ---------- */
