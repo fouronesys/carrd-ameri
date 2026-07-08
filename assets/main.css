@@ -9631,3 +9631,30 @@ filter: drop-shadow(0 2px 1px rgba(0,0,0,0.06));
 #buttons08 > li > a {
 	font-size: 0.32em;
 }
+
+/* Alineación exacta de los botones del inicio: misma altura y centrado */
+.fs-catalogo-wrap {
+	align-items: center;
+}
+
+.fs-catalogo-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 1.5rem;
+	padding: 0 1.1rem;
+	line-height: 1;
+	box-sizing: border-box;
+}
+
+.fs-catalogo-orn {
+	line-height: 1;
+	display: inline-block;
+}
+
+/* Anula los márgenes verticales que el framework aplica a los hijos de columnas,
+   que desalineaban el botón PREMIUM respecto a VER CATÁLOGO */
+.fs-catalogo-wrap > .fs-catalogo-btn {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+}
