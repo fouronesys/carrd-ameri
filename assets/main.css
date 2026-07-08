@@ -9481,3 +9481,48 @@ filter: drop-shadow(0 2px 1px rgba(0,0,0,0.06));
 #wa-flotante .wa-icon { animation: none; }
 #wa-flotante .wa-globo { animation: none; }
 }
+
+/* Botón destacado hacia el catálogo (inicio) */
+.fs-catalogo-wrap {
+	width: 100%;
+	text-align: center;
+	padding: 0.65rem 0 0.35rem 0;
+}
+
+.fs-catalogo-btn {
+	display: inline-block;
+	padding: 0.7rem 2.2rem;
+	font-family: 'Poppins', sans-serif;
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	text-decoration: none;
+	color: #FFE3F0;
+	background-color: #7D3754;
+	background-image: linear-gradient(120deg, rgba(125, 55, 84, 0.95) 0%, rgba(16, 1, 9, 0.9) 55%, rgba(125, 55, 84, 0.95) 100%);
+	border: 1px solid #F0A3C3;
+	border-radius: 3rem;
+	box-shadow: 0 0 14px rgba(240, 163, 195, 0.35), inset 0 0 10px rgba(240, 163, 195, 0.12);
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fs-catalogo-btn:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 0 22px rgba(240, 163, 195, 0.6), inset 0 0 14px rgba(240, 163, 195, 0.2);
+	color: #fff;
+}
+
+.fs-catalogo-btn:active {
+	transform: translateY(0);
+}
+
+.fs-catalogo-orn {
+	color: #F0A3C3;
+	font-weight: 400;
+	margin: 0 0.35rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.fs-catalogo-btn { transition: none; }
+}
