@@ -43,7 +43,7 @@ const CONTACTO_WHATSAPP = (process.env.WHATSAPP || '18492472516').replace(/[^0-9
 const FIDELIDAD_OBJETIVO = 5;
 const FIDELIDAD_RECOMPENSA = 'Una lectura corta de regalo ✦';
 
-// Adelanto (urgencia): recargo fijo para entrega en un máximo de 2 días.
+// Adelanto (urgencia): recargo fijo para entrega en un máximo de 3 días.
 // Debe coincidir con el valor mostrado en el catálogo y en assets/wompi.js.
 const ADELANTO_COP = 28000;
 const ADELANTO_USD = '10';
@@ -2097,6 +2097,36 @@ async function procesarSeguimientos() {
   try {
     const ahora = Date.now();
     const registros = await db.listarAgendamientos();
+
+    // Avisos de entrega próxima: trabajos agendados (pagados) aún no realizados.
+    // Con adelanto (urgencia) el plazo es de 3 días y se avisa cuando falta 1 día
+    // o menos; sin adelanto el plazo es de 6 semanas y se avisa en la última semana.
+    const DIA = 24 * 60 * 60 * 1000;
+    for (const reg of registros) {
+      if (reg.estado !== 'agendado' || reg.trabajo_hecho || reg.aviso_entrega_en) continue;
+      const desde = reg.pagado_en || reg.creado_en;
+      const base = desde ? new Date(desde).getTime() : 0;
+      if (!base) continue;
+      // Solo 'solo' e 'incluido' son urgencias reales; 'extra' son otros
+      // añadidos (velación, ocultamiento...) sin plazo de 3 días.
+      const conAdelanto = reg.adelanto === 'solo' || reg.adelanto === 'incluido';
+      const limite = base + (conAdelanto ? 3 * DIA : 42 * DIA);
+      const avisarDesde = limite - (conAdelanto ? 1 : 7) * DIA;
+      if (ahora < avisarDesde) continue;
+      const diasRestantes = Math.max(0, Math.ceil((limite - ahora) / DIA));
+      try {
+        const r = await mailer.enviarAvisoEntrega(reg, {
+          conAdelanto: conAdelanto,
+          desde: desde,
+          limite: new Date(limite).toISOString(),
+          diasRestantes: diasRestantes,
+        });
+        if (r.enviado) await db.actualizarPorRef(reg.ref, { aviso_entrega_en: new Date().toISOString() });
+      } catch (e) {
+        console.error('[aviso entrega]', reg.ref, e.message);
+      }
+    }
+
     for (const reg of registros) {
       if (!reg.trabajo_hecho || !reg.trabajo_hecho_en) continue;
       const base = new Date(reg.trabajo_hecho_en).getTime();
