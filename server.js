@@ -1435,8 +1435,10 @@ app.get('/admin', async function (req, res) {
     }
     const usuarios = esAdmin ? await db.listarUsuariosAdmin() : [];
     const accesos = esAdmin ? await db.listarAccesos(80) : [];
+    const eliminados = esAdmin ? await db.listarEliminados() : [];
     return res.send(templates.adminDashboard({
       registros: registros,
+      eliminados: eliminados,
       rol: req.session.rol || 'admin',
       baseUrl: baseUrlDe(req),
       hechizos: HECHIZOS.lista,
@@ -1521,15 +1523,41 @@ app.get('/admin/exportar/pdf', requiereAdmin, async function (req, res) {
 
 app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
   const reg = await db.obtenerPorRef(req.params.ref);
-  if (reg) {
-    const hecho = !reg.trabajo_hecho;
-    await db.actualizarPorRef(req.params.ref, {
-      trabajo_hecho: hecho,
-      trabajo_hecho_en: hecho ? new Date().toISOString() : '',
-    });
-    // Al marcar el trabajo como realizado, se avisa al cliente registrado.
-    if (hecho) await notificarEstadoCliente(req.params.ref, 'realizado');
+  if (!reg) {
+    return res.redirect('/admin');
   }
+
+  const accion = req.body.accion || 'marcar';
+  const marcarComoHecho = accion === 'marcar';
+
+  if (marcarComoHecho) {
+    // Validar que el trabajo tenga pago confirmado (estado 'agendado')
+    if (reg.estado !== 'agendado') {
+      return res.status(400).send('Solo se pueden marcar como realizados los trabajos con pago confirmado (agendados).');
+    }
+    
+    // Actualizar como realizado
+    await db.actualizarPorRef(req.params.ref, {
+      trabajo_hecho: true,
+      trabajo_hecho_en: new Date().toISOString(),
+    });
+
+    // Enviar correo solo si no se ha enviado antes
+    if (!reg.aviso_realizado_enviado) {
+      await notificarEstadoCliente(req.params.ref, 'realizado');
+      await db.actualizarPorRef(req.params.ref, { aviso_realizado_enviado: new Date().toISOString() });
+    }
+  } else {
+    // Desmarcar: limpiar banderas de seguimiento y aviso de entrega
+    await db.actualizarPorRef(req.params.ref, {
+      trabajo_hecho: false,
+      trabajo_hecho_en: '',
+      seguimiento_5s_en: '',
+      seguimiento_4m_en: '',
+      aviso_entrega_en: '',
+    });
+  }
+
   res.redirect('/admin');
 });
 
@@ -1587,12 +1615,42 @@ app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
 
 app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
   const reg = await db.obtenerPorRef(req.params.ref);
+  if (!reg) {
+    return res.redirect('/admin');
+  }
+  // Idempotencia: si ya está eliminado, redirigir sin error
+  if (reg.eliminado_en) {
+    return res.redirect('/admin');
+  }
   // Las asistentes no pueden eliminar agendamientos ya marcados como realizados.
-  if (reg && reg.trabajo_hecho && req.session.rol !== 'admin') {
+  if (reg.trabajo_hecho && req.session.rol !== 'admin') {
     return res.status(403).send('Solo el administrador puede eliminar un agendamiento marcado como realizado.');
   }
   await db.eliminarPorRef(req.params.ref);
   res.redirect('/admin');
+});
+
+app.post('/admin/restaurar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const reg = await db.obtenerPorRef(req.params.ref);
+  if (!reg) {
+    return res.redirect('/admin?tab=eliminados');
+  }
+  // Idempotencia: si no está eliminado, redirigir sin error
+  if (!reg.eliminado_en) {
+    return res.redirect('/admin?tab=eliminados');
+  }
+  await db.restaurarPorRef(req.params.ref);
+  res.redirect('/admin?tab=eliminados');
+});
+
+app.post('/admin/eliminar-definitivo/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const reg = await db.obtenerPorRef(req.params.ref);
+  if (!reg) {
+    return res.redirect('/admin?tab=eliminados');
+  }
+  // Idempotencia: si ya no existe (fue eliminado definitivamente), redirigir sin error
+  await db.eliminarDefinitivamentePorRef(req.params.ref);
+  res.redirect('/admin?tab=eliminados');
 });
 
 /* ---------- Edición de pedidos (solo administrador) ---------- */
