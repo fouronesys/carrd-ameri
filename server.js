@@ -1436,9 +1436,11 @@ app.get('/admin', async function (req, res) {
     const usuarios = esAdmin ? await db.listarUsuariosAdmin() : [];
     const accesos = esAdmin ? await db.listarAccesos(80) : [];
     const eliminados = esAdmin ? await db.listarEliminados() : [];
+    const realizados = await db.listarRealizados();
     return res.send(templates.adminDashboard({
       registros: registros,
       eliminados: eliminados,
+      realizados: realizados,
       rol: req.session.rol || 'admin',
       baseUrl: baseUrlDe(req),
       hechizos: HECHIZOS.lista,
