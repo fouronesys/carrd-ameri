@@ -1,0 +1,15 @@
+.git
+**/node_modules
+**/dist
+**/.turbo
+**/.cache
+*.log
+.DS_Store
+.env
+.env.*
+.agents
+.local
+.replit
+replit.nix
+attached_assets/screenshots
+artifacts/mockup-sandbox

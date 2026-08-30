@@ -1,0 +1,2 @@
+- [Wompi integration gotchas](wompi-integration.md) — key/secret slots get swapped (validate via checkout URL); secrets need requestEnvVar not setEnvVars; HMAC pay-link scheme.
+- [Scroll-to-end gates](scroll-gate-no-overflow.md) — a "scroll to bottom to unlock" UI must also unlock when content fits without overflow, or users get stuck.

@@ -1,6 +1,6 @@
-# [Project name]
+# Fresatanika
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A dark-themed React+Vite clone of the Fresatanika Carrd page — a Spanish-language tarot/witchcraft services site with sections for Home, Hechizos, Lecturas, Aclaraciones, Métodos de Pago, and Mensualidad.
 
 ## Run & Operate
 
@@ -22,7 +22,10 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- Frontend: `artifacts/fresatanika` (React+Vite). Pages in `src/pages`, catalog/payment helpers in `src/lib`.
+- API: `artifacts/api-server` (Express 5). Routes in `src/routes` (`health.ts`, `wompi.ts`), all mounted under `/api`.
+- DB: `lib/db` (Drizzle + `pg`, node-postgres). Schema source in `lib/db/src/schema`.
+- CapRover deploy: `Dockerfile`, `captain-definition`, `.dockerignore` at repo root; guide in `docs/CAPROVER.md`.
 
 ## Architecture decisions
 
