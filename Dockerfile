@@ -1,38 +1,28 @@
-# syntax=docker/dockerfile:1
-# Single-container build for CapRover.
-# The Express API server (artifacts/api-server) also serves the built
-# frontend (artifacts/fresatanika) so the whole site runs from one container.
+FROM node:20-bookworm-slim
 
-# ---------- Build stage ----------
-FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 
-# pnpm (pinned to match the committed lockfile)
-RUN npm install -g pnpm@10.26.1
+COPY package.json ./
+RUN npm install --omit=dev --registry https://registry.npmjs.org
 
 COPY . .
-RUN pnpm install --frozen-lockfile
-
-# Build the frontend (Vite) and the API server (esbuild).
-# BASE_PATH=/ serves the site at the domain root; PORT is only needed because
-# the build configs validate it at build time.
-ENV NODE_ENV=production
-ENV PORT=80
-ENV BASE_PATH=/
-RUN pnpm --filter @workspace/fresatanika run build \
- && pnpm --filter @workspace/api-server run build
-
-# ---------- Runtime stage ----------
-FROM node:24-bookworm-slim AS runtime
-WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=80
-ENV SERVE_STATIC_DIR=/app/public
-
-# Bundled API server (esbuild output is self-contained) + built frontend assets.
-COPY --from=builder /app/artifacts/api-server/dist ./dist
-COPY --from=builder /app/artifacts/fresatanika/dist/public ./public
+ENV DATA_DIR=/data
 
 EXPOSE 80
-CMD ["node", "--enable-source-maps", "dist/index.mjs"]
+
+# Health check para actualizaciones sin downtime (rolling update en Docker Swarm/
+# CapRover): el orquestador espera a que la nueva instancia responda "healthy" en
+# /healthz (conexión a PostgreSQL viva) antes de retirar la instancia anterior.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||80)+'/healthz',function(r){process.exit(r.statusCode===200?0:1)}).on('error',function(){process.exit(1)})"
+
+# En cada despliegue: primero concilia los pagos Wompi pendientes (agenda los que
+# ya fueron aprobados pero se quedaron sin confirmar) y LUEGO arranca el servidor.
+# Se encadena con ';' a propósito: si la conciliación falla (p. ej. una caída
+# pasajera de Wompi), NO se aborta el despliegue; el servidor arranca igual y su
+# tarea periódica de reconciliación (cada 15 min) reintentará. Se usa 'exec' para
+# que node reciba las señales (SIGTERM) y el apagado ordenado funcione.
+CMD ["sh", "-c", "node scripts/conciliar-pendientes.js; exec node server.js"]

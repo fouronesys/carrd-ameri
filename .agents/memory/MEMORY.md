@@ -1,2 +1,2 @@
-- [Wompi integration gotchas](wompi-integration.md) — key/secret slots get swapped (validate via checkout URL); secrets need requestEnvVar not setEnvVars; HMAC pay-link scheme.
-- [Scroll-to-end gates](scroll-gate-no-overflow.md) — a "scroll to bottom to unlock" UI must also unlock when content fits without overflow, or users get stuck.
+- [Fresatanika backend](fresatanika-backend.md) — Node/Express catalog+booking app: JSON-file DB (no better-sqlite3), CapRover needs volume at /data, strict Wompi payment checks, raster-only uploads.
+- [Standalone imports in artifact workspaces](standalone-import-routing.md) — artifact commands run from their artifact directory; stopped legacy routes can still intercept root-server APIs.

@@ -1,0 +1,144 @@
+uploads = []
+
+[[generated]]
+id = "iylMAedjhCMCMYo_AY8x7"
+uri = "file://assets/og-image.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "Dl_qc-SS01Q0dU5eaz0Ky"
+uri = "file://attached_assets/generated_images/fresatanika_icono.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "PlFms0DbVhxtXvs8Tk1Yz"
+uri = "file://attached_assets/generated_images/fresatanika_logo.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "86QeJFzPY-UN9SeVaUkbZ"
+uri = "file://attached_assets/generated_images/fresatanika_banner_horizontal.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "Mx-xNHCUTxjFmvGcMeHih"
+uri = "file://attached_assets/generated_images/fresatanika_banner_story.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "tM9esDWL3qjETBk11YawY"
+uri = "file://attached_assets/generated_images/fresatanika_og.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "Ghf2oz-7_p9F3lx8qYFvn"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_portada.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "rYEG23GxqLiMgLIRuXE2B"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_tarot.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "ErFy7ukd-oKcrx0hd3BIP"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_rituales.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "hqaZp6wrrWpq9339dmrWC"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_flatlay.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "gUT9BmbrncVm0617AArDe"
+uri = "file://attached_assets/generated_images/fresatanika_ad_cuadrado.png"
+type = "image"
+title = "generated_image"
+
+[[outputs]]
+id = "sJH72w8PbveTB5zNvWnmB"
+uri = "file://assets/og-image.png"
+type = "image"
+title = "Preview image del enlace (OG Image)"
+logical_id = "8c6b042b-0b72-4b37-a73b-5dc2fcf47443"
+
+[[outputs]]
+id = "8SqJTCfDR8nRZXB8R16qB"
+uri = "file://attached_assets/generated_images/fresatanika_icono.png"
+type = "image"
+title = "Icono / emblema (fresa y luna)"
+logical_id = "e7d7725a-e2ae-4c96-8cbb-c47952923ed9"
+
+[[outputs]]
+id = "vBiyz6MIUjVnD0HXIsKtz"
+uri = "file://attached_assets/generated_images/fresatanika_logo.png"
+type = "image"
+title = "Logo wordmark Fresatanika"
+logical_id = "5edc29d2-bd4c-4b00-8a17-ff65d46e28e0"
+
+[[outputs]]
+id = "x76Q7qo1VP0jIbRWxj0QM"
+uri = "file://attached_assets/generated_images/fresatanika_banner_horizontal.png"
+type = "image"
+title = "Banner horizontal (web / redes)"
+logical_id = "4237fe89-91b4-41ed-9d7f-47973eaf1675"
+
+[[outputs]]
+id = "qcxIPEpxJ6t5LnXAEHO16"
+uri = "file://attached_assets/generated_images/fresatanika_banner_story.png"
+type = "image"
+title = "Banner vertical (historias de Instagram)"
+logical_id = "9e3c7ea8-be1e-4b67-a253-d39e25ff9259"
+
+[[outputs]]
+id = "4o25R5kprD1-IPrJX3v8s"
+uri = "file://attached_assets/generated_images/fresatanika_og.png"
+type = "image"
+title = "Imagen para compartir enlaces (Open Graph)"
+logical_id = "b9613d31-7133-4b8e-8617-1bd48eba972e"
+
+[[outputs]]
+id = "JjSg2ee4I-_oAP1Vjfnuh"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_portada.png"
+type = "image"
+title = "Portada del perfil (altar con marca)"
+logical_id = "3330af20-d2c8-47fb-a1b1-88358e5c17e6"
+
+[[outputs]]
+id = "hFj8qoXhQ4wNLxqQlFNDd"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_tarot.png"
+type = "image"
+title = "Rincón de lecturas (bola de cristal y tarot)"
+logical_id = "c5abb8ce-bac0-4713-a40f-909204017cc6"
+
+[[outputs]]
+id = "7AAR5Ok8z0VXHCltHV5mK"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_rituales.png"
+type = "image"
+title = "Rituales y endulzamientos (velas, miel, manzana)"
+logical_id = "91fb2c21-3c9d-4530-9638-88da3576cf22"
+
+[[outputs]]
+id = "YrPDmoho8qSxEsmusZ0pH"
+uri = "file://attached_assets/generated_images/fresatanika_gbp_flatlay.png"
+type = "image"
+title = "Mesa de trabajo espiritual (vista superior)"
+logical_id = "fffe837b-9105-4cb1-816e-9876973bd9e6"
+
+[[outputs]]
+id = "0SJ5WPw_L-Sz7keCwA4p-"
+uri = "file://attached_assets/generated_images/fresatanika_ad_cuadrado.png"
+type = "image"
+title = "Imagen cuadrada para anuncios (1:1)"
+logical_id = "c18b5162-7f2e-4d66-9ab2-0412e353d7dd"

@@ -1,7 +1,7 @@
 kind = "web"
 previewPath = "/"
 title = "Fresatanika"
-description = "Sitio web en español para descubrir y reservar servicios de tarot, hechizos y brujería, con catálogo de servicios y flujo de pago integrado."
+description = "Catálogo Fresatanika con agendamiento, pagos Wompi y panel de administración."
 version = "1.0.0"
 id = "artifacts/fresatanika"
 router = "path"
@@ -9,20 +9,12 @@ router = "path"
 [[services]]
 name = "web"
 paths = [ "/" ]
-localPort = 19988
+localPort = 5000
 
 [services.development]
-run = "pnpm --filter @workspace/fresatanika run dev"
+run = "node ../../server.js"
 
 [services.production]
-build = [ "pnpm", "--filter", "@workspace/fresatanika", "run", "build" ]
-serve = "static"
-publicDir = "artifacts/fresatanika/dist/public"
-
-[[services.production.rewrites]]
-from = "/*"
-to = "/index.html"
 
 [services.env]
-PORT = "19988"
-BASE_PATH = "/"
+PORT = "5000"
