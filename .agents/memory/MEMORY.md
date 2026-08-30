@@ -1,2 +1,3 @@
 - [Fresatanika backend](fresatanika-backend.md) — Node/Express catalog+booking app: JSON-file DB (no better-sqlite3), CapRover needs volume at /data, strict Wompi payment checks, raster-only uploads.
 - [Standalone imports in artifact workspaces](standalone-import-routing.md) — artifact commands run from their artifact directory; stopped legacy routes can still intercept root-server APIs.
+- [Data directory across environments](data-dir-multi-env.md) — CapRover uses the persistent /data mount; Replit development may need the project-local data fallback.
