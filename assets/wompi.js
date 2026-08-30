@@ -720,7 +720,9 @@
 
       // Los descuentos aplican SOLO a los hechizos (sección #hechizos-section).
       var enHechizos = !!(span.closest && span.closest('#hechizos-section'));
-      var clave = enHechizos ? claveHechizo(span.querySelector('strong')) : '';
+      var clave = enHechizos
+        ? (span.getAttribute('data-hechizo-clave') || claveHechizo(span.querySelector('strong')))
+        : '';
       var pctFecha = (clave && PROMOS_FECHA[clave]) ? Number(PROMOS_FECHA[clave]) : 0;
       var hechizoInfo = clave ? { clave: clave, pctFecha: pctFecha } : null;
 

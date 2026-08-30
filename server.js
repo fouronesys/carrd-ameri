@@ -84,7 +84,8 @@ function cargarPreciosValidos() {
     return new Set();
   }
 }
-const PRECIOS_VALIDOS = cargarPreciosValidos();
+const PRECIOS_BASE = cargarPreciosValidos();
+const PRECIOS_VALIDOS = new Set(PRECIOS_BASE);
 
 // Precios en dólares válidos del catálogo (para validar los pagos en USD, que se
 // cobran por PayPal/AstroPay). Evita que se manipule el monto en dólares.
@@ -103,7 +104,8 @@ function cargarUsdValidos() {
     return new Set();
   }
 }
-const USD_VALIDOS = cargarUsdValidos();
+const USD_BASE = cargarUsdValidos();
+const USD_VALIDOS = new Set(USD_BASE);
 
 /* ---------- Catálogo de hechizos (para promociones/descuentos) ---------- */
 // Los descuentos aplican SOLO a los hechizos. Se parsea la sección
@@ -163,7 +165,38 @@ function cargarHechizos() {
   }
   return { mapa: mapa, lista: lista };
 }
-const HECHIZOS = cargarHechizos();
+const HECHIZOS_BASE = cargarHechizos();
+const HECHIZOS = { mapa: Object.assign({}, HECHIZOS_BASE.mapa), lista: HECHIZOS_BASE.lista.slice() };
+
+function claveCatalogo(nombre) {
+  return String(nombre || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 100);
+}
+
+async function refrescarCatalogoValidado() {
+  PRECIOS_VALIDOS.clear();
+  PRECIOS_BASE.forEach(function (p) { PRECIOS_VALIDOS.add(p); });
+  USD_VALIDOS.clear();
+  USD_BASE.forEach(function (p) { USD_VALIDOS.add(p); });
+  HECHIZOS.mapa = Object.assign({}, HECHIZOS_BASE.mapa);
+  HECHIZOS.lista = HECHIZOS_BASE.lista.slice();
+
+  const items = await db.listarCatalogoActivo();
+  items.forEach(function (item) {
+    const cop = parseInt(item.precio_cop, 10) || 0;
+    const usd = Number(item.precio_usd) || 0;
+    if (cop >= 1000) PRECIOS_VALIDOS.add(cop);
+    if (usd > 0) USD_VALIDOS.add(Math.round(usd * 100) / 100);
+    if (item.tipo === 'hechizo' && cop >= 1000) {
+      const clave = item.clave || claveCatalogo(item.nombre);
+      const h = { clave: clave, nombre: item.nombre, precio_cop: cop, precios: [cop], dinamico: true };
+      HECHIZOS.mapa[clave] = h;
+      HECHIZOS.lista.push(h);
+    }
+  });
+  return items;
+}
 
 // Fecha actual (YYYY-MM-DD) en horario de Colombia para comparar ventanas.
 function hoyBogota() {
@@ -1437,6 +1470,7 @@ app.get('/admin', async function (req, res) {
     const accesos = esAdmin ? await db.listarAccesos(80) : [];
     const eliminados = esAdmin ? await db.listarEliminados() : [];
     const realizados = await db.listarRealizados();
+    const catalogo = esAdmin ? await db.listarCatalogo() : [];
     return res.send(templates.adminDashboard({
       registros: registros,
       eliminados: eliminados,
@@ -1450,6 +1484,9 @@ app.get('/admin', async function (req, res) {
       usuarioId: req.session.usuario_id || '',
       usuarios: usuarios,
       accesos: accesos,
+      catalogo: catalogo,
+      tabActiva: String(req.query.tab || 'agenda'),
+      mensaje: String(req.query.ok || '').slice(0, 120),
     }));
   }
   res.send(templates.adminLogin({ noConfig: !ADMIN_PASSWORD }));
@@ -1526,6 +1563,7 @@ app.get('/admin/exportar/pdf', requiereAdmin, async function (req, res) {
 app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
   const reg = await db.obtenerPorRef(req.params.ref);
   if (!reg) {
+    if (req.get('accept') === 'application/json') return res.status(404).json({ ok: false, error: 'Trabajo no encontrado.' });
     return res.redirect('/admin');
   }
 
@@ -1535,6 +1573,9 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
   if (marcarComoHecho) {
     // Validar que el trabajo tenga pago confirmado (estado 'agendado')
     if (reg.estado !== 'agendado') {
+      if (req.get('accept') === 'application/json') {
+        return res.status(400).json({ ok: false, error: 'Solo se pueden entregar trabajos con pago confirmado.' });
+      }
       return res.status(400).send('Solo se pueden marcar como realizados los trabajos con pago confirmado (agendados).');
     }
     
@@ -1560,6 +1601,14 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
     });
   }
 
+  if (req.get('accept') === 'application/json') {
+    return res.json({
+      ok: true,
+      ref: req.params.ref,
+      realizado: marcarComoHecho,
+      trabajo_hecho_en: marcarComoHecho ? new Date().toISOString() : '',
+    });
+  }
   res.redirect('/admin');
 });
 
@@ -1786,6 +1835,80 @@ app.post('/admin/usuarios/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, 
   res.redirect('/admin');
 });
 
+/* ---------- Gestión del catálogo (solo administrador) ---------- */
+function datosCatalogo(body, existente) {
+  const b = body || {};
+  const tipo = b.tipo === 'lectura' ? 'lectura' : 'hechizo';
+  const nombre = String(b.nombre || '').trim().slice(0, 160);
+  const descripcion = String(b.descripcion || '').trim().slice(0, 2500);
+  const seccion = String(b.seccion || '').trim().slice(0, 100);
+  const icono = String(b.icono || '').trim().slice(0, 12) || (tipo === 'hechizo' ? '✦' : '✩');
+  const precioCop = parseInt(b.precio_cop, 10);
+  const precioUsd = Math.round((Number(String(b.precio_usd || '0').replace(',', '.')) || 0) * 100) / 100;
+  const orden = Math.max(0, Math.min(9999, parseInt(b.orden, 10) || 0));
+  if (!nombre || !descripcion || !seccion || !precioCop || precioCop < 1000 || precioUsd < 0) {
+    return { error: 'Completa nombre, descripción, sección y un precio válido en COP.' };
+  }
+  return {
+    item: {
+      tipo: tipo,
+      nombre: nombre,
+      descripcion: descripcion,
+      seccion: seccion,
+      icono: icono,
+      precio_cop: precioCop,
+      precio_usd: precioUsd,
+      orden: orden,
+      activo: existente ? existente.activo !== false : true,
+      clave: existente && existente.clave ? existente.clave : claveCatalogo(nombre),
+      actualizado_en: new Date().toISOString(),
+    },
+  };
+}
+
+app.post('/admin/catalogo', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const validado = datosCatalogo(req.body);
+  if (validado.error) return res.status(400).send(validado.error);
+  const item = Object.assign(validado.item, {
+    id: 'cat-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+    creado_en: new Date().toISOString(),
+  });
+  await db.guardarCatalogoItem(item);
+  await refrescarCatalogoValidado();
+  indexCache = null;
+  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent('Servicio creado correctamente'));
+});
+
+app.post('/admin/catalogo/:id', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const existente = await db.obtenerCatalogoPorId(req.params.id);
+  if (!existente) return res.status(404).send('Servicio no encontrado.');
+  const validado = datosCatalogo(req.body, existente);
+  if (validado.error) return res.status(400).send(validado.error);
+  await db.actualizarCatalogoItem(req.params.id, validado.item);
+  await refrescarCatalogoValidado();
+  indexCache = null;
+  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent('Servicio actualizado'));
+});
+
+app.post('/admin/catalogo/:id/estado', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const existente = await db.obtenerCatalogoPorId(req.params.id);
+  if (!existente) return res.status(404).send('Servicio no encontrado.');
+  await db.actualizarCatalogoItem(req.params.id, {
+    activo: !existente.activo,
+    actualizado_en: new Date().toISOString(),
+  });
+  await refrescarCatalogoValidado();
+  indexCache = null;
+  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent(existente.activo ? 'Servicio ocultado' : 'Servicio publicado'));
+});
+
+app.post('/admin/catalogo/:id/eliminar', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  await db.eliminarCatalogoItem(req.params.id);
+  await refrescarCatalogoValidado();
+  indexCache = null;
+  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent('Servicio eliminado'));
+});
+
 /* ---------- Gestión de promociones (panel admin) ---------- */
 function leerObjetivo(body) {
   // 'todos' o una lista de claves de hechizos.
@@ -1981,20 +2104,54 @@ function urlBase(req) {
 }
 
 let indexCache = null;
-function enviarIndex(req, res, status) {
+function renderCatalogoDinamico(items, tipo) {
+  const lista = (items || []).filter(function (item) { return item.tipo === tipo; });
+  if (!lista.length) return '';
+  const grupos = {};
+  lista.forEach(function (item) {
+    const seccion = String(item.seccion || (tipo === 'hechizo' ? 'Nuevos hechizos' : 'Nuevas lecturas')).trim();
+    if (!grupos[seccion]) grupos[seccion] = [];
+    grupos[seccion].push(item);
+  });
+  return Object.keys(grupos).map(function (seccion) {
+    const spans = grupos[seccion].map(function (item) {
+      const cop = (parseInt(item.precio_cop, 10) || 0).toLocaleString('es-CO');
+      const usd = Number(item.precio_usd) || 0;
+      const usdTexto = usd > 0 ? ' (<u>' + templates.escaparHtml(formatUsd(usd)) + ' USD</u>)' : '';
+      const icono = templates.escaparHtml(item.icono || (tipo === 'hechizo' ? '✦' : '✩'));
+      const claveAttr = tipo === 'hechizo'
+        ? ' data-hechizo-clave="' + templates.escaparHtml(item.clave || claveCatalogo(item.nombre)) + '"'
+        : '';
+      return '<span class="p"' + claveAttr + '>&nbsp;&nbsp;<strong>' + icono + ' ' +
+        templates.escaparHtml(item.nombre || '') + '</strong>&nbsp;&nbsp;<br /><strong><em>$' + cop +
+        usdTexto + '</em></strong><br />' +
+        templates.escaparHtml(item.descripcion || '').replace(/\n/g, '<br />') + '</span>';
+    }).join('');
+    return '<p class="text-component catalogo-dinamico-titulo"><strong><span style="color:#F0A3C3">｡ ˚ ︶︶ꔫ</span> ' +
+      templates.escaparHtml(seccion) + ' <span style="color:#F0A3C3">ꔫ︶︶ ₊ ˚</span></strong></p>' +
+      '<p class="text-component catalogo-dinamico-items">' + spans + '</p>';
+  }).join('');
+}
+
+async function enviarIndex(req, res, status) {
   try {
     if (indexCache === null || process.env.NODE_ENV !== 'production') {
       indexCache = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     }
-    const html = indexCache.split('__BASE_URL__').join(urlBase(req));
+    const catalogo = await db.listarCatalogoActivo();
+    const html = indexCache
+      .split('__BASE_URL__').join(urlBase(req))
+      .split('__CATALOGO_HECHIZOS__').join(renderCatalogoDinamico(catalogo, 'hechizo'))
+      .split('__CATALOGO_LECTURAS__').join(renderCatalogoDinamico(catalogo, 'lectura'));
     res.status(status || 200).type('html').send(html);
   } catch (e) {
+    console.error('[catalogo publico]', e.message);
     res.status(status || 200).sendFile(path.join(ROOT, 'index.html'));
   }
 }
 
-app.get('/', function (req, res) {
-  enviarIndex(req, res, 200);
+app.get('/', async function (req, res) {
+  await enviarIndex(req, res, 200);
 });
 
 app.get('/robots.txt', function (req, res) {
@@ -2246,6 +2403,7 @@ async function iniciar() {
   // 1) Prepara el esquema en PostgreSQL y migra los datos del JSON solo si las
   //    tablas están vacías (idempotente: no duplica ni sobrescribe nada).
   await db.init();
+  await refrescarCatalogoValidado();
 
   // 2) Levanta el servidor HTTP.
   servidor = app.listen(PORT, '0.0.0.0', function () {
