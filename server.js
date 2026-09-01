@@ -1567,7 +1567,7 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
     return res.redirect('/admin');
   }
 
-  const accion = req.body.accion || 'marcar';
+  const accion = (req.body || {}).accion || 'marcar';
   const marcarComoHecho = accion === 'marcar';
 
   if (marcarComoHecho) {
