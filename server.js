@@ -24,6 +24,14 @@ const SERVICIOS_ESTATICOS = catalogoCompra.cargarEstaticos(fs.readFileSync(path.
 function resolverServicioCompra(raw) {
   return catalogoCompra.resolverCompra(raw, SERVICIOS_ESTATICOS, db.obtenerCatalogoPorId);
 }
+// El adelanto independiente es un artículo fijo, no una bandera que permita
+// convertir cualquier servicio (incluido uno oculto) en una compra más barata.
+function esAdelantoIndependiente(raw) {
+  return !String(raw.catalogo_id || '').trim() &&
+    String(raw.nombre || '').trim() === 'Adelanto (urgencia)' &&
+    Number(raw.precio_cop) === ADELANTO_COP &&
+    Number(raw.precio_usd) === Number(ADELANTO_USD);
+}
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ASSISTANT_PASSWORD = process.env.ASSISTANT_PASSWORD || '';
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
@@ -895,6 +903,9 @@ app.post('/api/booking', function (req, res) {
         // los demás extras debe corresponder a un precio real del catálogo.
         let baseExtra, usdExtra, nombreExtra;
         if (esAdelantoSolo) {
+          if (!esAdelantoIndependiente({ ...b, nombre: b.producto })) {
+            return res.status(400).json({ error: 'Los datos del adelanto no coinciden con el catálogo.' });
+          }
           baseExtra = ADELANTO_COP;
           usdExtra = parseFloat(ADELANTO_USD);
           nombreExtra = 'Adelanto (urgencia)';
@@ -1192,6 +1203,9 @@ app.post('/api/checkout', function (req, res) {
 
         let base, nombre, precioUsd, itemAutorizado = null;
         if (esAdelanto) {
+          if (!esAdelantoIndependiente(it)) {
+            return res.status(400).json({ ok: false, error: 'Los datos del adelanto no coinciden con el catálogo.' });
+          }
           base = ADELANTO_COP;
           nombre = 'Adelanto (urgencia)';
           precioUsd = ADELANTO_USD;

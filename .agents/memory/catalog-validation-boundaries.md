@@ -9,7 +9,7 @@ Preserve the original Carrd services and styling as the baseline. Integrate admi
 
 **How to apply:** Include original services when reporting catalog totals. Make ordering semantics explicit within the chosen category; do not describe an administrable-only count as the full catalog.
 
-Use isolated in-memory fixtures for tests that create services, change work status or trigger notifications.
+Use isolated in-memory fixtures or disposable local PostgreSQL for tests that create services, change work status or trigger notifications. Database-contract tests should use a fresh local cluster and a child process that does not inherit project credentials.
 
 **Why:** Development can point at the same external PostgreSQL used by CapRover, and the configured SMTP credentials can send real customer messages. A preview is not proof of data isolation.
 
