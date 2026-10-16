@@ -46,6 +46,10 @@ externalPort = 8080
 localPort = 8081
 externalPort = 8081
 
+[[ports]]
+localPort = 8082
+externalPort = 3001
+
 [userenv]
 
 [userenv.shared]
@@ -55,3 +59,7 @@ SMTP_PORT = "465"
 SMTP_USER = "admin@fourone.com.do"
 SMTP_FROM = "admin@fourone.com.do"
 NOTIFY_TO = "admin@fourone.com.do"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000
