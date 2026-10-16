@@ -1,12 +1,20 @@
 'use strict';
 
 // Isolated application: no connection to PostgreSQL, Wompi, SMTP or live data.
+if (require.main === module) {
+  process.env.ADMIN_PASSWORD = 'isolated-admin-test';
+  process.env.ASSISTANT_PASSWORD = 'isolated-assistant-test';
+  process.env.SESSION_SECRET = 'isolated-session-test-not-a-live-secret';
+  process.env.NODE_ENV = 'test';
+}
 const session = require('express-session');
 function sustituir(nombre, exports) {
   const id = require.resolve(nombre);
   require.cache[id] = { id, filename: id, loaded: true, exports };
 }
 const servicios = new Map();
+const usuarios = new Map();
+const destinatarios = new Map();
 const trabajos = new Map([
   ['TEST-OLD', { ref: 'TEST-OLD', estado: 'agendado', producto: 'Trabajo de prueba antiguo', precio_cop: 20000, creado_en: '2026-01-01', cliente_id: 'TEST-CLIENT' }],
   ['TEST-NEW', { ref: 'TEST-NEW', estado: 'agendado', producto: 'Trabajo de prueba reciente', precio_cop: 30000, creado_en: '2026-02-01' }],
@@ -38,7 +46,25 @@ const db = {
     ingresos: 50000, catalogo: servicios.size,
   }),
   listarPromos: async () => [], listarCodigosConUsos: async () => [],
-  listarUsuariosAdmin: async () => [], listarAccesos: async () => [], listarEliminados: async () => [],
+  listarUsuariosAdmin: async () => copia([...usuarios.values()]),
+  obtenerUsuarioAdmin: async nombre => copia([...usuarios.values()].find(u => u.usuario === nombre) || null),
+  obtenerUsuarioAdminPorId: async id => copia(usuarios.get(id) || null),
+  crearUsuarioAdmin: async u => { usuarios.set(u.id, copia(u)); return copia(u); },
+  actualizarUsuarioAdmin: async (id, cambios) => {
+    if (!usuarios.has(id)) return null;
+    Object.assign(usuarios.get(id), cambios); return copia(usuarios.get(id));
+  },
+  eliminarUsuarioAdmin: async id => usuarios.delete(id),
+  listarDestinatariosNotificaciones: async () => copia([...destinatarios.values()]),
+  obtenerDestinatarioNotificaciones: async id => copia(destinatarios.get(id) || null),
+  guardarDestinatarioNotificaciones: async d => {
+    if ([...destinatarios.values()].some(x => x.email === d.email && x.id !== d.id)) {
+      throw Object.assign(new Error('duplicado'), { code: '23505' });
+    }
+    destinatarios.set(d.id, copia(d)); return copia(d);
+  },
+  eliminarDestinatarioNotificaciones: async id => destinatarios.delete(id),
+  listarAccesos: async () => [], listarEliminados: async () => [],
   registrarAcceso: async () => {}, verificarConexion: async () => {},
 };
 for (const nombre of Object.keys(db)) {
@@ -54,9 +80,13 @@ sustituir('../../lib/mailer', {
 sustituir('connect-pg-simple', () => session.MemoryStore);
 const { app } = require('../../server');
 // These diagnostic routes exist only in this test entrypoint.
-app.get('/__test/state', (req, res) => res.json({ llamadas, servicios: [...servicios.values()], trabajos: [...trabajos.values()] }));
+app.get('/__test/state', (req, res) => res.json({
+  llamadas, servicios: [...servicios.values()], trabajos: [...trabajos.values()],
+  usuarios: [...usuarios.values()].map(({ salt, hash, ...u }) => u),
+  destinatarios: [...destinatarios.values()],
+}));
 if (require.main === module) {
   const servidor = app.listen(Number(process.env.PORT || 5052), '0.0.0.0', () => console.log('Isolated admin fixture ready'));
   process.on('SIGTERM', () => servidor.close(() => process.exit(0)));
 }
-module.exports = { app, servicios, trabajos, llamadas };
+module.exports = { app, servicios, trabajos, llamadas, usuarios, destinatarios };

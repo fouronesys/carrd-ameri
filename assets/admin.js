@@ -130,10 +130,10 @@
   });
   document.addEventListener('input', function (e) {
     if (e.target.matches('#buscador, #catalogo-buscador')) filtrar();
-    if (e.target.matches('.catalog-panel input, .catalog-panel textarea, .catalog-panel select')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
+    if (e.target.matches('.catalog-panel input, .catalog-panel textarea, .catalog-panel select, [data-usuarios-form] input')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
   });
   document.addEventListener('change', function (e) {
-    if (e.target.matches('.catalog-panel select')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
+    if (e.target.matches('.catalog-panel select, [data-usuarios-form] select')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
     if (e.target.matches('#catalogo-filtro')) filtrar();
     if (e.target.matches('.catalog-create [name=tipo]')) sugerir(e.target.form);
   });
@@ -141,7 +141,8 @@
     var form = e.target;
     var trabajo = form.matches('.trabajo-form');
     var catalogo = !!form.closest('.catalog-panel');
-    if (!trabajo && !catalogo) return;
+    var usuarios = form.matches('[data-usuarios-form]');
+    if (!trabajo && !catalogo && !usuarios) return;
     if (e.defaultPrevented) return;
     e.preventDefault();
     if (mutando) return;
@@ -166,6 +167,9 @@
         var docs = await Promise.all([cargar('agenda'), cargar('realizados')]);
         reemplazar('agenda', docs[0]); reemplazar('realizados', docs[1]);
         mostrarToast(d.realizado ? 'Trabajo marcado como entregado' : 'Trabajo devuelto a la agenda');
+      } else if (usuarios) {
+        reemplazar('usuarios', await cargar('usuarios'));
+        mostrarToast(d.mensaje || 'Usuarios y notificaciones actualizados');
       } else {
         reemplazar('catalogo', await cargar('catalogo'));
         mostrarToast(d.mensaje || 'Catálogo actualizado');

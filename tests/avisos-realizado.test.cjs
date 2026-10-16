@@ -263,6 +263,21 @@ test('Cola durable: transacciones, concurrencia, caída forzada, reintentos y SM
         await new Promise(r => http.close(r));
       }
     });
+    await t.test('Destinatarios adicionales persisten, se editan y eliminan en PostgreSQL aislado', async () => {
+      const datos = { id: 'DST-TEST', email: 'extra@example.invalid', rol: 'asistente' };
+      await db.guardarDestinatarioNotificaciones(datos);
+      assert.deepEqual(await db.obtenerDestinatarioNotificaciones(datos.id), datos);
+      assert.deepEqual(await db.listarDestinatariosNotificaciones(), [datos]);
+      await db.guardarDestinatarioNotificaciones({ ...datos, rol: 'admin' });
+      assert.equal((await db.obtenerDestinatarioNotificaciones(datos.id)).rol, 'admin');
+      await assert.rejects(
+        db.guardarDestinatarioNotificaciones({ ...datos, id: 'OTRO' }),
+        e => e.code === '23505'
+      );
+      await db.eliminarDestinatarioNotificaciones(datos.id);
+      assert.deepEqual(await db.listarDestinatariosNotificaciones(), []);
+      assert.equal(await db.obtenerDestinatarioNotificaciones(datos.id), null);
+    });
   } finally {
     if (hijo) { const salida = once(hijo, 'exit'); hijo.kill('SIGKILL'); await salida; }
     if (db) await db.cerrar();

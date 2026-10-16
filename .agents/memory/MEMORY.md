@@ -3,3 +3,4 @@
 - [Data directory across environments](data-dir-multi-env.md) — CapRover uses the persistent /data mount; Replit development may need the project-local data fallback.
 - [Catalog and validation boundaries](catalog-validation-boundaries.md) — preserve the original Carrd services; use isolated fixtures for mutating tests.
 - [Delivery notification guarantees](delivery-notification-guarantees.md) — favor recovery; SMTP cannot guarantee exactly-once delivery across a crash before the database commit.
+- [Notification roles](notification-roles.md) — assistants receive operational notices only; access alerts are admin-only; keep customer messages private.

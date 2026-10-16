@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const db = require('./lib/db');
 const { crearColaAvisos } = require('./lib/avisos-realizado');
 const mailer = require('./lib/mailer');
+const notificaciones = require('./lib/notificaciones');
 const templates = require('./lib/templates');
 const exportar = require('./lib/exportar');
 const catalogoUtil = require('./lib/catalogo');
@@ -1459,7 +1460,7 @@ app.get('/admin', async function (req, res) {
     const esAdmin = req.session.rol === 'admin';
     const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados'] : ['agenda', 'realizados'];
     const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
-    const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen] = await Promise.all([
+    const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios] = await Promise.all([
       tab === 'agenda' ? db.listarAgendaPanel() : [],
       tab === 'promos' ? db.listarPromos() : [],
       tab === 'promos' ? db.listarCodigosConUsos() : [],
@@ -1469,6 +1470,7 @@ app.get('/admin', async function (req, res) {
       tab === 'realizados' ? db.listarRealizados() : [],
       tab === 'catalogo' ? db.listarCatalogo() : [],
       db.resumenPanel(),
+      tab === 'usuarios' ? db.listarDestinatariosNotificaciones() : [],
     ]);
     res.set('Cache-Control', 'no-store');
     return res.send(templates.adminDashboard({
@@ -1483,6 +1485,7 @@ app.get('/admin', async function (req, res) {
       usuario: req.session.usuario || '',
       usuarioId: req.session.usuario_id || '',
       usuarios: usuarios,
+      destinatarios: destinatarios,
       accesos: accesos,
       catalogo: catalogo,
       resumen: resumen,
@@ -1795,21 +1798,34 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
 });
 
 /* ---------- Gestión de usuarios del panel (solo administrador) ---------- */
+function errorUsuarios(req, res, mensaje, status = 400, campos) {
+  if (req.accepts(['json', 'html']) === 'json') return res.status(status).json({ ok: false, error: mensaje, campos });
+  return res.status(status).type('text').send(mensaje);
+}
+
+function usuariosGuardados(req, res, mensaje) {
+  if (req.accepts(['json', 'html']) === 'json') return res.json({ ok: true, mensaje });
+  return res.redirect('/admin?tab=usuarios&ok=' + encodeURIComponent(mensaje));
+}
+
 app.post('/admin/usuarios', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const b = req.body || {};
   const nombre = (b.nombre || '').toString().trim().slice(0, 120);
   const usuario = (b.usuario || '').toString().trim().toLowerCase();
   const password = (b.password || '').toString();
-  const rol = b.rol === 'admin' ? 'admin' : 'asistente';
+  const rol = b.rol || 'asistente';
+  const email = notificaciones.normalizarCorreo(b.email);
 
   if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) {
-    return res.status(400).send('El usuario debe tener entre 3 y 30 caracteres: letras, números, punto, guion o guion bajo.');
+    return errorUsuarios(req, res, 'El usuario debe tener entre 3 y 30 caracteres: letras, números, punto, guion o guion bajo.');
   }
   if (password.length < 6) {
-    return res.status(400).send('La contraseña debe tener al menos 6 caracteres.');
+    return errorUsuarios(req, res, 'La contraseña debe tener al menos 6 caracteres.');
   }
+  if (!notificaciones.rolValido(rol)) return errorUsuarios(req, res, 'Selecciona un rol válido.');
+  if (email && !notificaciones.correoValido(email)) return errorUsuarios(req, res, 'Escribe un solo correo electrónico válido.', 400, { email: 'Correo no válido.' });
   if (await db.obtenerUsuarioAdmin(usuario)) {
-    return res.status(400).send('Ya existe un usuario con ese nombre.');
+    return errorUsuarios(req, res, 'Ya existe un usuario con ese nombre.');
   }
   const cred = hashearPassword(password);
   await db.crearUsuarioAdmin({
@@ -1817,21 +1833,55 @@ app.post('/admin/usuarios', mismoOrigen, requiereAdmin, soloAdmin, async functio
     usuario: usuario,
     nombre: nombre || usuario,
     rol: rol,
+    email: email,
     salt: cred.salt,
     hash: cred.hash,
     creado_en: new Date().toISOString(),
     ultimo_acceso: '',
   });
-  res.redirect('/admin');
+  return usuariosGuardados(req, res, 'Usuario creado');
+});
+
+app.post('/admin/usuarios/:id/correo', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const email = notificaciones.normalizarCorreo((req.body || {}).email);
+  if (email && !notificaciones.correoValido(email)) return errorUsuarios(req, res, 'Escribe un solo correo electrónico válido.', 400, { email: 'Correo no válido.' });
+  // Solo modifica el correo, nunca acepta rol, contraseña o permisos del formulario.
+  const usuario = await db.actualizarUsuarioAdmin(req.params.id, { email });
+  if (!usuario) return errorUsuarios(req, res, 'El usuario ya no existe.', 404);
+  return usuariosGuardados(req, res, email ? 'Correo vinculado al usuario' : 'Correo desvinculado del usuario');
 });
 
 app.post('/admin/usuarios/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   // Un administrador no puede eliminar la propia cuenta con la que inició sesión.
   if (req.session.usuario_id && req.session.usuario_id === req.params.id) {
-    return res.status(400).send('No puedes eliminar tu propia cuenta mientras la usas.');
+    return errorUsuarios(req, res, 'No puedes eliminar tu propia cuenta mientras la usas.');
   }
   await db.eliminarUsuarioAdmin(req.params.id);
-  res.redirect('/admin');
+  return usuariosGuardados(req, res, 'Usuario eliminado');
+});
+
+async function guardarDestinatario(req, res) {
+  const b = req.body || {};
+  const email = notificaciones.normalizarCorreo(b.email);
+  if (!notificaciones.correoValido(email)) return errorUsuarios(req, res, 'Escribe un solo correo electrónico válido.', 400, { email: 'Correo no válido.' });
+  if (!notificaciones.rolValido(b.rol)) return errorUsuarios(req, res, 'Selecciona un rol válido.', 400, { rol: 'Rol no válido.' });
+  if (req.params.id && !await db.obtenerDestinatarioNotificaciones(req.params.id)) return errorUsuarios(req, res, 'El destinatario ya no existe.', 404);
+  try {
+    await db.guardarDestinatarioNotificaciones({
+      id: req.params.id || 'dst-' + crypto.randomUUID(), email, rol: b.rol,
+    });
+  } catch (e) {
+    if (e.code === '23505') return errorUsuarios(req, res, 'Este correo ya está en los destinatarios adicionales. Edita el existente.', 409, { email: 'Este correo ya existe.' });
+    throw e;
+  }
+  return usuariosGuardados(req, res, 'Destinatario guardado');
+}
+
+app.post('/admin/notificaciones', mismoOrigen, requiereAdmin, soloAdmin, guardarDestinatario);
+app.post('/admin/notificaciones/:id', mismoOrigen, requiereAdmin, soloAdmin, guardarDestinatario);
+app.post('/admin/notificaciones/:id/eliminar', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  if (!await db.eliminarDestinatarioNotificaciones(req.params.id)) return errorUsuarios(req, res, 'El destinatario ya no existe.', 404);
+  return usuariosGuardados(req, res, 'Destinatario eliminado');
 });
 
 /* ---------- Gestión del catálogo (solo administrador) ---------- */
