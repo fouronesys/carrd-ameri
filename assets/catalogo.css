@@ -1,0 +1,21 @@
+/* Explicit Carrd-compatible styling for services created from the admin panel. */
+.catalogo-dinamico-titulo,
+.catalogo-dinamico-items,
+.catalogo-servicio {
+  color: #c2a7b7;
+  -webkit-text-fill-color: currentColor;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.625rem;
+  line-height: 1.5;
+  text-align: left;
+}
+.catalogo-dinamico-titulo {
+  color: #f0a3c3;
+  margin: 1.4rem 0 0.7rem;
+}
+.catalogo-servicio {
+  display: block;
+  margin: 0.8rem 0;
+}
+.catalogo-servicio strong { color: #f1dbe7; }
+.catalogo-dinamico-items span.p + span.p { margin-top: 1rem; }

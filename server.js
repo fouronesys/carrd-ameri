@@ -12,6 +12,7 @@ const db = require('./lib/db');
 const mailer = require('./lib/mailer');
 const templates = require('./lib/templates');
 const exportar = require('./lib/exportar');
+const catalogoUtil = require('./lib/catalogo');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -1454,23 +1455,21 @@ async function registrarYalertarAcceso(req, info) {
 
 app.get('/admin', async function (req, res) {
   if (req.session && req.session.admin) {
-    const listaAg = await db.listarAgendamientos();
-    const registros = [];
-    for (const r of listaAg) {
-      registros.push(Object.assign({}, r, { cliente_email: await emailDelCliente(r) }));
-    }
     const esAdmin = req.session.rol === 'admin';
-    const promos = await db.listarPromos();
-    const listaCod = await db.listarCodigos();
-    const codigos = [];
-    for (const c of listaCod) {
-      codigos.push(Object.assign({}, c, { usos: await db.contarUsosCodigo(c.codigo) }));
-    }
-    const usuarios = esAdmin ? await db.listarUsuariosAdmin() : [];
-    const accesos = esAdmin ? await db.listarAccesos(80) : [];
-    const eliminados = esAdmin ? await db.listarEliminados() : [];
-    const realizados = await db.listarRealizados();
-    const catalogo = esAdmin ? await db.listarCatalogo() : [];
+    const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados'] : ['agenda', 'realizados'];
+    const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
+    const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen] = await Promise.all([
+      tab === 'agenda' ? db.listarAgendaPanel() : [],
+      tab === 'promos' ? db.listarPromos() : [],
+      tab === 'promos' ? db.listarCodigosConUsos() : [],
+      tab === 'usuarios' ? db.listarUsuariosAdmin() : [],
+      tab === 'usuarios' ? db.listarAccesos(80) : [],
+      tab === 'eliminados' ? db.listarEliminados() : [],
+      tab === 'realizados' ? db.listarRealizados() : [],
+      tab === 'catalogo' ? db.listarCatalogo() : [],
+      db.resumenPanel(),
+    ]);
+    res.set('Cache-Control', 'no-store');
     return res.send(templates.adminDashboard({
       registros: registros,
       eliminados: eliminados,
@@ -1485,7 +1484,10 @@ app.get('/admin', async function (req, res) {
       usuarios: usuarios,
       accesos: accesos,
       catalogo: catalogo,
-      tabActiva: String(req.query.tab || 'agenda'),
+      resumen: resumen,
+      resumenCatalogo: tab === 'catalogo' ? catalogoUtil.resumen(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), catalogo) : {},
+      cargaPorPestana: true,
+      tabActiva: tab,
       mensaje: String(req.query.ok || '').slice(0, 120),
     }));
   }
@@ -1567,7 +1569,10 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
     return res.redirect('/admin');
   }
 
-  const accion = (req.body || {}).accion || 'marcar';
+  const accion = (req.body || {}).accion;
+  if (accion !== 'marcar' && accion !== 'desmarcar') {
+    return res.status(400).json({ ok: false, error: 'Selecciona marcar o desmarcar el trabajo.' });
+  }
   const marcarComoHecho = accion === 'marcar';
 
   if (marcarComoHecho) {
@@ -1580,15 +1585,21 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
     }
     
     // Actualizar como realizado
-    await db.actualizarPorRef(req.params.ref, {
-      trabajo_hecho: true,
-      trabajo_hecho_en: new Date().toISOString(),
-    });
+    if (!reg.trabajo_hecho) {
+      await db.actualizarPorRef(req.params.ref, {
+        trabajo_hecho: true,
+        trabajo_hecho_en: new Date().toISOString(),
+      });
+    }
 
     // Enviar correo solo si no se ha enviado antes
-    if (!reg.aviso_realizado_enviado) {
-      await notificarEstadoCliente(req.params.ref, 'realizado');
-      await db.actualizarPorRef(req.params.ref, { aviso_realizado_enviado: new Date().toISOString() });
+    if (!reg.aviso_realizado_enviado && !reg.cliente_aviso_realizado && !avisosPorRef.has(req.params.ref)) {
+      // Do not hold the HTTP response while waiting for the SMTP server.
+      avisosPorRef.add(req.params.ref);
+      const tarea = notificarEstadoCliente(req.params.ref, 'realizado')
+        .catch(e => console.error('[aviso realizado]', e.message));
+      avisosEnCurso.add(tarea);
+      tarea.finally(() => { avisosEnCurso.delete(tarea); avisosPorRef.delete(req.params.ref); });
     }
   } else {
     // Desmarcar: limpiar banderas de seguimiento y aviso de entrega
@@ -1838,16 +1849,24 @@ app.post('/admin/usuarios/eliminar/:id', mismoOrigen, requiereAdmin, soloAdmin, 
 /* ---------- Gestión del catálogo (solo administrador) ---------- */
 function datosCatalogo(body, existente) {
   const b = body || {};
-  const tipo = b.tipo === 'lectura' ? 'lectura' : 'hechizo';
+  const tipo = b.tipo;
   const nombre = String(b.nombre || '').trim().slice(0, 160);
   const descripcion = String(b.descripcion || '').trim().slice(0, 2500);
   const seccion = String(b.seccion || '').trim().slice(0, 100);
   const icono = String(b.icono || '').trim().slice(0, 12) || (tipo === 'hechizo' ? '✦' : '✩');
-  const precioCop = parseInt(b.precio_cop, 10);
-  const precioUsd = Math.round((Number(String(b.precio_usd || '0').replace(',', '.')) || 0) * 100) / 100;
-  const orden = Math.max(0, Math.min(9999, parseInt(b.orden, 10) || 0));
-  if (!nombre || !descripcion || !seccion || !precioCop || precioCop < 1000 || precioUsd < 0) {
-    return { error: 'Completa nombre, descripción, sección y un precio válido en COP.' };
+  const precioCop = Number(b.precio_cop);
+  const precioUsd = Number(String(b.precio_usd || '0').replace(',', '.'));
+  const orden = Number(b.orden);
+  const campos = {};
+  if (!['hechizo', 'lectura'].includes(tipo)) campos.tipo = 'Selecciona hechizo o lectura.';
+  if (!nombre) campos.nombre = 'Escribe un nombre.';
+  if (!descripcion) campos.descripcion = 'Escribe una descripción.';
+  if (!seccion) campos.seccion = 'Selecciona o escribe una sección.';
+  if (!Number.isSafeInteger(precioCop) || precioCop < 1000) campos.precio_cop = 'El precio COP debe ser un entero de al menos 1.000.';
+  if (!Number.isFinite(precioUsd) || precioUsd < 0 || Math.abs(precioUsd * 100 - Math.round(precioUsd * 100)) > 0.00001) campos.precio_usd = 'Escribe un precio USD válido con máximo dos decimales.';
+  if (!Number.isInteger(orden) || orden < 0 || orden > 9999) campos.orden = 'El orden debe ser un entero entre 0 y 9999.';
+  if (Object.keys(campos).length) {
+    return { error: Object.values(campos).join(' '), campos };
   }
   return {
     item: {
@@ -1866,47 +1885,63 @@ function datosCatalogo(body, existente) {
   };
 }
 
+function errorCatalogo(req, res, mensaje, status, campos) {
+  if (req.accepts(['json', 'html']) === 'json') return res.status(status || 400).json({ ok: false, error: mensaje, campos });
+  // Progressive fallback: render the submitted values, not a dead-end text page.
+  return res.status(status || 400).send(templates.adminDashboard({
+    rol: req.session.rol, tabActiva: 'catalogo', cargaPorPestana: true,
+    catalogoError: mensaje, catalogoBorrador: req.body, catalogoEdicion: req.params.id || '',
+  }));
+}
+
+function catalogoGuardado(req, res, mensaje) {
+  if (req.accepts(['json', 'html']) === 'json') return res.json({ ok: true, mensaje });
+  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent(mensaje));
+}
+
 app.post('/admin/catalogo', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const validado = datosCatalogo(req.body);
-  if (validado.error) return res.status(400).send(validado.error);
+  if (validado.error) return errorCatalogo(req, res, validado.error, 400, validado.campos);
   const item = Object.assign(validado.item, {
     id: 'cat-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
     creado_en: new Date().toISOString(),
   });
+  // Duplicate display names must not overwrite each other's promotion key.
+  item.clave += '-' + item.id;
   await db.guardarCatalogoItem(item);
   await refrescarCatalogoValidado();
   indexCache = null;
-  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent('Servicio creado correctamente'));
+  catalogoGuardado(req, res, 'Servicio creado correctamente');
 });
 
 app.post('/admin/catalogo/:id', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const existente = await db.obtenerCatalogoPorId(req.params.id);
-  if (!existente) return res.status(404).send('Servicio no encontrado.');
+  if (!existente) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   const validado = datosCatalogo(req.body, existente);
-  if (validado.error) return res.status(400).send(validado.error);
+  if (validado.error) return errorCatalogo(req, res, validado.error, 400, validado.campos);
   await db.actualizarCatalogoItem(req.params.id, validado.item);
   await refrescarCatalogoValidado();
   indexCache = null;
-  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent('Servicio actualizado'));
+  catalogoGuardado(req, res, 'Servicio actualizado');
 });
 
 app.post('/admin/catalogo/:id/estado', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const existente = await db.obtenerCatalogoPorId(req.params.id);
-  if (!existente) return res.status(404).send('Servicio no encontrado.');
+  if (!existente) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   await db.actualizarCatalogoItem(req.params.id, {
     activo: !existente.activo,
     actualizado_en: new Date().toISOString(),
   });
   await refrescarCatalogoValidado();
   indexCache = null;
-  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent(existente.activo ? 'Servicio ocultado' : 'Servicio publicado'));
+  catalogoGuardado(req, res, existente.activo ? 'Servicio ocultado' : 'Servicio publicado');
 });
 
 app.post('/admin/catalogo/:id/eliminar', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   await db.eliminarCatalogoItem(req.params.id);
   await refrescarCatalogoValidado();
   indexCache = null;
-  res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent('Servicio eliminado'));
+  catalogoGuardado(req, res, 'Servicio eliminado');
 });
 
 /* ---------- Gestión de promociones (panel admin) ---------- */
@@ -2104,29 +2139,30 @@ function urlBase(req) {
 }
 
 let indexCache = null;
+function renderServicio(item) {
+  const tipo = item.tipo;
+  const cop = (parseInt(item.precio_cop, 10) || 0).toLocaleString('es-CO');
+  const usd = Number(item.precio_usd) || 0;
+  const usdTexto = usd > 0 ? ' (<u>' + templates.escaparHtml(formatUsd(usd)) + ' USD</u>)' : '';
+  const claveAttr = tipo === 'hechizo'
+    ? ' data-hechizo-clave="' + templates.escaparHtml(item.clave || claveCatalogo(item.nombre)) + '"' : '';
+  return '<span class="p catalogo-servicio"' + claveAttr + '><strong>' +
+    templates.escaparHtml(item.icono || (tipo === 'hechizo' ? '✦' : '✩')) + ' ' +
+    templates.escaparHtml(item.nombre) + '</strong><br /><strong><em>$' + cop + usdTexto + '</em></strong><br />' +
+    templates.escaparHtml(item.descripcion).replace(/\n/g, '<br />') + '</span>';
+}
+
 function renderCatalogoDinamico(items, tipo) {
   const lista = (items || []).filter(function (item) { return item.tipo === tipo; });
   if (!lista.length) return '';
-  const grupos = {};
+  const grupos = Object.create(null);
   lista.forEach(function (item) {
     const seccion = String(item.seccion || (tipo === 'hechizo' ? 'Nuevos hechizos' : 'Nuevas lecturas')).trim();
     if (!grupos[seccion]) grupos[seccion] = [];
     grupos[seccion].push(item);
   });
   return Object.keys(grupos).map(function (seccion) {
-    const spans = grupos[seccion].map(function (item) {
-      const cop = (parseInt(item.precio_cop, 10) || 0).toLocaleString('es-CO');
-      const usd = Number(item.precio_usd) || 0;
-      const usdTexto = usd > 0 ? ' (<u>' + templates.escaparHtml(formatUsd(usd)) + ' USD</u>)' : '';
-      const icono = templates.escaparHtml(item.icono || (tipo === 'hechizo' ? '✦' : '✩'));
-      const claveAttr = tipo === 'hechizo'
-        ? ' data-hechizo-clave="' + templates.escaparHtml(item.clave || claveCatalogo(item.nombre)) + '"'
-        : '';
-      return '<span class="p"' + claveAttr + '>&nbsp;&nbsp;<strong>' + icono + ' ' +
-        templates.escaparHtml(item.nombre || '') + '</strong>&nbsp;&nbsp;<br /><strong><em>$' + cop +
-        usdTexto + '</em></strong><br />' +
-        templates.escaparHtml(item.descripcion || '').replace(/\n/g, '<br />') + '</span>';
-    }).join('');
+    const spans = grupos[seccion].map(renderServicio).join('');
     return '<p class="text-component catalogo-dinamico-titulo"><strong><span style="color:#F0A3C3">｡ ˚ ︶︶ꔫ</span> ' +
       templates.escaparHtml(seccion) + ' <span style="color:#F0A3C3">ꔫ︶︶ ₊ ˚</span></strong></p>' +
       '<p class="text-component catalogo-dinamico-items">' + spans + '</p>';
@@ -2139,14 +2175,12 @@ async function enviarIndex(req, res, status) {
       indexCache = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     }
     const catalogo = await db.listarCatalogoActivo();
-    const html = indexCache
-      .split('__BASE_URL__').join(urlBase(req))
-      .split('__CATALOGO_HECHIZOS__').join(renderCatalogoDinamico(catalogo, 'hechizo'))
-      .split('__CATALOGO_LECTURAS__').join(renderCatalogoDinamico(catalogo, 'lectura'));
+    const html = catalogoUtil.integrar(indexCache, catalogo, renderServicio, renderCatalogoDinamico)
+      .split('__BASE_URL__').join(urlBase(req));
     res.status(status || 200).type('html').send(html);
   } catch (e) {
     console.error('[catalogo publico]', e.message);
-    res.status(status || 200).sendFile(path.join(ROOT, 'index.html'));
+    res.status(503).type('html').send('<h1>Catálogo temporalmente no disponible</h1><p>Inténtalo de nuevo en unos momentos.</p>');
   }
 }
 
@@ -2385,6 +2419,8 @@ let apagando = false;
 let tareaLimpieza = Promise.resolve();
 let tareaSeguimientos = Promise.resolve();
 let tareaReconciliacion = Promise.resolve();
+const avisosEnCurso = new Set();
+const avisosPorRef = new Set();
 
 function lanzarLimpieza() {
   tareaLimpieza = limpiarPendientes().catch(function (e) { console.error('[limpieza]', e.message); });
@@ -2448,7 +2484,7 @@ async function apagar(senal) {
     await cerrarHttp;
     // Espera a que terminen las tareas en segundo plano ya en curso antes de
     // cerrar el pool, para no cortar una escritura a mitad.
-    await Promise.allSettled([tareaLimpieza, tareaSeguimientos, tareaReconciliacion]);
+    await Promise.allSettled([tareaLimpieza, tareaSeguimientos, tareaReconciliacion, ...avisosEnCurso]);
     await db.cerrar();
     console.log('[apagado] Cierre completo.');
     clearTimeout(limite);
@@ -2474,6 +2510,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  app,
   reconciliarPagosPendientes,
   confirmarPagoRef,
   confirmarPagoPedido,
