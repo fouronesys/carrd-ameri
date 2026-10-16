@@ -67,6 +67,7 @@
     '<path d="M60 1l3.2 5L60 11l-3.2-5z" fill="currentColor"/>' +
     '<circle cx="50" cy="6" r="1.2" fill="currentColor"/><circle cx="70" cy="6" r="1.2" fill="currentColor"/></svg>';
   var LUPA = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  var AJUSTES = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true" focusable="false"><path d="M3 6h14M3 14h14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="6" r="2" fill="#18070f" stroke="currentColor" stroke-width="1.3"/><circle cx="13" cy="14" r="2" fill="#18070f" stroke="currentColor" stroke-width="1.3"/></svg>';
 
   function montar(sec) {
     var hr = sec.querySelector('hr');
@@ -78,24 +79,26 @@
 
     var panel = el('div', 'fsb-panel', { role: 'search', 'aria-label': 'Buscar ' + tipo });
     panel.innerHTML =
-      '<div class="fsb-head">' + ORN + '<p class="fsb-title">Buscar ' + tipo + '</p>' + ORN + '</div>' +
-      '<label class="fsb-label" for="' + id + '-q">Nombre, intención o palabra clave</label>' +
-      '<div class="fsb-qwrap">' + LUPA +
-      '<input id="' + id + '-q" class="fsb-input fsb-q" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="ej. amor, limpieza, tiempo">' +
+      '<div class="fsb-bar"><div class="fsb-qwrap">' + LUPA +
+      '<input id="' + id + '-q" class="fsb-q" aria-label="Buscar ' + tipo + ' por nombre, intención o palabra clave" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="Busca tu intención…">' +
       '<button type="button" class="fsb-x" aria-label="Borrar búsqueda" hidden>&times;</button></div>' +
-      '<div class="fsb-grid">' +
-      '<div class="fsb-field fsb-wide"><label class="fsb-label" for="' + id + '-c">Categoría</label>' +
+      '<button type="button" class="fsb-trigger" aria-expanded="false" aria-controls="' + id + '-filters">' + AJUSTES + '<span>Filtros</span><span class="fsb-badge" hidden></span></button></div>' +
+      '<div class="fsb-meta"><p class="fsb-count" aria-live="polite" aria-atomic="true"></p>' +
+      '<button type="button" class="fsb-reset" hidden>Limpiar todo</button></div>' +
+      '<div class="fsb-chips" aria-label="Filtros activos" hidden></div>' +
+      '<section id="' + id + '-filters" class="fsb-popover" aria-label="Filtros de ' + tipo + '" hidden>' +
+      '<header class="fsb-popover-head"><h2>Afina tu búsqueda</h2><button type="button" class="fsb-close" aria-label="Cerrar filtros">&times;</button></header>' +
+      '<div class="fsb-fields">' +
+      '<div class="fsb-field"><label class="fsb-label" for="' + id + '-c">Categoría</label>' +
       '<select id="' + id + '-c" class="fsb-input fsb-c"><option value="">Todas las categorías</option></select></div>' +
-      '<div class="fsb-field"><label class="fsb-label" for="' + id + '-m">Presupuesto máx.</label>' +
+      '<div class="fsb-field"><label class="fsb-label" for="' + id + '-m">Presupuesto máximo</label>' +
       '<div class="fsb-budget"><input id="' + id + '-m" class="fsb-input fsb-m" type="text" inputmode="decimal" autocomplete="off" placeholder="Sin límite" aria-describedby="' + id + '-error">' +
       '<select class="fsb-input fsb-cur" aria-label="Moneda del presupuesto y ordenación"><option value="cop">COP</option><option value="usd">USD</option></select></div>' +
-      '<p id="' + id + '-error" class="fsb-budget-error" hidden role="status"></p></div>' +
-      '<div class="fsb-field"><label class="fsb-label" for="' + id + '-s">Ordenar</label>' +
-      '<select id="' + id + '-s" class="fsb-input fsb-s"><option value="orig">Orden original</option><option value="asc">Precio: menor a mayor</option><option value="desc">Precio: mayor a menor</option><option value="az">Nombre: A–Z</option></select></div>' +
-      '</div>' +
-      '<p class="fsb-note">Precios base, sin comisión. Se ordenan en la moneda elegida; los servicios sin precio en ella aparecen al final.</p>' +
-      '<div class="fsb-foot"><p class="fsb-count" aria-live="polite" aria-atomic="true"></p>' +
-      '<button type="button" class="fsb-reset" disabled>Limpiar filtros</button></div>';
+      '<p class="fsb-help">Precio base, sin comisión.</p><p id="' + id + '-error" class="fsb-budget-error" hidden role="status"></p></div>' +
+      '<div class="fsb-field"><label class="fsb-label" for="' + id + '-s">Ordenar por</label>' +
+      '<select id="' + id + '-s" class="fsb-input fsb-s"><option value="orig">Orden del catálogo</option><option value="asc">Precio: menor a mayor</option><option value="desc">Precio: mayor a menor</option><option value="az">Nombre: A–Z</option></select></div>' +
+      '<p class="fsb-note"></p></div>' +
+      '<footer class="fsb-popover-foot"><button type="button" class="fsb-restore" disabled>Restablecer</button><button type="button" class="fsb-apply">Ver resultados <span aria-hidden="true">→</span></button></footer></section>';
 
     var sel = panel.querySelector('.fsb-c');
     datos.cats.forEach(function (c) {
@@ -122,9 +125,94 @@
     var q = panel.querySelector('.fsb-q'), m = panel.querySelector('.fsb-m'),
       cur = panel.querySelector('.fsb-cur'), so = panel.querySelector('.fsb-s'),
       x = panel.querySelector('.fsb-x'), count = panel.querySelector('.fsb-count'),
-      reset = panel.querySelector('.fsb-reset'), error = panel.querySelector('.fsb-budget-error');
+      reset = panel.querySelector('.fsb-reset'), error = panel.querySelector('.fsb-budget-error'),
+      trigger = panel.querySelector('.fsb-trigger'), popup = panel.querySelector('.fsb-popover'),
+      chips = panel.querySelector('.fsb-chips'), badge = panel.querySelector('.fsb-badge'),
+      restore = panel.querySelector('.fsb-restore'), apply = panel.querySelector('.fsb-apply');
+    var abierto = false, capaSuperior = typeof popup.showPopover === 'function';
+    if (capaSuperior) popup.setAttribute('popover', 'manual');
     q.setAttribute('aria-controls', res.id);
     var movidos = []; // { node, mark }
+
+    function posicionar() {
+      if (!abierto || !panel.getBoundingClientRect) return;
+      var barra = panel.querySelector('.fsb-bar').getBoundingClientRect();
+      var vp = window.visualViewport;
+      var alto = vp ? vp.height : window.innerHeight;
+      var ancho = vp ? vp.width : window.innerWidth;
+      var y = vp ? vp.offsetTop : 0, izquierda = vp ? vp.offsetLeft : 0;
+      var w = Math.max(0, Math.min(360, barra.width, ancho - 24));
+      popup.style.width = w + 'px';
+      popup.style.maxHeight = Math.max(0, alto - 24) + 'px';
+      var top = Math.max(y + 12, Math.min(barra.bottom + 10, y + alto - popup.getBoundingClientRect().height - 12));
+      var left = Math.max(izquierda + 12, Math.min(barra.right - w, izquierda + ancho - w - 12));
+      if (!capaSuperior) {
+        var base = panel.getBoundingClientRect();
+        top -= base.top; left -= base.left;
+      }
+      popup.style.top = top + 'px'; popup.style.left = left + 'px';
+    }
+
+    function cerrar(devolverFoco) {
+      if (!abierto) return;
+      abierto = false;
+      if (capaSuperior) popup.hidePopover();
+      popup.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      panel.classList.remove('fsb-open');
+      document.removeEventListener('pointerdown', fuera);
+      document.removeEventListener('focusin', focoFuera);
+      document.removeEventListener('keydown', teclado, true);
+      document.removeEventListener('scroll', desplazar, true);
+      window.removeEventListener('resize', posicionar);
+      window.removeEventListener('hashchange', cambioSeccion);
+      if (window.visualViewport) window.visualViewport.removeEventListener('resize', posicionar);
+      if (devolverFoco) trigger.focus();
+    }
+    function fuera(e) { if (!panel.contains(e.target)) cerrar(false); }
+    function focoFuera(e) { if (!panel.contains(e.target)) cerrar(false); }
+    function teclado(e) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(true); }
+    }
+    function desplazar(e) { if (!popup.contains(e.target)) posicionar(); }
+    function cambioSeccion() { cerrar(false); }
+    function abrir() {
+      abierto = true; popup.hidden = false;
+      if (capaSuperior) popup.showPopover();
+      panel.classList.add('fsb-open');
+      trigger.setAttribute('aria-expanded', 'true');
+      posicionar();
+      sel.focus();
+      document.addEventListener('pointerdown', fuera);
+      document.addEventListener('focusin', focoFuera);
+      document.addEventListener('keydown', teclado, true);
+      document.addEventListener('scroll', desplazar, true);
+      window.addEventListener('resize', posicionar);
+      window.addEventListener('hashchange', cambioSeccion);
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', posicionar);
+    }
+    function etiqueta(texto, nombre, quitar) {
+      var b = el('button', 'fsb-chip', { type: 'button', 'aria-label': nombre });
+      b.appendChild(document.createTextNode(texto));
+      var cruz = el('span', '', { 'aria-hidden': 'true' }); cruz.textContent = '×'; b.appendChild(cruz);
+      b.addEventListener('click', function () { quitar(); aplicar(); trigger.focus(); });
+      chips.appendChild(b);
+    }
+    function controles(cat, maxTxt, max, invalido, orden, moneda, activo) {
+      chips.textContent = '';
+      if (cat) etiqueta(cat, 'Quitar categoría ' + cat, function () { sel.value = ''; });
+      if (maxTxt) etiqueta(invalido ? 'Revisar presupuesto' : 'Hasta ' + max.toLocaleString('es-CO') + ' ' + moneda.toUpperCase(), 'Quitar presupuesto', function () { m.value = ''; });
+      if (orden !== 'orig') etiqueta(orden === 'az' ? 'Nombre A–Z' : (orden === 'asc' ? 'Menor precio' : 'Mayor precio') + ' · ' + moneda.toUpperCase(), 'Quitar ordenación', function () { so.value = 'orig'; });
+      if (moneda !== 'cop') etiqueta(moneda.toUpperCase(), 'Restablecer moneda a COP', function () { cur.value = 'cop'; });
+      var cuantos = chips.children.length;
+      chips.hidden = !cuantos; badge.hidden = !cuantos;
+      badge.textContent = cuantos;
+      badge.setAttribute('aria-label', cuantos + ' filtros activos');
+      reset.hidden = !activo;
+      restore.disabled = !activo;
+      panel.querySelector('.fsb-note').textContent = 'Se ordena en ' + moneda.toUpperCase() + ', sin conversiones. Los servicios sin precio en esa moneda aparecen al final.';
+      posicionar();
+    }
 
     function restaurar() {
       movidos.forEach(function (r) {
@@ -141,7 +229,7 @@
       var cat = sel.value, moneda = cur.value;
       var maxTxt = m.value.trim();
       var max = filtros.presupuesto(maxTxt, moneda);
-      var invalido = Number.isNaN(max);
+      var invalido = Number.isNaN(max) || Boolean(maxTxt && max === null);
       error.hidden = !invalido;
       error.textContent = invalido ? (moneda === 'cop' ? 'Escribe un valor COP válido, por ejemplo 50.000.' : 'Escribe un valor USD válido, por ejemplo 25,50.') : '';
       m.setAttribute('aria-invalid', String(invalido));
@@ -149,12 +237,13 @@
       var orden = so.value;
       var activo = tokens.length || cat || max !== null || orden !== 'orig';
       x.hidden = !q.value;
-      reset.disabled = !(activo || maxTxt || moneda !== 'cop');
+      controles(cat, maxTxt, max, invalido, orden, moneda, Boolean(q.value || cat || maxTxt || moneda !== 'cop' || orden !== 'orig'));
       var total = datos.items.length;
       if (!activo) {
         sec.classList.remove('fsb-activo');
         vacio.hidden = true;
-        count.textContent = total + ' ' + tipo + ' en el catálogo';
+        count.textContent = total + ' ' + tipo;
+        apply.textContent = 'Ver ' + total + ' resultados →';
         return;
       }
       var lista = datos.items.filter(function (it) {
@@ -182,6 +271,7 @@
       sec.classList.add('fsb-activo');
       vacio.hidden = lista.length > 0;
       count.textContent = lista.length + ' de ' + total + ' ' + tipo;
+      apply.textContent = 'Ver ' + lista.length + ' resultados →';
     }
 
     function limpiar() {
@@ -193,15 +283,23 @@
     m.addEventListener('input', aplicar);
     [sel, cur, so].forEach(function (s) { s.addEventListener('change', aplicar); });
     q.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && q.value) { e.preventDefault(); q.value = ''; aplicar(); }
+      if (e.key === 'Escape' && !abierto && q.value) { e.preventDefault(); q.value = ''; aplicar(); }
       if (e.key === 'Enter') e.preventDefault();
     });
     x.addEventListener('click', function () { q.value = ''; aplicar(); q.focus(); });
     reset.addEventListener('click', function () { limpiar(); q.focus(); });
+    restore.addEventListener('click', function () { limpiar(); });
+    trigger.addEventListener('click', function () { if (abierto) cerrar(false); else abrir(); });
+    panel.querySelector('.fsb-close').addEventListener('click', function () { cerrar(true); });
+    apply.addEventListener('click', function () {
+      if (m.getAttribute('aria-invalid') === 'true') { m.focus(); return; }
+      cerrar(true);
+    });
     vacio.querySelector('button').addEventListener('click', function () { limpiar(); q.focus(); });
 
     sec.__fsbLimpiar = limpiar;
     sec.__fsbDesmontar = function () {
+      cerrar(false);
       restaurar();
       sec.classList.remove('fsb-activo');
       originales.forEach(function (o) { o.classList.remove('fsb-orig'); });
