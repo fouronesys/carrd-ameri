@@ -25,6 +25,11 @@ const db = {
   listarRealizados: async () => copia([...trabajos.values()].filter(r => r.trabajo_hecho)),
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
   actualizarPorRef: async (ref, cambios) => { Object.assign(trabajos.get(ref), cambios); return copia(trabajos.get(ref)); },
+  marcarTrabajoRealizado: async ref => {
+    Object.assign(trabajos.get(ref), { trabajo_hecho: true, trabajo_hecho_en: new Date().toISOString() });
+    return copia(trabajos.get(ref));
+  },
+  procesarSiguienteAvisoRealizado: async () => false,
   obtenerClientePorId: async () => ({ email: 'cliente@example.invalid' }),
   resumenPanel: async () => ({
     total: [...trabajos.values()].filter(r => !r.trabajo_hecho).length,

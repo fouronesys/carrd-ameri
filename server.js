@@ -9,6 +9,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const db = require('./lib/db');
+const { crearColaAvisos } = require('./lib/avisos-realizado');
 const mailer = require('./lib/mailer');
 const templates = require('./lib/templates');
 const exportar = require('./lib/exportar');
@@ -1584,23 +1585,10 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
       return res.status(400).send('Solo se pueden marcar como realizados los trabajos con pago confirmado (agendados).');
     }
     
-    // Actualizar como realizado
-    if (!reg.trabajo_hecho) {
-      await db.actualizarPorRef(req.params.ref, {
-        trabajo_hecho: true,
-        trabajo_hecho_en: new Date().toISOString(),
-      });
-    }
-
-    // Enviar correo solo si no se ha enviado antes
-    if (!reg.aviso_realizado_enviado && !reg.cliente_aviso_realizado && !avisosPorRef.has(req.params.ref)) {
-      // Do not hold the HTTP response while waiting for the SMTP server.
-      avisosPorRef.add(req.params.ref);
-      const tarea = notificarEstadoCliente(req.params.ref, 'realizado')
-        .catch(e => console.error('[aviso realizado]', e.message));
-      avisosEnCurso.add(tarea);
-      tarea.finally(() => { avisosEnCurso.delete(tarea); avisosPorRef.delete(req.params.ref); });
-    }
+    const actualizado = await db.marcarTrabajoRealizado(req.params.ref);
+    if (!actualizado) return res.status(409).json({ ok: false, error: 'El trabajo ya no está disponible para entregar.' });
+    // Persistir antes de responder; SMTP nunca bloquea esta petición.
+    colaAvisos.despertar();
   } else {
     // Desmarcar: limpiar banderas de seguimiento y aviso de entrega
     await db.actualizarPorRef(req.params.ref, {
@@ -2419,8 +2407,7 @@ let apagando = false;
 let tareaLimpieza = Promise.resolve();
 let tareaSeguimientos = Promise.resolve();
 let tareaReconciliacion = Promise.resolve();
-const avisosEnCurso = new Set();
-const avisosPorRef = new Set();
+const colaAvisos = crearColaAvisos(db, mailer);
 
 function lanzarLimpieza() {
   tareaLimpieza = limpiarPendientes().catch(function (e) { console.error('[limpieza]', e.message); });
@@ -2446,6 +2433,7 @@ async function iniciar() {
     console.log('Fresatanika escuchando en el puerto ' + PORT);
     console.log('Datos en: ' + db.DATA_DIR);
     if (!process.env.SMTP_PASS) console.warn('Aviso: SMTP_PASS no está configurado; las notificaciones por correo están desactivadas.');
+    colaAvisos.iniciar();
     lanzarLimpieza();
     intervaloLimpieza = setInterval(lanzarLimpieza, 60 * 60 * 1000);
     lanzarSeguimientos();
@@ -2468,6 +2456,7 @@ async function apagar(senal) {
   if (intervaloLimpieza) clearInterval(intervaloLimpieza);
   if (intervaloSeguimientos) clearInterval(intervaloSeguimientos);
   if (intervaloReconciliacion) clearInterval(intervaloReconciliacion);
+  const cierreAvisos = colaAvisos.detener();
 
   const cerrarHttp = new Promise(function (resolve) {
     if (!servidor) return resolve();
@@ -2484,7 +2473,7 @@ async function apagar(senal) {
     await cerrarHttp;
     // Espera a que terminen las tareas en segundo plano ya en curso antes de
     // cerrar el pool, para no cortar una escritura a mitad.
-    await Promise.allSettled([tareaLimpieza, tareaSeguimientos, tareaReconciliacion, ...avisosEnCurso]);
+    await Promise.allSettled([tareaLimpieza, tareaSeguimientos, tareaReconciliacion, cierreAvisos]);
     await db.cerrar();
     console.log('[apagado] Cierre completo.');
     clearTimeout(limite);

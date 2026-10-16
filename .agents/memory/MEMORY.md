@@ -2,3 +2,4 @@
 - [Standalone imports in artifact workspaces](standalone-import-routing.md) — artifact commands run from their artifact directory; stopped legacy routes can still intercept root-server APIs.
 - [Data directory across environments](data-dir-multi-env.md) — CapRover uses the persistent /data mount; Replit development may need the project-local data fallback.
 - [Catalog and validation boundaries](catalog-validation-boundaries.md) — preserve the original Carrd services; use isolated fixtures for mutating tests.
+- [Delivery notification guarantees](delivery-notification-guarantees.md) — favor recovery; SMTP cannot guarantee exactly-once delivery across a crash before the database commit.
