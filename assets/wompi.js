@@ -71,9 +71,13 @@
     return null;
   }
 
-  function extraerNombreProducto(texto) {
-    var linea = texto.split('\n')[0].trim();
-    linea = linea.replace(/[ෆ⟡⊹˚꒦ᶻ𝗓𐰁ೀ𖥔ꗯಎ☼𝜗᭪𐙚✩]/g, '').trim();
+  function extraerNombreProducto(texto, ficha) {
+    if (ficha && ficha.getAttribute && ficha.getAttribute('data-catalogo-nombre')) {
+      return ficha.getAttribute('data-catalogo-nombre').trim();
+    }
+    var titulo = ficha && ficha.querySelector ? ficha.querySelector('strong') : null;
+    var linea = titulo ? (titulo.textContent || '').trim() : texto.split('\n')[0].trim();
+    linea = linea.replace(/[ෆ⟡⊹˚꒦ᶻ𝗓𐰁ೀ𖥔ꗯಎ☼𝜗᭪𐙚✩✦ᵎ]/g, '').trim();
     linea = linea.replace(/^\s*/, '').trim();
     if (linea.length > 60) linea = linea.substring(0, 57) + '…';
     return linea;
@@ -103,6 +107,10 @@
   // Deriva la clave estable de un hechizo (debe coincidir con el servidor).
   function claveHechizo(strongEl) {
     if (!strongEl) return '';
+    var ficha = strongEl.closest && strongEl.closest('.p[data-hechizo-clave]');
+    if (ficha && ficha.getAttribute('data-hechizo-clave')) {
+      return ficha.getAttribute('data-hechizo-clave').trim().toLowerCase();
+    }
     var t = (strongEl.textContent || '')
       .replace(/\u00a0/g, ' ')
       .replace(ICONOS_HECHIZO, '')
@@ -307,7 +315,7 @@
     var estado = {
       precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi',
       esHechizo: false, clave: '', base: 0, pctFecha: 0, pctCodigo: 0, codigo: '', precioFinal: 0,
-      adelanto: '', incluyeAdelanto: false, moneda: 'cop', esExtra: false,
+      adelanto: '', incluyeAdelanto: false, moneda: 'cop', esExtra: false, catalogoId: '',
     };
 
     var checkbox = document.getElementById('wm-acepto');
@@ -595,6 +603,7 @@
         fd.append('objetivo_fecha_nac', inpObjFecha.value);
         fd.append('info_extra', inpInfo.value.trim());
         fd.append('producto', estado.nombre);
+        if (estado.catalogoId) fd.append('catalogo_id', estado.catalogoId);
         fd.append('precio_cop', String(estado.precioCOP));
         fd.append('precio_texto', estado.precioTexto);
         fd.append('precio_usd', estado.precioUSD || '');
@@ -653,9 +662,10 @@
       limpiarError();
     }
 
-    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo, hechizoInfo, esExtra, esAdelanto) {
+    return function abrirModal(nombre, precioCOP, precioTexto, precioUSD, modo, hechizoInfo, esExtra, esAdelanto, catalogoId) {
       var extra = !!esExtra;
       estado.esExtra = extra;
+      estado.catalogoId = catalogoId || '';
       estado.adelanto = esAdelanto ? 'solo' : '';
       estado.incluyeAdelanto = false;
       estado.precioCOP = precioCOP;
@@ -710,7 +720,7 @@
       // hechizos: abren un formulario corto (nombre + hechizos, máximo 3).
       var enAclaraciones = !!(span.closest && span.closest('#aclaraciones-section'));
 
-      var nombre = enAclaraciones ? limpiarNombreExtra(texto) : extraerNombreProducto(texto);
+      var nombre = enAclaraciones ? limpiarNombreExtra(texto) : extraerNombreProducto(texto, span);
       if (!nombre) return;
 
       var precioMatch = texto.match(REGEX_COP);
@@ -720,9 +730,8 @@
 
       // Los descuentos aplican SOLO a los hechizos (sección #hechizos-section).
       var enHechizos = !!(span.closest && span.closest('#hechizos-section'));
-      var clave = enHechizos
-        ? (span.getAttribute('data-hechizo-clave') || claveHechizo(span.querySelector('strong')))
-        : '';
+      var clave = enHechizos ? claveHechizo(span.querySelector('strong')) : '';
+      var catalogoId = span.getAttribute('data-catalogo-id') || '';
       var pctFecha = (clave && PROMOS_FECHA[clave]) ? Number(PROMOS_FECHA[clave]) : 0;
       var hechizoInfo = clave ? { clave: clave, pctFecha: pctFecha } : null;
 
@@ -741,7 +750,7 @@
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'wompi', hechizoInfo, enAclaraciones, false);
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'wompi', hechizoInfo, enAclaraciones, false, catalogoId);
       });
       span.appendChild(btn);
 
@@ -752,7 +761,7 @@
       btnT.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia', hechizoInfo, enAclaraciones, false);
+        abrirModal(nombre, precioCOP, precioTexto, precioUSD, 'transferencia', hechizoInfo, enAclaraciones, false, catalogoId);
       });
       span.appendChild(btnT);
 
@@ -767,6 +776,7 @@
         e.stopPropagation();
         if (!window.FresaCart) return;
         window.FresaCart.add({
+          catalogo_id: catalogoId,
           nombre: nombre,
           precio_cop: precioCOP,
           precio_usd: precioUSD || '',

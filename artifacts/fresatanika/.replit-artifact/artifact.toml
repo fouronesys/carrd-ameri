@@ -12,7 +12,7 @@ paths = [ "/" ]
 localPort = 5000
 
 [services.development]
-run = "node ../../server.js"
+run = "DATA_DIR=../../data node ../../server.js"
 
 [services.production]
 

@@ -44,13 +44,14 @@
   }
 
   function firmaItem(it) {
-    return [it.nombre, it.precio_cop, it.hechizo_clave, it.es_extra, it.es_adelanto].join('|');
+    return [it.catalogo_id, it.nombre, it.precio_cop, it.hechizo_clave, it.es_extra, it.es_adelanto].join('|');
   }
 
   function sanitizar(it) {
     if (!it || !it.nombre) return null;
     return {
       id: it.id || nuevoId(),
+      catalogo_id: String(it.catalogo_id || '').slice(0, 80),
       nombre: String(it.nombre).slice(0, 200),
       precio_cop: parseInt(it.precio_cop, 10) || 0,
       precio_usd: String(it.precio_usd || '').slice(0, 20),
@@ -1117,6 +1118,7 @@
 
     var itemsPayload = estado.items.map(function (it, i) {
       var out = {
+        catalogo_id: it.catalogo_id,
         nombre: it.nombre,
         precio_cop: it.precio_cop,
         precio_usd: it.precio_usd,

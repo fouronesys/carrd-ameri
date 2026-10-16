@@ -15,10 +15,15 @@ const notificaciones = require('./lib/notificaciones');
 const templates = require('./lib/templates');
 const exportar = require('./lib/exportar');
 const catalogoUtil = require('./lib/catalogo');
+const catalogoCompra = require('./lib/catalogo-compra');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 const ROOT = __dirname;
+const SERVICIOS_ESTATICOS = catalogoCompra.cargarEstaticos(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'));
+function resolverServicioCompra(raw) {
+  return catalogoCompra.resolverCompra(raw, SERVICIOS_ESTATICOS, db.obtenerCatalogoPorId);
+}
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ASSISTANT_PASSWORD = process.env.ASSISTANT_PASSWORD || '';
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
@@ -129,7 +134,7 @@ function limpiarNombreHechizo(raw) {
   return decodificarEntidades(raw)
     .replace(/<[^>]+>/g, '')
     .replace(/\u00a0/g, ' ')
-    .replace(/[ෆ⟡⊹˚꒦ᶻ𝗓𐰁ೀ𖥔ꗯಎ☼𝜗᭪𐙚✩ᵎ]/g, '')
+    .replace(/[ෆ⟡⊹˚꒦ᶻ𝗓𐰁ೀ𖥔ꗯಎ☼𝜗᭪𐙚✩✦ᵎ]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -266,8 +271,10 @@ async function codigoDescuentoPara(clave, codigoStr) {
 // Calcula el mejor descuento aplicable a un hechizo (no se acumulan: se toma el mayor).
 // `base` es el precio base validado (algunos hechizos comparten nombre con precios
 // distintos, por eso se usa el precio base recibido y no un mapa fijo).
-async function calcularDescuentoHechizo(clave, codigoStr, base) {
-  const h = HECHIZOS.mapa[clave];
+async function calcularDescuentoHechizo(clave, codigoStr, base, autorizado) {
+  const h = autorizado && autorizado.tipo === 'hechizo'
+    ? { precios: [autorizado.precio_cop] }
+    : HECHIZOS.mapa[clave];
   if (!h) return null;
   // El precio base debe corresponder realmente a este hechizo; así se evita
   // que un servicio que no es hechizo obtenga descuento enviando una clave válida.
@@ -415,6 +422,7 @@ function sanitizarItemCarrito(raw) {
     (Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
   return {
     id: id,
+    catalogo_id: (raw.catalogo_id || '').toString().trim().slice(0, 80),
     nombre: nombre.slice(0, 200),
     precio_cop: precio,
     precio_usd: (raw.precio_usd || '').toString().slice(0, 20),
@@ -891,15 +899,16 @@ app.post('/api/booking', function (req, res) {
           usdExtra = parseFloat(ADELANTO_USD);
           nombreExtra = 'Adelanto (urgencia)';
         } else {
-          baseExtra = parseInt(b.precio_cop, 10);
-          if (!baseExtra || baseExtra < 1000) {
-            return res.status(400).json({ error: 'El precio no es válido.' });
+          const autorizado = await resolverServicioCompra({
+            catalogo_id: b.catalogo_id, nombre: b.producto,
+            precio_cop: b.precio_cop, precio_usd: b.precio_usd,
+          });
+          if (!autorizado || autorizado.tipo !== 'extra') {
+            return res.status(400).json({ error: 'Los datos del extra no coinciden con el catálogo.' });
           }
-          if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(baseExtra)) {
-            return res.status(400).json({ error: 'El precio no corresponde a ningún servicio del catálogo.' });
-          }
-          usdExtra = parseFloat((b.precio_usd || '').toString().replace(',', '.'));
-          nombreExtra = (b.producto || 'Extra').toString().slice(0, 200);
+          baseExtra = autorizado.precio_cop;
+          usdExtra = autorizado.precio_usd;
+          nombreExtra = autorizado.nombre;
         }
 
         let totalExtra, precioTextoExtra, precioUsdExtra;
@@ -957,25 +966,27 @@ app.post('/api/booking', function (req, res) {
       const contacto = (b.contacto || '').toString().trim();
       if (!contacto) return res.status(400).json({ error: 'Escribe tu WhatsApp o red social para entregarte la evidencia.' });
 
-      // El precio base siempre debe corresponder a un servicio del catálogo.
-      const base = parseInt(b.precio_cop, 10);
-      if (!base || base < 1000) return res.status(400).json({ error: 'El precio no es válido.' });
-      if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(base)) {
-        return res.status(400).json({ error: 'El precio no corresponde a ningún servicio del catálogo.' });
+      const itemAutorizado = await resolverServicioCompra({
+        catalogo_id: b.catalogo_id, nombre: b.producto,
+        precio_cop: b.precio_cop, precio_usd: b.precio_usd,
+      });
+      if (!itemAutorizado || itemAutorizado.tipo === 'extra') {
+        return res.status(400).json({ error: 'Este servicio ya no está disponible o sus datos cambiaron.' });
       }
+      const base = itemAutorizado.precio_cop;
 
       // Precio autoritativo: para hechizos se aplica el descuento (promoción por
       // fecha o código) sobre el precio base, recalculado siempre en el servidor.
-      const claveEnviada = (b.hechizo_clave || '').toString().trim().toLowerCase();
+      const claveEnviada = itemAutorizado.tipo === 'hechizo' ? itemAutorizado.clave : '';
       const codigoEnviado = (b.codigo || '').toString().trim();
-      const info = claveEnviada ? await calcularDescuentoHechizo(claveEnviada, codigoEnviado, base) : null;
+      const info = claveEnviada ? await calcularDescuentoHechizo(claveEnviada, codigoEnviado, base, itemAutorizado) : null;
 
       // El precio en USD se recalcula en paralelo al COP para reflejar el descuento
       // y el adelanto. Es el monto cobrado si se paga en dólares por transferencia
       // (PayPal/AstroPay); en pesos o por Wompi es solo informativo.
-      let usdNum = parseFloat((b.precio_usd || '').toString().replace(',', '.'));
+      let usdNum = Number(itemAutorizado.precio_usd || 0);
       const usdBase = usdNum; // valor base en USD (antes de descuento/adelanto)
-      let precioUsd = (b.precio_usd || '').toString().slice(0, 20);
+      let precioUsd = usdNum > 0 ? String(usdNum) : '';
       const fmtUsd = (n) => {
         const r = Math.round(n * 100) / 100;
         return Number.isInteger(r) ? String(r) : r.toFixed(2);
@@ -1032,12 +1043,8 @@ app.post('/api/booking', function (req, res) {
       }
 
       if (usdManual) {
-        if (isNaN(usdBase)) {
+        if (!Number.isFinite(usdBase) || usdBase <= 0) {
           return res.status(400).json({ error: 'Este servicio no tiene precio en dólares. Paga en pesos (COP).' });
-        }
-        // El precio en dólares debe corresponder a un servicio real del catálogo.
-        if (USD_VALIDOS.size && !USD_VALIDOS.has(Math.round(usdBase * 100) / 100)) {
-          return res.status(400).json({ error: 'El precio en dólares no corresponde a ningún servicio del catálogo.' });
         }
       }
       let totalCop, precioTextoFinal;
@@ -1054,7 +1061,8 @@ app.post('/api/booking', function (req, res) {
       const ref = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
       const registro = {
         ref: ref,
-        producto: (b.producto || '').toString().slice(0, 200),
+        producto: itemAutorizado.nombre,
+        catalogo_id: b.catalogo_id || '',
         precio_cop: totalCop,
         precio_usd: precioUsd,
         precio_texto: precioTextoFinal.slice(0, 180),
@@ -1180,23 +1188,22 @@ app.post('/api/checkout', function (req, res) {
       for (let i = 0; i < items.length; i++) {
         const it = items[i] || {};
         const esAdelanto = !!it.es_adelanto;
-        const esExtra = esAdelanto || !!it.es_extra;
+        let esExtra = esAdelanto;
 
-        let base, nombre, precioUsd;
+        let base, nombre, precioUsd, itemAutorizado = null;
         if (esAdelanto) {
           base = ADELANTO_COP;
           nombre = 'Adelanto (urgencia)';
           precioUsd = ADELANTO_USD;
         } else {
-          base = parseInt(it.precio_cop, 10);
-          if (!base || base < 1000) {
-            return res.status(400).json({ ok: false, error: 'Uno de los servicios tiene un precio no válido.' });
+          itemAutorizado = await resolverServicioCompra(it);
+          if (!itemAutorizado) {
+            return res.status(400).json({ ok: false, error: 'Uno de los servicios ya no está disponible o sus datos cambiaron.' });
           }
-          if (PRECIOS_VALIDOS.size && !PRECIOS_VALIDOS.has(base)) {
-            return res.status(400).json({ ok: false, error: 'Un precio no corresponde a ningún servicio del catálogo.' });
-          }
-          nombre = (it.nombre || 'Servicio').toString().slice(0, 200);
-          precioUsd = (it.precio_usd || '').toString().slice(0, 20);
+          base = itemAutorizado.precio_cop;
+          nombre = itemAutorizado.nombre;
+          precioUsd = String(itemAutorizado.precio_usd || '');
+          esExtra = itemAutorizado.tipo === 'extra';
         }
 
         // Descuentos automáticos por fecha SOLO para hechizos reales (no se piden
@@ -1204,9 +1211,9 @@ app.post('/api/checkout', function (req, res) {
         let precioNeto = base;
         let descuentoPct = 0;
         let precioOriginal = 0;
-        if (!esExtra && it.es_hechizo && it.hechizo_clave) {
+        if (!esExtra && itemAutorizado && itemAutorizado.tipo === 'hechizo') {
           const info = await calcularDescuentoHechizo(
-            it.hechizo_clave.toString().trim().toLowerCase(), '', base);
+            itemAutorizado.clave, '', base, itemAutorizado);
           if (info && info.pct > 0) {
             precioNeto = info.final;
             descuentoPct = info.pct;
@@ -1238,6 +1245,7 @@ app.post('/api/checkout', function (req, res) {
         totalNeto += precioNeto;
         preparados.push({
           nombre: nombre,
+          catalogoId: it.catalogo_id || '',
           precioNeto: precioNeto,
           precioUsd: precioUsd,
           precioTexto: precioTexto,
@@ -1250,6 +1258,10 @@ app.post('/api/checkout', function (req, res) {
           infoExtra: infoExtra,
           fotoFile: fotoFile,
         });
+      }
+
+      if (preparados.some(function (p) { return !p.esExtra; }) && !contacto) {
+        return res.status(400).json({ ok: false, error: 'Escribe tu WhatsApp o red social para entregarte la evidencia.' });
       }
 
       // La comisión de Wompi se aplica UNA sola vez sobre el total (no por servicio).
@@ -1269,6 +1281,7 @@ app.post('/api/checkout', function (req, res) {
           pedido_total_cop: totalCobro,
           cliente_id: clienteId,
           producto: p.nombre,
+          catalogo_id: p.catalogoId,
           precio_cop: p.precioNeto,
           precio_usd: p.precioUsd,
           precio_texto: p.precioTexto.slice(0, 180),
@@ -2184,7 +2197,8 @@ function renderServicio(item) {
   const usdTexto = usd > 0 ? ' (<u>' + templates.escaparHtml(formatUsd(usd)) + ' USD</u>)' : '';
   const claveAttr = tipo === 'hechizo'
     ? ' data-hechizo-clave="' + templates.escaparHtml(item.clave || claveCatalogo(item.nombre)) + '"' : '';
-  return '<span class="p catalogo-servicio"' + claveAttr + '><strong>' +
+  return '<span class="p catalogo-servicio" data-catalogo-id="' + templates.escaparHtml(item.id) +
+    '" data-catalogo-nombre="' + templates.escaparHtml(item.nombre) + '"' + claveAttr + '><strong>' +
     templates.escaparHtml(item.icono || (tipo === 'hechizo' ? '✦' : '✩')) + ' ' +
     templates.escaparHtml(item.nombre) + '</strong><br /><strong><em>$' + cop + usdTexto + '</em></strong><br />' +
     templates.escaparHtml(item.descripcion).replace(/\n/g, '<br />') + '</span>';

@@ -27,7 +27,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "node server.js"
+args = "DATA_DIR=./data node server.js"
 waitForPort = 5000
 
 [[ports]]
