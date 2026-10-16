@@ -40,6 +40,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
       return fetchLocal(destino, options);
     };
     const browsers = [];
+    const actorCatalogo = { rol: 'admin', usuario: 'administrador-contratos', usuario_id: 'TEST-ADMIN-CONTRATOS' };
     const cobro = base => Math.ceil((base + 700 * 1.19) / (1 - 0.0265 * 1.19));
     const firma = (ref, total) => crypto.createHash('sha256')
       .update(ref + String(total * 100) + 'COPcontratos-integridad-sintetica').digest('hex');
@@ -92,7 +93,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         descripcion: 'Servicio sintético', clave: tipo === 'hechizo' ? 'contrato-hechizo' : '',
         precio_cop: 50000 + i * 10000, precio_usd: 12.5 + i,
       }));
-      for (const item of dinamicos) await db.guardarCatalogoItem(item);
+      for (const item of dinamicos) await db.guardarCatalogoItem(item, actorCatalogo);
       const { app } = require('../server');
       http = app.listen(0, '127.0.0.1');
       await once(http, 'listening');
@@ -307,7 +308,12 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         }
         const item = dinamicos[1];
         for (const cambio of [{ precio_cop: item.precio_cop + 1000 }, { precio_cop: item.precio_cop, activo: false }]) {
-          await db.actualizarCatalogoItem(item.id, cambio);
+          await db.actualizarCatalogoItem(item.id, cambio, actorCatalogo);
+          if (cambio.activo === false) {
+            // Publicar/ocultar es una operación auditada distinta de editar.
+            await db.actualizarCatalogoItem(item.id, {}, actorCatalogo, 'estado');
+            assert.equal((await db.obtenerCatalogoPorId(item.id)).activo, false);
+          }
           await rechaza('/api/booking', booking(item));
           await rechaza('/api/checkout', { cliente_nombre: 'Prueba', contacto: 'Prueba', items: JSON.stringify([cartItem(item)]) });
           if (cambio.activo === false) {
@@ -318,7 +324,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             assert.equal(actualizado.data.precio_cop, cobro(cambio.precio_cop));
           }
         }
-        await db.eliminarCatalogoItem(item.id);
+        await db.eliminarCatalogoItem(item.id, actorCatalogo);
         await rechaza('/api/booking', booking(item));
         await rechaza('/api/checkout', { cliente_nombre: 'Prueba', contacto: 'Prueba', items: JSON.stringify([cartItem(item)]) });
         const publico = await (await request('/')).text();
