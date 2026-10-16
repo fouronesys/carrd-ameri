@@ -13,6 +13,7 @@ function sustituir(nombre, exports) {
   require.cache[id] = { id, filename: id, loaded: true, exports };
 }
 const servicios = new Map();
+const historial = [];
 const usuarios = new Map();
 const destinatarios = new Map();
 const trabajos = new Map([
@@ -26,9 +27,36 @@ const db = {
   listarCatalogo: async () => copia([...servicios.values()]),
   listarCatalogoActivo: async () => copia([...servicios.values()].filter(i => i.activo)),
   obtenerCatalogoPorId: async id => servicios.has(id) ? copia(servicios.get(id)) : null,
-  guardarCatalogoItem: async i => { servicios.set(i.id, copia(i)); return copia(i); },
-  actualizarCatalogoItem: async (id, cambios) => { Object.assign(servicios.get(id), cambios); return copia(servicios.get(id)); },
-  eliminarCatalogoItem: async id => servicios.delete(id),
+  guardarCatalogoItem: async (i, actor) => {
+    historial.push(require('../../lib/catalogo-historial').evento('creacion', null, i, actor));
+    servicios.set(i.id, copia(i)); return copia(i);
+  },
+  actualizarCatalogoItem: async (id, cambios, actor, operacion) => {
+    if (!servicios.has(id)) return null;
+    const antes = copia(servicios.get(id));
+    cambios = { ...cambios };
+    if (operacion === 'estado') cambios = { activo: antes.activo === false, actualizado_en: new Date().toISOString() };
+    else delete cambios.activo;
+    const nuevo = { ...antes, ...cambios };
+    historial.push(require('../../lib/catalogo-historial').evento(operacion === 'estado' ? (nuevo.activo ? 'activacion' : 'desactivacion') : 'edicion', antes, nuevo, actor));
+    servicios.set(id, nuevo); return copia(nuevo);
+  },
+  eliminarCatalogoItem: async (id, actor) => {
+    if (!servicios.has(id)) return null;
+    const antes = copia(servicios.get(id));
+    historial.push(require('../../lib/catalogo-historial').evento('eliminacion', antes, null, actor));
+    servicios.delete(id); return antes;
+  },
+  listarHistorialCatalogo: async query => {
+    const filtros = require('../../lib/catalogo-historial').filtros(query);
+    const eventos = [...historial].reverse().filter(e =>
+      (!filtros.accion || e.accion === filtros.accion) &&
+      (!filtros.desde || e.fecha >= filtros.desde + 'T00:00:00.000Z') &&
+      (!filtros.hasta || e.fecha <= filtros.hasta + 'T23:59:59.999Z') &&
+      (!filtros.buscar || [e.catalogo_id, e.usuario, e.usuario_id, e.anterior?.nombre, e.nuevo?.nombre].join(' ').toLowerCase().includes(filtros.buscar.toLowerCase())));
+    const offset = (filtros.pagina - 1) * 30;
+    return { filtros, eventos: copia(eventos.slice(offset, offset + 30)), hayMas: eventos.length > offset + 30 };
+  },
   listarAgendaPanel: async () => copia([...trabajos.values()].filter(r => !r.trabajo_hecho)),
   listarRealizados: async () => copia([...trabajos.values()].filter(r => r.trabajo_hecho)),
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
@@ -89,4 +117,4 @@ if (require.main === module) {
   const servidor = app.listen(Number(process.env.PORT || 5052), '0.0.0.0', () => console.log('Isolated admin fixture ready'));
   process.on('SIGTERM', () => servidor.close(() => process.exit(0)));
 }
-module.exports = { app, servicios, trabajos, llamadas, usuarios, destinatarios };
+module.exports = { app, servicios, historial, trabajos, llamadas, usuarios, destinatarios };

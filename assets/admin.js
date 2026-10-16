@@ -4,7 +4,12 @@
   var mutando = false;
   function seccion(id, root) { return (root || document).querySelector('[data-sec="' + id + '"]'); }
   function activa() { var el = document.querySelector('.admin-sec.activo'); return el ? el.dataset.sec : 'agenda'; }
-  function urlTab(tab) { return '/admin?tab=' + encodeURIComponent(tab); }
+  function urlTab(tab) {
+    var params = new URLSearchParams(location.search);
+    if (tab !== 'catalogo' || params.get('tab') !== 'catalogo') params = new URLSearchParams();
+    params.set('tab', tab);
+    return '/admin?' + params.toString();
+  }
   async function cargar(tab) {
     var r = await fetch(urlTab(tab), { credentials: 'same-origin', cache: 'no-store' });
     if (!r.ok) throw new Error('No se pudo cargar el panel. Inténtalo nuevamente.');
@@ -139,6 +144,7 @@
   });
   document.addEventListener('submit', async function (e) {
     var form = e.target;
+    if (form.method.toLowerCase() !== 'post') return;
     var trabajo = form.matches('.trabajo-form');
     var catalogo = !!form.closest('.catalog-panel');
     var usuarios = form.matches('[data-usuarios-form]');

@@ -1487,7 +1487,7 @@ app.get('/admin', async function (req, res) {
     const esAdmin = req.session.rol === 'admin';
     const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados'] : ['agenda', 'realizados'];
     const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
-    const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios] = await Promise.all([
+    const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios, historialCatalogo] = await Promise.all([
       tab === 'agenda' ? db.listarAgendaPanel() : [],
       tab === 'promos' ? db.listarPromos() : [],
       tab === 'promos' ? db.listarCodigosConUsos() : [],
@@ -1498,6 +1498,7 @@ app.get('/admin', async function (req, res) {
       tab === 'catalogo' ? db.listarCatalogo() : [],
       db.resumenPanel(),
       tab === 'usuarios' ? db.listarDestinatariosNotificaciones() : [],
+      esAdmin && tab === 'catalogo' ? db.listarHistorialCatalogo(req.query) : null,
     ]);
     res.set('Cache-Control', 'no-store');
     return res.send(templates.adminDashboard({
@@ -1515,6 +1516,7 @@ app.get('/admin', async function (req, res) {
       destinatarios: destinatarios,
       accesos: accesos,
       catalogo: catalogo,
+      historialCatalogo: historialCatalogo,
       resumen: resumen,
       resumenCatalogo: tab === 'catalogo' ? catalogoUtil.resumen(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), catalogo) : {},
       cargaPorPestana: true,
@@ -1964,6 +1966,10 @@ function catalogoGuardado(req, res, mensaje) {
   res.redirect('/admin?tab=catalogo&ok=' + encodeURIComponent(mensaje));
 }
 
+function actorCatalogo(req) {
+  return { usuario: req.session.usuario, usuario_id: req.session.usuario_id, rol: req.session.rol };
+}
+
 app.post('/admin/catalogo', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const validado = datosCatalogo(req.body);
   if (validado.error) return errorCatalogo(req, res, validado.error, 400, validado.campos);
@@ -1973,7 +1979,7 @@ app.post('/admin/catalogo', mismoOrigen, requiereAdmin, soloAdmin, async functio
   });
   // Duplicate display names must not overwrite each other's promotion key.
   item.clave += '-' + item.id;
-  await db.guardarCatalogoItem(item);
+  await db.guardarCatalogoItem(item, actorCatalogo(req));
   await refrescarCatalogoValidado();
   indexCache = null;
   catalogoGuardado(req, res, 'Servicio creado correctamente');
@@ -1984,7 +1990,8 @@ app.post('/admin/catalogo/:id', mismoOrigen, requiereAdmin, soloAdmin, async fun
   if (!existente) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   const validado = datosCatalogo(req.body, existente);
   if (validado.error) return errorCatalogo(req, res, validado.error, 400, validado.campos);
-  await db.actualizarCatalogoItem(req.params.id, validado.item);
+  const actualizado = await db.actualizarCatalogoItem(req.params.id, validado.item, actorCatalogo(req));
+  if (!actualizado) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   await refrescarCatalogoValidado();
   indexCache = null;
   catalogoGuardado(req, res, 'Servicio actualizado');
@@ -1993,17 +2000,16 @@ app.post('/admin/catalogo/:id', mismoOrigen, requiereAdmin, soloAdmin, async fun
 app.post('/admin/catalogo/:id/estado', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const existente = await db.obtenerCatalogoPorId(req.params.id);
   if (!existente) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
-  await db.actualizarCatalogoItem(req.params.id, {
-    activo: !existente.activo,
-    actualizado_en: new Date().toISOString(),
-  });
+  const actualizado = await db.actualizarCatalogoItem(req.params.id, {}, actorCatalogo(req), 'estado');
+  if (!actualizado) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   await refrescarCatalogoValidado();
   indexCache = null;
-  catalogoGuardado(req, res, existente.activo ? 'Servicio ocultado' : 'Servicio publicado');
+  catalogoGuardado(req, res, actualizado.activo ? 'Servicio publicado' : 'Servicio ocultado');
 });
 
 app.post('/admin/catalogo/:id/eliminar', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
-  await db.eliminarCatalogoItem(req.params.id);
+  const eliminado = await db.eliminarCatalogoItem(req.params.id, actorCatalogo(req));
+  if (!eliminado) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   await refrescarCatalogoValidado();
   indexCache = null;
   catalogoGuardado(req, res, 'Servicio eliminado');
