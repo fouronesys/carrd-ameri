@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { crearDivisas, DIVISAS } = require('../lib/divisas');
-const { crearCotizaciones } = require('../lib/cotizaciones');
+const { crearCotizaciones, huellaCotizacion } = require('../lib/cotizaciones');
 const { tasasPrueba } = require('./helpers/tasas.cjs');
 
 test('Tasas automáticas: USD base, divisas admitidas, caché y consultas concurrentes coalescidas', async () => {
@@ -73,7 +73,7 @@ test('Desglose firmado coherente en las once divisas, incluso al redondear varia
       const sum = q.items.reduce((n, i) => n + Math.round(i.importe_divisa * precision), 0);
       assert.equal(sum, Math.round(q.subtotal_divisa * precision), divisa);
       assert.equal(sum + Math.round(q.comision_divisa * precision), Math.round(q.total_divisa * precision), divisa);
-      assert.equal(q.total_divisa, Math.round(q.total_cop / q.tasa_cop * q.tasa_divisa * precision) / precision);
+      assert.equal(q.total_divisa, divisa === 'COP' ? q.total_cop : Math.round(q.total_cop / q.tasa_cop * q.tasa_divisa * precision) / precision);
       assert.equal(cot.validar(q.token, datos).comision_divisa, q.comision_divisa);
       if (metodo === 'transferencia') assert.equal(q.comision_divisa, 0);
     }
@@ -108,6 +108,55 @@ test('Tarifas independientes: COP original fijo; USD y otras divisas usan USD si
       assert.equal(q.subtotal_cop, 41 * tasa);
       assert.equal(q.total_cop, 41 * tasa + 1000);
       assert.equal(q.tarifa, 'USD');
+    }
+  }
+});
+
+test('COP no consulta al proveedor: descuento, urgencia, comisión, huella y vencimiento propios', async () => {
+  let tiempo = Date.now(), llamadas = 0;
+  const cot = crearCotizaciones({ secreto: 'aislado', ahora: () => tiempo,
+    divisas: { obtener: async () => { llamadas++; throw new Error('Proveedor caído'); } },
+    resolver: async i => ({ ...i, tipo: 'hechizo' }), descuento: async () => 20,
+    comision: n => n + 1000, adelanto: () => ({ precio_cop: 28000, precio_usd: 10 }) });
+  const datos = { divisa: 'COP', items: [{ nombre: 'Sintético', precio_cop: 50000, precio_usd: 20, incluye_adelanto: true }] };
+  const q = await cot.crear(datos);
+  assert.equal(llamadas, 0);
+  assert.equal(q.total_cop, 69000);
+  assert.equal(q.subtotal_divisa, 68000);
+  assert.equal(q.comision_divisa, 1000);
+  assert.equal(q.items[0].importe_divisa, 68000);
+  assert.equal(q.tasa_cop, null);
+  assert.equal(q.tasa_divisa, null);
+  assert.equal(q.actualizado_en, null);
+  assert.equal(q.conversion_aplicada, false);
+  assert.deepEqual(huellaCotizacion(q), {
+    base_divisa: 'COP', conversion_aplicada: false, tasa_usd_cop: null, tasa_actualizada_en: null,
+    cotizacion_vence_en: new Date(tiempo + 900000).toISOString(), divisa_vista: 'COP',
+  });
+  assert.equal(cot.validar(q.token, datos).total_cop, 69000);
+  assert.throws(() => cot.validar(q.token + 'x', datos), /válida/);
+  assert.throws(() => cot.validar(q.token, { ...datos, items: [{ ...datos.items[0], precio_cop: 1 }] }), /cambió/);
+  assert.equal((await cot.crear({ ...datos, metodo: 'transferencia' })).total_cop, 68000);
+  tiempo += 900000;
+  assert.throws(() => cot.validar(q.token, datos), /venció/);
+});
+
+test('Proveedor caído, tasas inválidas o vencidas: COP funciona y todas las extranjeras se bloquean', async () => {
+  for (const proveedor of [
+    async () => { throw new Error('Sin conexión'); },
+    async () => ({ ok: false }),
+    async () => ({ ok: true, json: async () => ({ ...tasasPrueba(), time_last_update_unix: 1 }) }),
+    async () => ({ ok: true, json: async () => ({ ...tasasPrueba(), rates: { USD: 1 } }) }),
+  ]) {
+    const fx = crearDivisas({ fetchImpl: proveedor });
+    const cot = crearCotizaciones({ divisas: fx, secreto: 'aislado',
+      resolver: async i => ({ ...i, tipo: 'lectura' }), descuento: async () => 0,
+      comision: n => n + 1000, adelanto: () => ({ precio_cop: 28000, precio_usd: 10 }) });
+    const datos = { items: [{ nombre: 'Lectura sintética', precio_cop: 40000, precio_usd: 15 }] };
+    await assert.rejects(fx.obtener(), /tasa/);
+    assert.equal((await cot.crear({ ...datos, divisa: 'COP' })).total_cop, 41000);
+    for (const { codigo } of DIVISAS.filter(d => d.codigo !== 'COP')) {
+      await assert.rejects(cot.crear({ ...datos, divisa: codigo }), /disponible/);
     }
   }
 });

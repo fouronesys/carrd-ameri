@@ -2,7 +2,7 @@
  *
  * window.FresaDivisas
  *   listo            Promise que se resuelve tras el primer intento de cargar tasas.
- *   actual()         Divisa efectiva para mostrar (si no hay tasas: "USD", la base).
+ *   actual()         Conserva COP sin tasas; las extranjeras usan USD como referencia.
  *   preferida()      Divisa elegida por la persona (persistida en localStorage).
  *   establecer(c)    Cambia la divisa y emite el evento "fresa:divisa".
  *   disponibles()    [{codigo, nombre}] utilizables ahora mismo.
@@ -121,12 +121,13 @@
   function hayTasas() { return !!st.tasas; }
 
   function actual() {
+    if (st.preferida === 'COP') return 'COP';
     if (hayTasas() && st.tasas[st.preferida] > 0) return st.preferida;
     return 'USD';
   }
 
   function disponibles() {
-    if (!hayTasas()) return [{ codigo: 'USD', nombre: NOMBRES.USD }];
+    if (!hayTasas()) return ['COP', 'USD'].map(function (c) { return { codigo: c, nombre: NOMBRES[c] }; });
     var lista = (st.divisas && st.divisas.length ? st.divisas : ADMITIDAS.map(function (c) {
       return { codigo: c, nombre: NOMBRES[c] };
     }));
@@ -224,7 +225,7 @@
       })
       .catch(function () {
         st.tasas = null;
-        st.error = 'No pudimos cargar las tasas de cambio. Te mostramos el precio base en USD.';
+        st.error = 'No pudimos cargar las tasas de cambio. Puedes pagar con la tarifa COP original; los pagos en divisas extranjeras requieren tasas vigentes.';
       })
       .then(function () {
         st.cargando = false;
@@ -456,7 +457,7 @@
     }).join('');
     if (sel.innerHTML !== html) sel.innerHTML = html;
     sel.value = actual();
-    var bloqueado = st.cargando || !hayTasas();
+    var bloqueado = false; // COP está disponible incluso durante la carga o sin tasas.
     sel.disabled = bloqueado;
     if (btn && ul) {
       var lid = ul.id;
@@ -482,7 +483,7 @@
       nota.textContent = 'Cargando tasas de referencia…';
     } else if (!hayTasas()) {
       nota.className = 'fd-nota err';
-      nota.innerHTML = esc(st.error || 'Tasas no disponibles.') + ' El total en COP se confirma al pagar.' +
+      nota.innerHTML = esc(st.error || 'Tasas no disponibles. Puedes pagar con la tarifa COP original.') +
         '<button type="button" class="fd-retry">Reintentar</button>';
       nota.querySelector('.fd-retry').addEventListener('click', function () { cargar(); });
     } else {

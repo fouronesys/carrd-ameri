@@ -147,7 +147,7 @@ sustituir('../../lib/mailer', {
 sustituir('connect-pg-simple', () => session.MemoryStore);
 const divisasReales = require('../../lib/divisas');
 sustituir('../../lib/divisas', { ...divisasReales, crearDivisas: () => divisasReales.crearDivisas({
-  fetchImpl: async () => ({ ok: true, json: async () => require('./tasas.cjs').tasasPrueba() }),
+  fetchImpl: async () => ({ ok: !process.argv.includes('--sin-tasas'), json: async () => require('./tasas.cjs').tasasPrueba() }),
 }) });
 const { app } = require('../../server');
 // These diagnostic routes exist only in this test entrypoint.

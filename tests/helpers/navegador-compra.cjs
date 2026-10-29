@@ -84,7 +84,7 @@ async function navegador(url, html, request) {
     el.dispatchEvent(new Event('click', { bubbles: true, cancelable: true }));
   }
   return {
-    document, solicitudes, location, listo, valor, click,
+    document, solicitudes, location, listo, valor, click, divisas: context.FresaDivisas,
     divisa: codigo => context.FresaDivisas.establecer(codigo),
     carrito: () => JSON.parse(storage.get('fresa_carrito_v1') || '[]'),
     cerrar() { for (const id of timers) clearTimeout(id); },
