@@ -10,3 +10,9 @@ Divisas solicitadas: USD, EUR, pesos mexicanos (MXN), soles peruanos (PEN), DOP,
 **Why:** El usuario indicó «se toma el dolar como referencia», enumeró estas divisas y eligió «Automáticamente» y «También cambiar el importe cobrado».
 
 **How to apply:** Diferenciar divisa de visualización, precio base USD y moneda real de cobro. No asumir que una pasarela admite todas las divisas mostradas. Wompi Colombia documenta únicamente COP para el cobro: https://docs.wompi.co/docs/colombia/widget-checkout-web/ . No cambiar importes de pedidos ya registrados al actualizar las tasas.
+
+El usuario confirmó «Convertir y cobrar en COP»: todas las divisas son opciones de visualización; el precio USD se convierte a COP y ese es el importe real del nuevo cobro, también con pago manual.
+
+**Why:** El usuario eligió explícitamente esta opción tras aclarar la limitación de Wompi Colombia.
+
+**How to apply:** Mostrar el total COP antes de registrar el pago. No añadir una modalidad de cobro en USD ni otra pasarela solo por seleccionar una divisa extranjera. Una tasa ausente o vencida debe impedir cotizar, no recuperar el importe COP histórico como respaldo silencioso.

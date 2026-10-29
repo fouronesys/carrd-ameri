@@ -14,8 +14,10 @@
   'use strict';
 
   var STORAGE_KEY = 'fresa_carrito_v1';
-  var WOMPI_PUBLIC_KEY = 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
-  var COM = { pct: 0.0265, fijo: 700, iva: 0.19 };
+  // Sin llave de respaldo: solo la configuración pública real de /api/config.
+  var WOMPI_PUBLIC_KEY = '';
+  var CONFIG_LISTA = null;
+  var D = window.FresaDivisas || null;
 
   var estado = {
     items: [],
@@ -33,10 +35,21 @@
     return '$' + Number(n || 0).toLocaleString('es-CO') + ' COP';
   }
 
-  function conComisionWompi(baseCop) {
-    var factor = 1 - COM.pct * (1 + COM.iva);
-    var fijo = COM.fijo * (1 + COM.iva);
-    return Math.ceil((baseCop + fijo) / factor);
+  // Precio de un servicio en la divisa elegida (base USD); texto original si no hay USD.
+  function precioVisible(it) {
+    var t = (D && it.precio_usd) ? D.formato(it.precio_usd) : '';
+    return t || it.precio_texto || fmtCOP(it.precio_cop);
+  }
+
+  // Suma de referencia en USD (null si algún servicio no tiene precio USD).
+  function sumaUsd() {
+    var tot = 0;
+    for (var i = 0; i < estado.items.length; i++) {
+      var n = parseFloat(String(estado.items[i].precio_usd || '').replace(',', '.'));
+      if (!isFinite(n)) return null;
+      tot += n;
+    }
+    return tot;
   }
 
   function nuevoId() {
@@ -193,6 +206,8 @@
       '.fc-sesion{font-size:12px;color:#c9a9ba;padding:8px 0;}',
       '.fc-sesion strong{color:#F0A3C3;}',
       '.fc-transfer-info{font-size:11.5px;color:#e0c0cf;line-height:1.5;background:rgba(125,55,84,0.14);border:1px solid rgba(194,167,183,0.25);border-radius:8px;padding:10px 12px;margin-top:8px;}',
+      '.fc-codigo-row{display:flex;gap:8px;}',
+      '.fc-codigo-row .fc-btn{width:auto;padding:0 16px;font-size:11.5px;}',
       '.fc-link{background:none;border:none;color:#F0A3C3;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0;text-decoration:underline;}',
       /* --- Programa de fidelidad "Círculo íntimo" --- */
       '.fc-fid{background:linear-gradient(135deg,rgba(240,163,195,0.12),rgba(125,55,84,0.14));border:1px solid rgba(240,163,195,0.34);border-radius:12px;padding:14px 15px;margin:0 0 16px;}',
@@ -468,6 +483,8 @@
 
   function cerrar() {
     if (refs.overlay) refs.overlay.classList.remove('activo');
+    if (cot && !enviandoCheckout) cot.reiniciar();
+    pasoCheckout = 1;
   }
 
   function render() {
@@ -483,15 +500,15 @@
       var tag = it.es_adelanto ? 'Adelanto' : (it.es_extra ? 'Extra' : (it.es_hechizo ? 'Hechizo' : ''));
       return '<div class="fc-item"><div>' +
         '<div class="n">' + esc(it.nombre) + '</div>' +
-        '<div class="p">' + esc(it.precio_texto || fmtCOP(it.precio_cop)) + '</div>' +
+        '<div class="p" title="' + esc(it.precio_texto) + '">' + esc(precioVisible(it)) + '</div>' +
         (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') +
         '</div>' +
         '<button class="fc-rm" data-id="' + esc(it.id) + '">Quitar</button></div>';
     }).join('');
 
     var vacio = estado.items.length === 0;
-    var neto = totalNeto();
-    var estWompi = conComisionWompi(neto);
+    var usdTot = sumaUsd();
+    var subtotalRef = (D && usdTot !== null) ? D.formato(usdTot) : fmtCOP(totalNeto());
 
     var html =
       '<div class="fc-panel">' +
@@ -500,9 +517,8 @@
       (vacio
         ? '<div class="fc-vacio">Tu carrito está vacío.<br>Agrega servicios desde el catálogo con “＋ Carrito”.</div>'
         : filas +
-          '<div class="fc-total"><span>Subtotal</span><span>' + fmtCOP(neto) + '</span></div>' +
-          '<p class="fc-nota">Con Wompi el total estimado (incluye comisión) sería <strong>' + fmtCOP(estWompi) + '</strong>. ' +
-          'Por transferencia pagas ' + fmtCOP(neto) + '. El monto final lo confirma el servidor al pagar.</p>') +
+          '<div class="fc-total"><span>Subtotal de referencia</span><span>' + esc(subtotalRef) + '</span></div>' +
+          '<p class="fc-nota">Precios base sin descuentos ni comisión. El total exacto se calcula en COP en el paso de pago, antes de pagar.</p>') +
       '</div>' +
       '<div class="fc-foot">' +
       (vacio ? '' :
@@ -835,7 +851,7 @@
     var bloques = estado.items.map(function (it, i) {
       var esNormal = !it.es_extra && !it.es_adelanto;
       var titulo = '<div class="fc-svc-tit">' + (i + 1) + '. ' + esc(it.nombre) + '</div>' +
-        '<div class="fc-svc-precio">' + esc(it.precio_texto || fmtCOP(it.precio_cop)) + '</div>';
+        '<div class="fc-svc-precio">' + esc(precioVisible(it)) + '</div>';
       var campos;
       if (it.es_adelanto) {
         campos = '<p class="fc-nota">Adelanto por urgencia. No requiere datos adicionales.</p>';
@@ -868,7 +884,8 @@
       : '';
 
     var neto = totalNeto();
-    var estWompi = conComisionWompi(neto);
+    codigoCheckout = '';
+    if (cot) cot.reiniciar();
 
     var stepperHtml =
       '<div class="fc-stepper">' +
@@ -894,9 +911,8 @@
       '<div class="fc-metodo sel" data-metodo="wompi">Tarjeta / Wompi</div>' +
       '<div class="fc-metodo" data-metodo="transferencia">Transferencia</div>' +
       '</div>' +
-      '<div id="fc-transfer-box"></div>' +
-      '<div class="fc-total"><span>Total estimado</span><span id="fc-total-est">' + fmtCOP(estWompi) + '</span></div>' +
-      '<p class="fc-nota">El servidor recalcula y confirma el total al procesar el pago.</p>';
+      '<div id="fc-cotizacion" class="fd-cot" aria-live="polite" style="display:none"></div>' +
+      '<div id="fc-transfer-box"></div>';
 
     var html =
       '<div class="fc-panel ancho">' +
@@ -930,8 +946,10 @@
           x.classList.toggle('sel', x === m);
         });
         actualizarTotalYTransfer(neto);
+        pedirCotizacion(false);
       });
     });
+
 
     // Con solo servicios sin datos (adelanto/extra) el paso "Servicios" se omite.
     var hayServiciosConDatos = estado.items.some(function (it) { return !it.es_adelanto; });
@@ -941,6 +959,71 @@
 
   // Estado y navegación del checkout por pasos (1 Contacto → 2 Servicios → 3 Pago).
   var pasoCheckout = 1;
+  var codigoCheckout = '';
+  var enviandoCheckout = false;
+
+  // Cotización autoritativa del servidor para el carrito completo.
+  var cot = D ? D.cotizador(function (s) {
+    var el = document.getElementById('fc-cotizacion');
+    if (el) {
+      D.pintarCotizacion(el, s, {
+        reintentar: function () { pedirCotizacion(false); },
+        confirmar: function () { cot.confirmarRevision(); msgCheckout('', 'ok'); }
+      });
+    }
+    var msg = document.getElementById('fc-codigo-msg');
+    if (msg) {
+      var p = s.payload;
+      msg.textContent = (p && p.codigo && s.fase === 'lista') ? 'Código «' + p.codigo + '» incluido en el total.' :
+        ((p && p.codigo && s.fase === 'error') ? 'Revisa el código o bórralo y pulsa Aplicar.' : '');
+    }
+    actualizarBotonPagar();
+  }) : null;
+
+  function payloadCarrito() {
+    return {
+      items: estado.items.map(function (it) {
+        return {
+          catalogo_id: it.catalogo_id || '',
+          nombre: it.nombre,
+          precio_cop: it.precio_cop,
+          precio_usd: it.precio_usd || '',
+          es_adelanto: !!it.es_adelanto,
+          incluye_adelanto: false
+        };
+      }),
+      metodo: metodoCheckout === 'transferencia' ? 'transferencia' : 'wompi',
+      codigo: codigoCheckout,
+      divisa: D ? D.preferida() : 'COP'
+    };
+  }
+
+  function pedirCotizacion(revisar) {
+    if (!cot || pasoCheckout !== 3 || !document.getElementById('fc-cotizacion')) return;
+    cot.pedir(payloadCarrito(), { revisar: !!revisar });
+  }
+
+  function textoPagar() {
+    var trans = metodoCheckout === 'transferencia';
+    if (!cot) return 'Cotizador no disponible';
+    var s = cot.estado();
+    if (s.fase === 'error') return 'Total no disponible';
+    if (s.fase !== 'lista' || !s.datos) return 'Calculando total…';
+    if (s.revisar) return 'Revisa el total actualizado';
+    return (trans ? 'Confirmar ' : 'Pagar ') + D.fmt(s.datos.total_cop, 'COP');
+  }
+
+  function actualizarBotonPagar() {
+    var b = document.getElementById('fc-pagar');
+    if (!b || enviandoCheckout) return;
+    b.disabled = !(cot && cot.listo());
+    b.textContent = textoPagar();
+  }
+
+  window.addEventListener('fresa:divisa', function () {
+    if (enviandoCheckout) return;
+    if (refs.overlay && refs.overlay.classList.contains('activo') && pasoCheckout === 3) pedirCotizacion(false);
+  });
 
   function mostrarPasoCheckout(n, neto, hayServiciosConDatos) {
     pasoCheckout = n;
@@ -959,18 +1042,25 @@
     var msgEl = document.getElementById('fc-checkout-msg');
     if (msgEl) msgEl.className = 'fc-msg';
     renderFootCheckout(neto, hayServiciosConDatos);
-    if (n === 3) actualizarTotalYTransfer(neto);
+    if (n === 3) {
+      actualizarTotalYTransfer(neto);
+      if (cot) pedirCotizacion(false);
+      else {
+        var ce = document.getElementById('fc-cotizacion');
+        if (ce) { ce.style.display = ''; ce.innerHTML = '<div class="fd-cot-err" role="alert">No pudimos cargar el cotizador. Recarga la página para continuar.</div>'; }
+      }
+    } else if (cot) {
+      cot.reiniciar();
+    }
   }
 
   function renderFootCheckout(neto, hayServiciosConDatos) {
     var foot = document.getElementById('fc-checkout-foot');
     if (!foot) return;
     var n = pasoCheckout;
-    var total = metodoCheckout === 'transferencia' ? neto : conComisionWompi(neto);
     if (n === 3) {
       foot.innerHTML =
-        '<button class="fc-btn primario" id="fc-pagar">' +
-        (metodoCheckout === 'transferencia' ? 'Confirmar ' : 'Pagar ') + fmtCOP(total) + '</button>' +
+        '<button class="fc-btn primario" id="fc-pagar" disabled>' + esc(textoPagar()) + '</button>' +
         '<button class="fc-btn sec" id="fc-atras">← Atrás</button>';
       document.getElementById('fc-pagar').addEventListener('click', enviarCheckout);
       document.getElementById('fc-atras').addEventListener('click', function () {
@@ -1040,16 +1130,12 @@
 
   function actualizarTotalYTransfer(neto) {
     var esTransfer = metodoCheckout === 'transferencia';
-    var total = esTransfer ? neto : conComisionWompi(neto);
-    var elTot = document.getElementById('fc-total-est');
-    if (elTot) elTot.textContent = fmtCOP(total);
-    var elBtn = document.getElementById('fc-pagar');
-    if (elBtn) elBtn.textContent = (esTransfer ? 'Confirmar ' : 'Pagar ') + fmtCOP(total);
+    actualizarBotonPagar();
     var box = document.getElementById('fc-transfer-box');
     if (!box) return;
     if (esTransfer) {
       box.innerHTML =
-        '<div class="fc-transfer-info">Realiza la transferencia por <strong>' + fmtCOP(neto) + '</strong> ' +
+        '<div class="fc-transfer-info">Transfiere exactamente el <strong>total en COP</strong> que aparece arriba ' +
         'y sube el comprobante. Verificaremos tu pago manualmente antes de agendar.</div>' +
         '<label class="fc-label">Comprobante de pago <span class="fc-req">*</span></label>' +
         '<input class="fc-input" id="fc-comprobante" type="file" accept="image/*">';
@@ -1079,8 +1165,15 @@
 
   function enviarCheckout() {
     var btn = document.getElementById('fc-pagar');
-    var textoBtn = btn.textContent;
+    if (!btn || btn.disabled || enviandoCheckout) return;
     var esTransfer = metodoCheckout === 'transferencia';
+    if (!cot || !cot.listo()) { msgCheckout('Espera a que se confirme el total antes de pagar.'); return; }
+    if (!cot.vigente()) {
+      msgCheckout('La cotización venció. Actualizamos el precio: revísalo antes de continuar.');
+      cot.expirar();
+      return;
+    }
+    var cotizacion = cot.estado().datos;
 
     var clienteNombre = (document.getElementById('fc-cliente-nombre') || {}).value || '';
     if (!clienteNombre.trim()) { msgCheckout('Escribe tu nombre y apellido.'); return; }
@@ -1190,7 +1283,10 @@
     fd.append('cliente_nombre', clienteNombre.trim());
     fd.append('contacto', contacto.trim());
     fd.append('metodo', esTransfer ? 'transferencia' : 'wompi');
+    fd.append('codigo', codigoCheckout);
+    fd.append('cotizacion', cotizacion.token);
 
+    enviandoCheckout = true;
     btn.disabled = true;
     btn.textContent = 'Preparando…';
     mostrarRitual(
@@ -1200,10 +1296,21 @@
         : 'Te llevamos a la pasarela de pago segura. No cierres esta ventana…'
     );
 
-    fetch('/api/checkout', { method: 'POST', body: fd })
-      .then(parseJson)
+    (esTransfer ? Promise.resolve('') : llavePublica())
+      .then(function () {
+        return fetch('/api/checkout', { method: 'POST', body: fd, credentials: 'same-origin' });
+      })
+      .then(function (resp) {
+        return resp.json().catch(function () { return {}; }).then(function (data) {
+          return { ok: resp.ok, status: resp.status, data: data || {} };
+        });
+      })
       .then(function (res) {
-        if (!res.ok || !res.data.ok) throw new Error(res.data.error || 'No se pudo procesar el pedido.');
+        if (!res.ok || !res.data.ok) {
+          var er = new Error(res.data.error || 'No se pudo procesar el pedido.');
+          er.status = res.status;
+          throw er;
+        }
         // El carrito NO se vacía aquí: el pago aún no está confirmado. Si el pago
         // se rechaza o se abandona, el carrito debe seguir disponible para reintentar.
         // La página /pedido lo vacía solo cuando el pago queda confirmado/recibido.
@@ -1212,7 +1319,15 @@
           window.location.href = destino;
           return;
         }
-        var centavos = res.data.total_cop * 100;
+        // Solo el importe confirmado por el servidor y debe coincidir con lo cotizado.
+        var cobro = parseInt(res.data.total_cop, 10);
+        if (!(cobro > 0)) throw new Error('El servidor no confirmó el importe a cobrar. No abrimos el pago.');
+        if (cobro !== Number(cotizacion.total_cop)) {
+          var e2 = new Error('El importe cambió respecto a tu cotización. Revisa el nuevo total antes de pagar.');
+          e2.status = 409;
+          throw e2;
+        }
+        var centavos = cobro * 100;
         var url = 'https://checkout.wompi.co/p/'
           + '?public-key=' + encodeURIComponent(WOMPI_PUBLIC_KEY)
           + '&currency=COP'
@@ -1225,9 +1340,10 @@
       .catch(function (e) {
         // Falló: quitamos el ritual y dejamos el checkout intacto para reintentar.
         ocultarRitual();
-        btn.disabled = false;
-        btn.textContent = textoBtn;
+        enviandoCheckout = false;
         msgCheckout(e.message || 'No se pudo procesar. Intenta de nuevo.');
+        if (e.status === 409 || (e.status === 400 && /cotiz/i.test(e.message || ''))) pedirCotizacion(true);
+        else actualizarBotonPagar();
       });
   }
 
@@ -1260,14 +1376,23 @@
   }
 
   function cargarConfig() {
-    try {
-      fetch('/api/config').then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (cfg) {
-          if (!cfg) return;
-          if (cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = cfg.wompiPublicKey;
-          if (cfg.comision) COM = cfg.comision;
-        }).catch(function () {});
-    } catch (e) {}
+    CONFIG_LISTA = fetch('/api/config', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cfg) {
+        if (cfg && cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = String(cfg.wompiPublicKey);
+      }).catch(function () {});
+    return CONFIG_LISTA;
+  }
+
+  function llavePublica() {
+    return (CONFIG_LISTA || cargarConfig()).then(function () {
+      return WOMPI_PUBLIC_KEY ? null : cargarConfig();
+    }).then(function () {
+      if (!WOMPI_PUBLIC_KEY) {
+        throw new Error('El pago con Wompi no está disponible ahora mismo (falta la configuración pública). Prueba por transferencia o escríbenos.');
+      }
+      return WOMPI_PUBLIC_KEY;
+    });
   }
 
   function cargarSesion() {

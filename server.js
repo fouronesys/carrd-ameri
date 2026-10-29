@@ -17,6 +17,9 @@ const exportar = require('./lib/exportar');
 const catalogoUtil = require('./lib/catalogo');
 const catalogoCompra = require('./lib/catalogo-compra');
 const { crearClienteWompi } = require('./lib/wompi');
+const { crearDivisas } = require('./lib/divisas');
+const { crearCotizaciones, datosBooking, huellaCotizacion } = require('./lib/cotizaciones');
+const { tipoServicio, tipoPanel } = require('./lib/tipo-servicio');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -718,6 +721,29 @@ async function confirmarPagoPedido(pedidoRef, txId) {
 }
 
 /* ---------- Config pública para el frontend ---------- */
+const divisas = crearDivisas();
+const cotizaciones = crearCotizaciones({
+  divisas, resolver: resolverServicioCompra, comision: conComisionWompi,
+  secreto: process.env.SESSION_SECRET,
+  adelanto: raw => !raw || esAdelantoIndependiente(raw)
+    ? { nombre: 'Adelanto (urgencia)', tipo: 'extra', precio_cop: ADELANTO_COP, precio_usd: Number(ADELANTO_USD) } : null,
+  descuento: async (item, codigo) => {
+    const info = await calcularDescuentoHechizo(item.clave, codigo, item.precio_cop, item);
+    return info ? info.pct : 0;
+  },
+});
+app.get('/api/divisas', async function (req, res) {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await divisas.obtener());
+  } catch (e) { res.status(503).json({ ok: false, error: e.message }); }
+});
+app.post('/api/cotizacion', mismoOrigen, async function (req, res) {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await cotizaciones.crear(req.body || {}));
+  } catch (e) { res.status(e.status || 503).json({ ok: false, error: e.status ? e.message : 'No se pudo obtener una tasa vigente. Intenta nuevamente.' }); }
+});
 app.get('/api/config', function (req, res) {
   res.json({
     wompiPublicKey: WOMPI_PUBLIC_KEY,
@@ -877,12 +903,13 @@ app.post('/api/booking', function (req, res) {
       if (!clienteNombre) return res.status(400).json({ error: 'Escribe tu nombre y apellido.' });
 
       const esTransferencia = (b.metodo || '').toString().trim() === 'transferencia';
-      const moneda = (b.moneda || 'cop').toString().toLowerCase() === 'usd' ? 'usd' : 'cop';
+      const moneda = 'cop';
       // Manual = transferencia (se verifica el comprobante a mano). El pago en
       // dólares por transferencia se cobra por PayPal/AstroPay; en dólares por
       // Wompi se cobra el precio en pesos del catálogo (Wompi solo cobra COP).
       const esManual = esTransferencia;
-      const usdManual = moneda === 'usd' && esManual;
+      // Las divisas del catálogo son de referencia; el nuevo cobro es en COP.
+      const usdManual = false;
 
       // Falla en seguro: sin el secreto de integridad, Wompi rechazaría el pago.
       // Evitamos crear un agendamiento y redirigir a un checkout que dará error.
@@ -948,8 +975,16 @@ app.post('/api/booking', function (req, res) {
             (!esTransferencia ? ' · Total $' + totalExtra.toLocaleString('es-CO') + ' COP (incluye comisión Wompi)' : '');
         }
 
+        const cotizacion = cotizaciones.validar(b.cotizacion, datosBooking(b));
+        totalExtra = cotizacion.total_cop;
+        precioUsdExtra = formatUsd(cotizacion.items[0].usd);
+        precioTextoExtra = '$' + totalExtra.toLocaleString('es-CO') + ' COP · ' + precioUsdExtra + ' USD base' +
+          (!esManual ? ' (incluye comisión Wompi)' : '');
         const refA = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
         const registroA = {
+          ...huellaCotizacion(cotizacion),
+          tipo_servicio: 'trabajo',
+          catalogo_id: b.catalogo_id || '',
           ref: refA,
           producto: nombreExtra,
           precio_cop: totalExtra,
@@ -1076,8 +1111,17 @@ app.post('/api/booking', function (req, res) {
           (!esTransferencia ? ' · Total $' + totalCop.toLocaleString('es-CO') + ' COP (incluye comisión Wompi)' : '');
       }
 
+      const cotizacion = cotizaciones.validar(b.cotizacion, datosBooking(b));
+      totalCop = cotizacion.total_cop;
+      precioUsd = String(cotizacion.items[0].usd);
+      descuentoPct = cotizacion.items[0].descuento_pct;
+      precioOriginal = descuentoPct ? cotizacion.items[0].base_cop : 0;
+      precioTextoFinal = '$' + totalCop.toLocaleString('es-CO') + ' COP · ' + precioUsd + ' USD base' +
+        (!esManual ? ' (incluye comisión Wompi)' : '');
       const ref = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
       const registro = {
+        ...huellaCotizacion(cotizacion),
+        tipo_servicio: cotizacion.items[0].tipo,
         ref: ref,
         producto: itemAutorizado.nombre,
         catalogo_id: b.catalogo_id || '',
@@ -1109,8 +1153,8 @@ app.post('/api/booking', function (req, res) {
         signature: esManual ? '' : firmaIntegridadWompi(ref, totalCop * 100, 'COP'),
       });
     } catch (e) {
-      console.error('[booking]', e);
-      res.status(500).json({ error: 'No se pudo registrar. Intenta de nuevo.' });
+      if (!e.status) console.error('[booking] No se pudo registrar la solicitud.');
+      res.status(e.status || 500).json({ error: e.status ? e.message : 'No se pudo registrar. Intenta de nuevo.' });
     }
   });
 });
@@ -1286,7 +1330,17 @@ app.post('/api/checkout', function (req, res) {
       }
 
       // La comisión de Wompi se aplica UNA sola vez sobre el total (no por servicio).
-      const totalCobro = esTransferencia ? totalNeto : conComisionWompi(totalNeto);
+      const cotizacion = cotizaciones.validar(b.cotizacion, { items, metodo: b.metodo, codigo: '' });
+      preparados.forEach((p, i) => {
+        const linea = cotizacion.items[i];
+        p.precioNeto = linea.cop;
+        p.precioUsd = String(linea.usd);
+        p.precioOriginal = linea.descuento_pct ? linea.base_cop : 0;
+        p.descuentoPct = linea.descuento_pct;
+        p.tipoServicio = linea.tipo;
+        p.precioTexto = '$' + linea.cop.toLocaleString('es-CO') + ' COP · ' + linea.usd + ' USD base';
+      });
+      const totalCobro = cotizacion.total_cop;
       const pedidoRef = 'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
       const creadoEn = new Date().toISOString();
       // Se guarda el cliente dueño del pedido (si hay sesión) para vaciar su
@@ -1297,6 +1351,8 @@ app.post('/api/checkout', function (req, res) {
       for (let i = 0; i < preparados.length; i++) {
         const p = preparados[i];
         const registro = {
+          ...huellaCotizacion(cotizacion),
+          tipo_servicio: p.tipoServicio,
           ref: pedidoRef + '-' + (i + 1),
           pedido_ref: pedidoRef,
           pedido_total_cop: totalCobro,
@@ -1340,8 +1396,8 @@ app.post('/api/checkout', function (req, res) {
         signature: esManual ? '' : firmaIntegridadWompi(pedidoRef, totalCobro * 100, 'COP'),
       });
     } catch (e) {
-      console.error('[checkout]', e);
-      res.status(500).json({ ok: false, error: 'No se pudo procesar el pedido. Intenta de nuevo.' });
+      if (!e.status) console.error('[checkout] No se pudo procesar el pedido.');
+      res.status(e.status || 500).json({ ok: false, error: e.status ? e.message : 'No se pudo procesar el pedido. Intenta de nuevo.' });
     }
   });
 });
@@ -1502,16 +1558,17 @@ app.get('/admin', async function (req, res) {
     const esAdmin = req.session.rol === 'admin';
     const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados'] : ['agenda', 'realizados'];
     const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
+    const tipo = tipoPanel(req.query.tipo || 'trabajo');
     const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios, historialCatalogo] = await Promise.all([
-      tab === 'agenda' ? db.listarAgendaPanel(req.query) : null,
+      tab === 'agenda' ? db.listarAgendaPanel({ ...req.query, tipo }) : null,
       tab === 'promos' ? db.listarPromos() : [],
       tab === 'promos' ? db.listarCodigosConUsos() : [],
       tab === 'usuarios' ? db.listarUsuariosAdmin() : [],
       tab === 'usuarios' ? db.listarAccesos(80) : [],
-      tab === 'eliminados' ? db.listarEliminados() : [],
-      tab === 'realizados' ? db.listarRealizados() : [],
+      tab === 'eliminados' ? db.listarEliminados(tipo) : [],
+      tab === 'realizados' ? db.listarRealizados(tipo) : [],
       tab === 'catalogo' ? db.listarCatalogo() : [],
-      db.resumenPanel(),
+      db.resumenPanel(tipo),
       tab === 'usuarios' ? db.listarDestinatariosNotificaciones() : [],
       esAdmin && tab === 'catalogo' ? db.listarHistorialCatalogo(req.query) : null,
     ]);
@@ -1519,6 +1576,7 @@ app.get('/admin', async function (req, res) {
     return res.send(templates.adminDashboard({
       registros: registros ? registros.registros : [],
       agenda: registros,
+      tipoPanel: tipo,
       eliminados: eliminados,
       realizados: realizados,
       rol: req.session.rol || 'admin',
@@ -1614,6 +1672,14 @@ app.get('/admin/exportar/pdf', requiereAdmin, async function (req, res) {
   }
 });
 
+function volverPanel(req, res, destino = '/admin') {
+  const url = new URL(destino, 'http://panel.interno');
+  let tipo = (req.body || {}).tipo_servicio;
+  try { tipo = tipo || new URL(req.get('referer')).searchParams.get('tipo'); } catch { /* Sin Referer: conserva la ruta original. */ }
+  if (['lectura', 'trabajo', 'todos'].includes(tipo)) url.searchParams.set('tipo', tipo);
+  return res.redirect(url.pathname + url.search);
+}
+
 app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
   const reg = await db.obtenerPorRef(req.params.ref);
   if (!reg) {
@@ -1659,7 +1725,7 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
       trabajo_hecho_en: marcarComoHecho ? new Date().toISOString() : '',
     });
   }
-  res.redirect('/admin');
+  volverPanel(req, res);
 });
 
 app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
@@ -1697,7 +1763,7 @@ app.post('/admin/aprobar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fun
       await notificarEstadoCliente(req.params.ref, 'agendado');
     }
   }
-  res.redirect('/admin');
+  volverPanel(req, res);
 });
 
 app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
@@ -1711,7 +1777,7 @@ app.post('/admin/rechazar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
       await notificarEstadoCliente(req.params.ref, 'rechazado');
     }
   }
-  res.redirect('/admin');
+  volverPanel(req, res);
 });
 
 app.post('/admin/eliminar/:ref', mismoOrigen, requiereAdmin, async function (req, res) {
@@ -1772,6 +1838,7 @@ app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async func
   if (!reg) return res.status(404).send('Agendamiento no encontrado.');
   const b = req.body || {};
   const cambios = {};
+  if (['trabajo', 'lectura'].includes(b.tipo_servicio)) cambios.tipo_servicio = b.tipo_servicio;
 
   const producto = (b.producto || '').toString().trim();
   if (producto) cambios.producto = producto.slice(0, 200);
@@ -1792,7 +1859,7 @@ app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async func
   // Si el servicio pertenece a un pedido, se recalcula el total del pedido.
   if (reg.pedido_ref) await recalcularTotalPedido(reg.pedido_ref);
 
-  res.redirect('/admin');
+  volverPanel(req, res);
 });
 
 // Agrega un servicio a un agendamiento. Si era individual, lo convierte en un
@@ -1816,6 +1883,7 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
   const nuevoRef = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
   await db.crearAgendamiento({
     ref: nuevoRef,
+    tipo_servicio: ['trabajo', 'lectura'].includes(b.tipo_servicio) ? b.tipo_servicio : tipoServicio(reg),
     producto: producto.slice(0, 200),
     precio_cop: precio,
     precio_usd: 0,
@@ -1842,7 +1910,7 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
     pagado_en: reg.pagado_en || '',
   });
   await recalcularTotalPedido(pedidoRef);
-  res.redirect('/admin');
+  volverPanel(req, res);
 });
 
 /* ---------- Gestión de usuarios del panel (solo administrador) ---------- */
@@ -2147,7 +2215,7 @@ app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, soloAdmin, functio
           console.error('[mailer] Falló el envío de la evidencia:', e.message);
         }
       }
-      res.redirect('/admin');
+      volverPanel(req, res);
     } catch (e) {
       console.error('[evidencia]', e);
       res.status(500).send('No se pudo guardar la evidencia.');

@@ -52,8 +52,8 @@ test('Etiquetas eliminables, presupuesto validado, monedas y restablecimiento', 
   ui.set(p.querySelector('.fsb-cur'), 'usd');
   ui.set(p.querySelector('.fsb-m'), '25,50');
   assert.equal(p.querySelector('.fsb-m').getAttribute('aria-invalid'), 'false');
-  assert.match(p.querySelector('.fsb-chips').textContent, /25,5 USD/);
-  assert.equal(p.querySelector('.fsb-badge').textContent, '4');
+  assert.match(p.querySelector('.fsb-chips').textContent, /USD 25,5|25,5 USD/);
+  assert.equal(p.querySelector('.fsb-badge').textContent, '3');
   for (const bad of ['abc', '-1', '$', '25.555']) {
     ui.set(p.querySelector('.fsb-m'), bad);
     assert.equal(p.querySelector('.fsb-budget-error').hidden, false);
@@ -66,7 +66,7 @@ test('Etiquetas eliminables, presupuesto validado, monedas y restablecimiento', 
   assert.equal(p.querySelector('.fsb-chips').hidden, true);
   assert.equal(p.querySelector('.fsb-reset').hidden, true);
   assert.equal(p.querySelector('.fsb-budget-error').hidden, true);
-  assert.equal(p.querySelector('.fsb-cur').value, 'cop');
+  assert.equal(p.querySelector('.fsb-cur').value, 'USD', 'Restablecer filtros no cambia la divisa elegida');
   assert.equal(p.querySelector('.fsb-s').value, 'orig');
   ui.click(p.querySelector('.fsb-apply'));
   assert.equal(p.querySelector('.fsb-popover').hidden, true);

@@ -8,6 +8,18 @@
   var uid = 0;
   var filtros = window.FresaCatalogoFiltros;
   var norm = filtros.normalizar;
+  // Divisa global: misma conversión que el resto del sitio (FresaDivisas, base USD).
+  function D() { return window.FresaDivisas || null; }
+  function monedaActual() { return D() ? D().actual() : 'USD'; }
+  function convertir(usd, c) {
+    if (usd === null || usd === undefined) return null;
+    if (D()) return D().convertir(usd, c);
+    return c === 'USD' ? usd : null;
+  }
+  function fmtMonto(n, c) {
+    return D() ? D().fmt(n, c) : c + ' ' + n.toLocaleString('es-CO');
+  }
+  function sinDecimales(c) { return D() ? D().sinDecimales(c) : false; }
   function textoPropio(el) {
     // Texto del servicio sin botones ni insignias agregadas por wompi.js.
     var out = '';
@@ -93,8 +105,8 @@
       '<select id="' + id + '-c" class="fsb-input fsb-c"><option value="">Todas las categorías</option></select></div>' +
       '<div class="fsb-field"><label class="fsb-label" for="' + id + '-m">Presupuesto máximo</label>' +
       '<div class="fsb-budget"><input id="' + id + '-m" class="fsb-input fsb-m" type="text" inputmode="decimal" autocomplete="off" placeholder="Sin límite" aria-describedby="' + id + '-error">' +
-      '<select class="fsb-input fsb-cur" aria-label="Moneda del presupuesto y ordenación"><option value="cop">COP</option><option value="usd">USD</option></select></div>' +
-      '<p class="fsb-help">Precio base, sin comisión.</p><p id="' + id + '-error" class="fsb-budget-error" hidden role="status"></p></div>' +
+      '<select class="fsb-input fsb-cur" aria-label="Moneda de los precios, el presupuesto y la ordenación"></select></div>' +
+      '<p class="fsb-help">Precio base, sin comisión. La moneda se comparte con todo el catálogo.</p><p id="' + id + '-error" class="fsb-budget-error" hidden role="status"></p></div>' +
       '<div class="fsb-field"><label class="fsb-label" for="' + id + '-s">Ordenar por</label>' +
       '<select id="' + id + '-s" class="fsb-input fsb-s"><option value="orig">Orden del catálogo</option><option value="asc">Precio: menor a mayor</option><option value="desc">Precio: mayor a menor</option><option value="az">Nombre: A–Z</option></select></div>' +
       '<p class="fsb-note"></p></div>' +
@@ -133,6 +145,15 @@
     if (capaSuperior) popup.setAttribute('popover', 'manual');
     q.setAttribute('aria-controls', res.id);
     var movidos = []; // { node, mark }
+
+    function poblarMonedas() {
+      var lista = D() ? D().disponibles() : [{ codigo: 'USD', nombre: 'Dólar estadounidense' }];
+      var html = lista.map(function (d) { return '<option value="' + d.codigo + '">' + d.codigo + '</option>'; }).join('');
+      if (cur.innerHTML !== html) cur.innerHTML = html;
+      cur.value = monedaActual();
+      cur.disabled = lista.length < 2;
+    }
+    poblarMonedas();
 
     function posicionar() {
       if (!abierto || !panel.getBoundingClientRect) return;
@@ -201,16 +222,17 @@
     function controles(cat, maxTxt, max, invalido, orden, moneda, activo) {
       chips.textContent = '';
       if (cat) etiqueta(cat, 'Quitar categoría ' + cat, function () { sel.value = ''; });
-      if (maxTxt) etiqueta(invalido ? 'Revisar presupuesto' : 'Hasta ' + max.toLocaleString('es-CO') + ' ' + moneda.toUpperCase(), 'Quitar presupuesto', function () { m.value = ''; });
-      if (orden !== 'orig') etiqueta(orden === 'az' ? 'Nombre A–Z' : (orden === 'asc' ? 'Menor precio' : 'Mayor precio') + ' · ' + moneda.toUpperCase(), 'Quitar ordenación', function () { so.value = 'orig'; });
-      if (moneda !== 'cop') etiqueta(moneda.toUpperCase(), 'Restablecer moneda a COP', function () { cur.value = 'cop'; });
+      if (maxTxt) etiqueta(invalido ? 'Revisar presupuesto' : 'Hasta ' + fmtMonto(max, moneda), 'Quitar presupuesto', function () { m.value = ''; });
+      if (orden !== 'orig') etiqueta(orden === 'az' ? 'Nombre A–Z' : (orden === 'asc' ? 'Menor precio' : 'Mayor precio') + ' · ' + moneda, 'Quitar ordenación', function () { so.value = 'orig'; });
       var cuantos = chips.children.length;
       chips.hidden = !cuantos; badge.hidden = !cuantos;
       badge.textContent = cuantos;
       badge.setAttribute('aria-label', cuantos + ' filtros activos');
       reset.hidden = !activo;
       restore.disabled = !activo;
-      panel.querySelector('.fsb-note').textContent = 'Se ordena en ' + moneda.toUpperCase() + ', sin conversiones. Los servicios sin precio en esa moneda aparecen al final.';
+      panel.querySelector('.fsb-note').textContent = moneda === 'USD'
+        ? 'Se compara en USD, el precio base. Los servicios sin precio en USD aparecen al final.'
+        : 'Se compara en ' + moneda + ' convertido desde el precio base en USD con la tasa de referencia diaria. Los servicios sin precio base aparecen al final.';
       posicionar();
     }
 
@@ -226,18 +248,20 @@
     function aplicar() {
       datos = recolectar(sec.classList.contains('fsb-activo') ? (restaurar(), sec) : sec);
       var tokens = norm(q.value).split(' ').filter(Boolean);
-      var cat = sel.value, moneda = cur.value;
+      poblarMonedas();
+      var cat = sel.value, moneda = monedaActual();
       var maxTxt = m.value.trim();
-      var max = filtros.presupuesto(maxTxt, moneda);
+      var max = filtros.presupuesto(maxTxt, sinDecimales(moneda) ? 'cop' : 'usd');
       var invalido = Number.isNaN(max) || Boolean(maxTxt && max === null);
       error.hidden = !invalido;
-      error.textContent = invalido ? (moneda === 'cop' ? 'Escribe un valor COP válido, por ejemplo 50.000.' : 'Escribe un valor USD válido, por ejemplo 25,50.') : '';
+      error.textContent = invalido ? (sinDecimales(moneda) ? 'Escribe un valor ' + moneda + ' válido, por ejemplo 50.000.' : 'Escribe un valor ' + moneda + ' válido, por ejemplo 25,50.') : '';
       m.setAttribute('aria-invalid', String(invalido));
       if (invalido) max = null;
       var orden = so.value;
       var activo = tokens.length || cat || max !== null || orden !== 'orig';
       x.hidden = !q.value;
-      controles(cat, maxTxt, max, invalido, orden, moneda, Boolean(q.value || cat || maxTxt || moneda !== 'cop' || orden !== 'orig'));
+      controles(cat, maxTxt, max, invalido, orden, moneda, Boolean(q.value || cat || maxTxt || orden !== 'orig'));
+      datos.items.forEach(function (it) { it.precioSel = convertir(it.usd, moneda); });
       var total = datos.items.length;
       if (!activo) {
         sec.classList.remove('fsb-activo');
@@ -249,13 +273,13 @@
       var lista = datos.items.filter(function (it) {
         if (cat && it.cat !== cat) return false;
         if (max !== null) {
-          var p = moneda === 'cop' ? it.cop : it.usd;
+          var p = it.precioSel;
           if (p === null || p > max) return false;
         }
         for (var i = 0; i < tokens.length; i++) if (it.hay.indexOf(tokens[i]) < 0) return false;
         return true;
       });
-      filtros.ordenar(lista, orden, moneda);
+      filtros.ordenar(lista, orden, 'precioSel');
 
       lista.forEach(function (it) {
         var mark = document.createComment('fsb');
@@ -275,13 +299,19 @@
     }
 
     function limpiar() {
-      q.value = ''; m.value = ''; sel.value = ''; so.value = 'orig'; cur.value = 'cop';
+      q.value = ''; m.value = ''; sel.value = ''; so.value = 'orig';
       aplicar();
     }
 
     q.addEventListener('input', aplicar);
     m.addEventListener('input', aplicar);
-    [sel, cur, so].forEach(function (s) { s.addEventListener('change', aplicar); });
+    [sel, so].forEach(function (s) { s.addEventListener('change', aplicar); });
+    cur.addEventListener('change', function () {
+      if (D()) D().establecer(cur.value); else aplicar();
+    });
+    // El selector global (y la carga de tasas) re-aplica filtros y orden.
+    function alCambiarDivisa() { aplicar(); }
+    window.addEventListener('fresa:divisa', alCambiarDivisa);
     q.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && !abierto && q.value) { e.preventDefault(); q.value = ''; aplicar(); }
       if (e.key === 'Enter') e.preventDefault();
@@ -300,6 +330,7 @@
     sec.__fsbLimpiar = limpiar;
     sec.__fsbDesmontar = function () {
       cerrar(false);
+      window.removeEventListener('fresa:divisa', alCambiarDivisa);
       restaurar();
       sec.classList.remove('fsb-activo');
       originales.forEach(function (o) { o.classList.remove('fsb-orig'); });

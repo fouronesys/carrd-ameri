@@ -33,6 +33,9 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
     const externas = [];
     let url, http;
     global.fetch = (destino, options) => {
+      if (String(destino) === 'https://open.er-api.com/v6/latest/USD') {
+        return Promise.resolve(new Response(JSON.stringify(require('./helpers/tasas.cjs').tasasPrueba()), { headers: { 'Content-Type': 'application/json' } }));
+      }
       if (!url || new URL(destino).origin !== url) {
         externas.push(String(destino));
         throw new Error('Red externa prohibida');
@@ -42,6 +45,8 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
     const browsers = [];
     const actorCatalogo = { rol: 'admin', usuario: 'administrador-contratos', usuario_id: 'TEST-ADMIN-CONTRATOS' };
     const cobro = base => Math.ceil((base + 700 * 1.19) / (1 - 0.0265 * 1.19));
+    const neto = (item, pct = 0, urgencia = false) => Math.round(
+      (Math.round(Number(item.precio_usd) * (1 - pct / 100) * 100) / 100 + (urgencia ? 10 : 0)) * 4000);
     const firma = (ref, total) => crypto.createHash('sha256')
       .update(ref + String(total * 100) + 'COPcontratos-integridad-sintetica').digest('hex');
     async function request(ruta, options) {
@@ -50,6 +55,18 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
     async function post(ruta, campos) {
       const body = new FormData();
       for (const [key, value] of Object.entries(campos)) body.append(key, String(value));
+      if (ruta === '/api/booking' || ruta === '/api/checkout') {
+        let datos;
+        try {
+          datos = ruta === '/api/booking' ? require('../lib/cotizaciones').datosBooking(campos)
+            : { items: JSON.parse(campos.items || '[]'), metodo: campos.metodo, codigo: '' };
+        } catch { datos = null; }
+        if (datos) {
+          const quote = await request('/api/cotizacion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
+          const data = await quote.json();
+          if (quote.ok) body.set('cotizacion', data.token);
+        }
+      }
       const res = await request(ruta, { method: 'POST', body });
       return { status: res.status, data: await res.json() };
     }
@@ -157,12 +174,14 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             if (item.tipo === 'extra') b.valor('wm-extra-h1', 'Hechizo sintético');
             b.document.getElementById('wm-acepto').checked = true;
             b.document.getElementById('wm-acepto').dispatchEvent(new b.document.defaultView.Event('change'));
+            await b.listo();
+            assert.equal(b.document.getElementById('wm-btn-pagar').disabled, false, b.document.getElementById('wompi-overlay').textContent);
             b.click('wm-btn-pagar');
             await b.listo();
             const res = b.solicitudes.find(r => r.ruta === '/api/booking');
             assert.ok(res, item.nombre + ': formulario enviado');
             assert.equal(res.status, 200, item.nombre + ': ' + JSON.stringify(res.data));
-            assert.equal(res.data.precio_cop, cobro(item.precio_cop));
+            assert.equal(res.data.precio_cop, cobro(neto(item)));
             const reg = await db.obtenerPorRef(res.data.ref);
             assert.equal(reg.producto, item.nombre);
             assert.equal(reg.estado, 'pendiente_pago');
@@ -200,19 +219,21 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
               if (campo.getAttribute('data-campo') === 'objetivo_nombre') campo.value = 'Persona sintética';
               if (campo.getAttribute('data-campo') === 'info_extra') campo.value = 'Hechizo sintético';
             }
-            b.click('fc-siguiente'); b.click('fc-siguiente'); b.click('fc-pagar');
+            b.click('fc-siguiente'); b.click('fc-siguiente');
+            await b.listo();
+            b.click('fc-pagar');
             await b.listo();
             const res = b.solicitudes.find(r => r.ruta === '/api/checkout');
             assert.ok(res, 'Carrito enviado');
             assert.equal(res.status, 200, JSON.stringify(res.data));
-            const total = cobro(items.reduce((s, it) => s + it.precio_cop, 0));
+            const total = cobro(items.reduce((s, it) => s + neto(it), 0));
             assert.equal(res.data.total_cop, total);
             assert.equal(res.data.signature, firma(res.data.pedido_ref, total));
             const registros = await db.obtenerPorPedido(res.data.pedido_ref);
             assert.equal(registros.length, items.length);
             registros.forEach((reg, i) => {
               assert.equal(reg.producto, items[i].nombre);
-              assert.equal(reg.precio_cop, items[i].precio_cop);
+              assert.equal(reg.precio_cop, neto(items[i]));
               assert.equal(reg.pedido_total_cop, total);
             });
             assert.equal(Number(new URL(b.location.href).searchParams.get('amount-in-cents')), total * 100);
@@ -245,7 +266,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
           const res = b.solicitudes.find(r => r.ruta === '/api/booking');
           assert.ok(res, 'Compra con código enviada');
           assert.equal(res.status, 200);
-          assert.equal(res.data.precio_cop, cobro(Math.round(hechizoOriginal.precio_cop * 0.7)));
+          assert.equal(res.data.precio_cop, cobro(neto(hechizoOriginal, 30)));
           const reg = await db.obtenerPorRef(res.data.ref);
           assert.equal(reg.codigo_promo, 'PRUEBA');
           assert.equal(reg.descuento_pct, 30);
@@ -256,7 +277,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             es_hechizo: '1', hechizo_clave: dinamicos[0].clave, codigo: 'PRUEBA', descuento_pct: '100',
           }));
           assert.equal(res.status, 200, JSON.stringify(res.data));
-          assert.equal(res.data.precio_cop, cobro(Math.round(item.precio_cop * (esHechizo ? 0.7 : 1))));
+          assert.equal(res.data.precio_cop, cobro(neto(item, esHechizo ? 30 : 0)));
           const reg = await db.obtenerPorRef(res.data.ref);
           assert.equal(Number(reg.descuento_pct || 0), esHechizo ? 30 : 0);
           const pedido = await checkout([cartItem(item, {
@@ -264,7 +285,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             es_extra: !esHechizo,
           })]);
           assert.equal(pedido.status, 200);
-          assert.equal(pedido.data.total_cop, cobro(Math.round(item.precio_cop * (esHechizo ? 0.8 : 1))));
+          assert.equal(pedido.data.total_cop, cobro(neto(item, esHechizo ? 20 : 0)));
         }
         const lectura = dinamicos[1];
         await rechaza('/api/booking', booking(lectura, { incluye_adelanto: '1', es_hechizo: '1', hechizo_clave: dinamicos[0].clave }));
@@ -280,13 +301,13 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         const fijo = { nombre: 'Adelanto (urgencia)', tipo: 'extra', precio_cop: 28000, precio_usd: 10 };
         const individual = await post('/api/booking', booking(fijo, { adelanto: 'solo' }));
         assert.equal(individual.status, 200);
-        assert.equal(individual.data.precio_cop, cobro(28000));
+        assert.equal(individual.data.precio_cop, cobro(neto(fijo)));
         const pedido = await checkout([cartItem(fijo, { es_adelanto: true })]);
         assert.equal(pedido.status, 200);
-        assert.equal(pedido.data.total_cop, cobro(28000));
+        assert.equal(pedido.data.total_cop, cobro(neto(fijo)));
         const incluido = await post('/api/booking', booking(dinamicos[0], { incluye_adelanto: '1' }));
         assert.equal(incluido.status, 200);
-        assert.equal(incluido.data.precio_cop, cobro(40000 + 28000));
+        assert.equal(incluido.data.precio_cop, cobro(neto(dinamicos[0], 20, true)));
         const reg = await db.obtenerPorRef(incluido.data.ref);
         assert.equal(reg.adelanto, 'incluido');
         assert.equal(reg.descuento_pct, 20);
@@ -321,7 +342,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
           } else {
             const actualizado = await post('/api/booking', booking({ ...item, ...cambio }));
             assert.equal(actualizado.status, 200);
-            assert.equal(actualizado.data.precio_cop, cobro(cambio.precio_cop));
+            assert.equal(actualizado.data.precio_cop, cobro(neto({ ...item, ...cambio })));
           }
         }
         await db.eliminarCatalogoItem(item.id, actorCatalogo);
@@ -373,6 +394,43 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
           assert.equal(resumen.personas_agendadas, base.personas_agendadas + personas);
           assert.equal(resumen.agendados, base.agendados + trabajos);
         }
+      });
+      await t.test('Separación SQL: lecturas históricas, dinámicas, tipos corregidos y compradores compartidos', async () => {
+        const antesLecturas = await db.resumenPanel('lectura');
+        const antesTrabajos = await db.resumenPanel('trabajo');
+        await db.guardarCatalogoItem({ id: 'TIPO-DINAMICO', nombre: 'Lectura dinámica sintética',
+          tipo: 'lectura', activo: true, precio_cop: 40000, precio_usd: 10 }, actorCatalogo);
+        const filas = [
+          { ref: 'TIPO-L1', producto: estaticos.find(i => i.tipo === 'lectura').nombre },
+          { ref: 'TIPO-L2', producto: 'Nombre anterior', catalogo_id: 'TIPO-DINAMICO' },
+          { ref: 'TIPO-L3', producto: 'Servicio manual', tipo_servicio: 'lectura', estado: 'pendiente_pago' },
+          { ref: 'TIPO-W1', producto: 'Corrección manual', catalogo_id: 'TIPO-DINAMICO', tipo_servicio: 'trabajo' },
+          { ref: 'TIPO-W2', producto: 'Servicio sin clasificar' },
+        ];
+        for (const r of filas) await db.crearAgendamiento({ cliente_id: 'TIPO-COMPRADOR',
+          cliente_nombre: 'Comprador separación SQL', estado: 'agendado', precio_cop: 10000, ...r });
+        for (const [tipo, refs] of [
+          ['lectura', ['TIPO-L1', 'TIPO-L2', 'TIPO-L3']],
+          ['trabajo', ['TIPO-W1', 'TIPO-W2']],
+          ['todos', filas.map(r => r.ref)],
+        ]) {
+          const agenda = await db.listarAgendaPanel({ tipo, buscar: 'Comprador separación SQL' });
+          assert.equal(agenda.personas, 1);
+          assert.deepEqual(agenda.registros.map(r => r.ref).sort(), refs.sort());
+        }
+        const lectura = await db.resumenPanel('lectura'), trabajo = await db.resumenPanel('trabajo');
+        assert.equal(lectura.total, antesLecturas.total + 3);
+        assert.equal(lectura.agendados, antesLecturas.agendados + 2);
+        assert.equal(lectura.personas_agendadas, antesLecturas.personas_agendadas + 1);
+        assert.equal(trabajo.total, antesTrabajos.total + 2);
+        assert.equal(trabajo.agendados, antesTrabajos.agendados + 2);
+        assert.equal(trabajo.personas_agendadas, antesTrabajos.personas_agendadas + 1);
+        for (const ref of ['TIPO-L1', 'TIPO-L2']) await db.actualizarPorRef(ref, { trabajo_hecho: true });
+        assert.equal((await db.resumenPanel('lectura')).personas_agendadas, antesLecturas.personas_agendadas);
+        assert.deepEqual(await db.resumenPanel('trabajo'), trabajo);
+        const realizados = await db.listarRealizados('lectura');
+        assert.ok(realizados.some(r => r.ref === 'TIPO-L1') && realizados.some(r => r.ref === 'TIPO-L2'));
+        assert.ok(!realizados.some(r => r.ref === 'TIPO-W1'));
       });
       assert.deepEqual(correos, [], 'No enviar correos');
       assert.deepEqual(externas, [], 'No consultar Wompi ni otros destinos');

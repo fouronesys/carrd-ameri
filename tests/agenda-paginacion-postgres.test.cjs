@@ -16,7 +16,7 @@ const templates = require('../lib/templates');
 
 test('Normaliza filtros y limita tamaño, páginas y búsqueda desde el servidor', () => {
   assert.deepEqual(opcionesAgenda({ pagina: '-5', tamano: 999, estado: 'SQL', buscar: ['a'] }),
-    { pagina: 1, tamano: 15, estado: 'todos', buscar: '' });
+    { pagina: 1, tamano: 15, estado: 'todos', tipo: 'todos', buscar: '' });
   assert.equal(opcionesAgenda({ pagina: 'Infinity' }).pagina, 1);
   assert.equal(opcionesAgenda({ buscar: 'x'.repeat(500) }).buscar.length, 200);
 });

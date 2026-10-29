@@ -6,6 +6,9 @@ if (require.main === module) {
   process.env.ASSISTANT_PASSWORD = 'isolated-assistant-test';
   process.env.SESSION_SECRET = 'isolated-session-test-not-a-live-secret';
   process.env.NODE_ENV = 'test';
+  process.env.WOMPI_PUBLIC_KEY = 'pub_test_sintetica';
+  process.env.WOMPI_PRIVATE_KEY = 'prv_test_sintetica';
+  process.env.WOMPI_INTEGRITY_SECRET = 'integridad-sintetica';
 }
 const session = require('express-session');
 function sustituir(nombre, exports) {
@@ -22,6 +25,7 @@ const trabajos = new Map([
 ]);
 const llamadas = {};
 const copia = x => JSON.parse(JSON.stringify(x));
+const tipoServicio = r => require('../../lib/tipo-servicio').tipoServicio(r, [...servicios.values()]);
 function sembrarAgendaAgrupada() {
   trabajos.clear();
   const datos = [
@@ -75,7 +79,8 @@ const db = {
   listarAgendaPanel: async query => {
     const filtros = require('../../lib/agenda-panel').opcionesAgenda(query);
     const grupos = require('../../lib/agenda-clientes').agruparClientes(
-      [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en)
+      [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en && (filtros.tipo === 'todos' || tipoServicio(r) === filtros.tipo))
+        .map(r => ({ ...r, tipo_servicio: tipoServicio(r) }))
     ).filter(g => (filtros.estado === 'todos' || g.registros.some(r => r.estado === filtros.estado)) &&
       (!filtros.buscar || g.registros.some(r => [r.ref, r.pedido_ref, r.cliente_nombre, r.contacto, r.producto, r.objetivo_nombre, r.cliente_email]
         .join(' ').toLowerCase().includes(filtros.buscar.toLowerCase()))));
@@ -85,7 +90,9 @@ const db = {
       trabajos: grupos.reduce((n, g) => n + g.registros.length, 0),
       registros: copia(grupos.slice((pagina - 1) * filtros.tamano, pagina * filtros.tamano).flatMap(g => g.registros)) };
   },
-  listarRealizados: async () => copia([...trabajos.values()].filter(r => r.trabajo_hecho)),
+  listarRealizados: async (tipo = 'todos') => copia([...trabajos.values()].filter(r => r.trabajo_hecho && (tipo === 'todos' || tipoServicio(r) === tipo))),
+  crearAgendamiento: async r => { trabajos.set(r.ref, copia(r)); return copia(r); },
+  obtenerPorPedido: async ref => copia([...trabajos.values()].filter(r => r.pedido_ref === ref)),
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
   actualizarPorRef: async (ref, cambios) => { Object.assign(trabajos.get(ref), cambios); return copia(trabajos.get(ref)); },
   marcarTrabajoRealizado: async ref => {
@@ -94,14 +101,14 @@ const db = {
   },
   procesarSiguienteAvisoRealizado: async () => false,
   obtenerClientePorId: async () => ({ email: 'cliente@example.invalid' }),
-  resumenPanel: async () => {
-    const activos = [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en);
+  resumenPanel: async (tipo = 'todos') => {
+    const activos = [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en && (tipo === 'todos' || tipoServicio(r) === tipo));
     const pagados = activos.filter(r => r.estado === 'agendado');
     return {
       total: activos.length, agendados: pagados.length,
       personas_agendadas: require('../../lib/agenda-clientes').agruparClientes(pagados).length,
       verificar: activos.filter(r => r.estado === 'pendiente_verificacion').length,
-      realizados: [...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en).length,
+      realizados: [...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en && (tipo === 'todos' || tipoServicio(r) === tipo)).length,
       ingresos: 50000, catalogo: servicios.size,
     };
   },
@@ -138,6 +145,10 @@ sustituir('../../lib/mailer', {
   enviarEstadoCliente: async () => { await new Promise(r => setTimeout(r, 1200)); return { enviado: true }; },
 });
 sustituir('connect-pg-simple', () => session.MemoryStore);
+const divisasReales = require('../../lib/divisas');
+sustituir('../../lib/divisas', { ...divisasReales, crearDivisas: () => divisasReales.crearDivisas({
+  fetchImpl: async () => ({ ok: true, json: async () => require('./tasas.cjs').tasasPrueba() }),
+}) });
 const { app } = require('../../server');
 // These diagnostic routes exist only in this test entrypoint.
 app.get('/__test/state', (req, res) => res.json({
@@ -147,6 +158,11 @@ app.get('/__test/state', (req, res) => res.json({
 }));
 if (require.main === module) {
   if (process.argv.includes('--agenda-clientes')) sembrarAgendaAgrupada();
+  if (process.argv.includes('--divisas')) {
+    sembrarAgendaAgrupada();
+    trabajos.set('LECTURA-1', { ref: 'LECTURA-1', tipo_servicio: 'lectura', cliente_id: 'CLIENTE-A',
+      cliente_nombre: 'Cliente de prueba', producto: 'Lectura de prueba', estado: 'agendado', precio_cop: 40000 });
+  }
   if (process.argv.includes('--agenda-paginacion')) {
     trabajos.clear();
     for (let i = 0; i < 31; i++) {

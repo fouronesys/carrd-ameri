@@ -1,27 +1,28 @@
 (function () {
-  var WOMPI_PUBLIC_KEY = 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
+  // Sin llave de respaldo: la llave pública llega SOLO desde /api/config.
+  var WOMPI_PUBLIC_KEY = '';
 
-  // Comisión de Wompi (para el pago en pesos); llega desde /api/config.
-  // El monto real siempre lo calcula el servidor; esto es solo para mostrar un estimado.
-  var COM = { pct: 0.0265, fijo: 700, iva: 0.19 };
-
-  // Intenta obtener la llave pública y la comisión desde el servidor (fuente única).
-  try {
-    fetch('/api/config')
+  function cargarConfig() {
+    return fetch('/api/config', { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (cfg) {
-        if (!cfg) return;
-        if (cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = cfg.wompiPublicKey;
-        if (cfg.comision) COM = cfg.comision;
+        if (cfg && cfg.wompiPublicKey) WOMPI_PUBLIC_KEY = String(cfg.wompiPublicKey);
       })
       .catch(function () {});
-  } catch (e) {}
+  }
+  var CONFIG_LISTA = cargarConfig();
 
-  // Bruto a cobrar para que el negocio reciba el neto tras la comisión de Wompi.
-  function conComisionWompi(baseCop) {
-    var factor = 1 - COM.pct * (1 + COM.iva);
-    var fijo = COM.fijo * (1 + COM.iva);
-    return Math.ceil((baseCop + fijo) / factor);
+  function llavePublica() {
+    return CONFIG_LISTA.then(function () {
+      if (WOMPI_PUBLIC_KEY) return WOMPI_PUBLIC_KEY;
+      CONFIG_LISTA = cargarConfig();
+      return CONFIG_LISTA;
+    }).then(function () {
+      if (!WOMPI_PUBLIC_KEY) {
+        throw new Error('El pago con Wompi no está disponible ahora mismo (falta la configuración pública). Prueba por transferencia o escríbenos.');
+      }
+      return WOMPI_PUBLIC_KEY;
+    });
   }
 
   var ACLARACIONES_RESUMEN = [
@@ -229,12 +230,7 @@
       '<h3><span>♡</span> Confirmar pago <span>♡</span></h3>',
       '<div class="wm-producto" id="wm-nombre-producto"></div>',
       '<div class="wm-precio" id="wm-precio-producto"></div>',
-      '<div class="wm-moneda" id="wm-moneda-wrap">',
-      '  <span class="wm-moneda-lbl">Pagar en:</span>',
-      '  <label class="wm-moneda-opt"><input type="radio" name="wm-moneda" value="cop" checked> Pesos (COP)</label>',
-      '  <label class="wm-moneda-opt" id="wm-moneda-usd-wrap"><input type="radio" name="wm-moneda" value="usd"> Dólares (USD)</label>',
-      '</div>',
-      '<div class="wm-total" id="wm-total"></div>',
+      '<div id="wm-cotizacion" class="fd-cot" aria-live="polite" style="display:none"></div>',
       '<div class="wm-promo" id="wm-promo" style="display:none">',
       '  <label class="wm-label">¿Tienes un código promocional?',
       '    <span style="display:flex;gap:8px;margin-top:6px;">',
@@ -282,10 +278,10 @@
       '<div class="wm-transfer-only">',
       '  <hr class="wm-divider">',
       '  <div class="wm-metodos">',
-      '    <div class="wm-metodos-tit">Realiza el pago a cualquiera de estos métodos:</div>',
+      '    <div class="wm-metodos-tit">Transfiere el total en COP indicado arriba a cualquiera de estos métodos:</div>',
       '    ' + metodosItems,
       '  </div>',
-      '  <p class="wm-usd-note">Para pagar en <strong>dólares (USD)</strong>, usa PayPal o AstroPay:</p>',
+      '  <p class="wm-pago-cap">Si usas PayPal o AstroPay, envía el equivalente del total en COP; la conversión de esa plataforma puede variar.</p>',
       '  <div class="wm-pagos">',
       '    <a class="wm-pago-btn" href="' + URL_ASTROPAY + '" target="_blank" rel="noopener">Pagar por AstroPay ↗</a>',
       '    <a class="wm-pago-btn" href="https://www.paypal.com/myaccount/transfer/homepage/pay" target="_blank" rel="noopener">Pagar por PayPal ↗</a>',
@@ -314,9 +310,11 @@
 
     var estado = {
       precioCOP: 0, precioUSD: '', nombre: '', precioTexto: '', modo: 'wompi',
-      esHechizo: false, clave: '', base: 0, pctFecha: 0, pctCodigo: 0, codigo: '', precioFinal: 0,
-      adelanto: '', incluyeAdelanto: false, moneda: 'cop', esExtra: false, catalogoId: '',
+      esHechizo: false, clave: '', base: 0, pctFecha: 0, pctCodigo: 0, codigo: '',
+      adelanto: '', incluyeAdelanto: false, esExtra: false, catalogoId: '', abierto: false
     };
+    var enviando = false;
+    var D = window.FresaDivisas || null;
 
     var checkbox = document.getElementById('wm-acepto');
     var btnPagar = document.getElementById('wm-btn-pagar');
@@ -343,115 +341,68 @@
       return [inpExtraH1.value.trim(), inpExtraH2.value.trim(), inpExtraH3.value.trim()].filter(Boolean);
     }
     var normalOnlyEls = Array.prototype.slice.call(modal.querySelectorAll('.wm-normal-only'));
-    var totalEl = document.getElementById('wm-total');
-    var monedaWrap = document.getElementById('wm-moneda-wrap');
-    var monedaUsdWrap = document.getElementById('wm-moneda-usd-wrap');
-    var monedaRadios = Array.prototype.slice.call(modal.querySelectorAll('input[name="wm-moneda"]'));
+    var cotEl = document.getElementById('wm-cotizacion');
 
-    // Oculta la opción de USD si el servicio no tiene precio en dólares.
-    function aplicarDisponibilidadUsd() {
-      if (!monedaUsdWrap) return;
-      var hayUsd = !!String(estado.precioUSD || '').trim();
-      monedaUsdWrap.style.display = hayUsd ? '' : 'none';
-      if (!hayUsd && estado.moneda === 'usd') {
-        estado.moneda = 'cop';
-        monedaRadios.forEach(function (r) { r.checked = r.value === 'cop'; });
-      }
+    // Cotización autoritativa del servidor: sin ella no se puede pagar.
+    var cot = D ? D.cotizador(function (s) {
+      D.pintarCotizacion(cotEl, s, {
+        reintentar: function () { pedirCotizacion(false); },
+        confirmar: function () { cot.confirmarRevision(); limpiarError(); }
+      });
+      actualizarBoton();
+    }) : null;
+    if (!D) {
+      cotEl.style.display = '';
+      cotEl.innerHTML = '<div class="fd-cot-err" role="alert">No pudimos cargar el cotizador. Recarga la página para continuar.</div>';
     }
 
-    // Manual = transferencia (se sube comprobante). En dólares por transferencia
-    // se paga por PayPal/AstroPay; en dólares por Wompi se cobra en pesos.
     function esManual() {
       return estado.modo === 'transferencia';
     }
     function aplicarModoPago() {
       modal.classList.toggle('modo-transfer', esManual());
-      modal.classList.toggle('moneda-usd', estado.moneda === 'usd');
-      btnPagar.textContent = textoBoton();
-      if (typeof actualizarBoton === 'function') actualizarBoton();
+      actualizarBoton();
     }
 
-    monedaRadios.forEach(function (r) {
-      r.addEventListener('change', function () {
-        if (r.checked) {
-          estado.moneda = r.value === 'usd' ? 'usd' : 'cop';
-          aplicarModoPago();
-          actualizarPrecio();
-        }
-      });
-    });
-
-    function pctActual() {
-      return Math.max(estado.pctFecha || 0, estado.pctCodigo || 0);
+    // Una compra individual: un solo item con el estado original del servicio.
+    function payloadCotizacion() {
+      var soloAdelanto = estado.adelanto === 'solo';
+      return {
+        items: [{
+          catalogo_id: estado.catalogoId || '',
+          nombre: soloAdelanto ? 'Adelanto (urgencia)' : estado.nombre,
+          precio_cop: soloAdelanto ? ADELANTO_COP : estado.precioCOP,
+          precio_usd: soloAdelanto ? ADELANTO_USD : (estado.precioUSD || ''),
+          es_adelanto: soloAdelanto,
+          incluye_adelanto: !soloAdelanto && !estado.esExtra && !!estado.incluyeAdelanto
+        }],
+        metodo: esManual() ? 'transferencia' : 'wompi',
+        codigo: estado.esHechizo ? (estado.codigo || '') : '',
+        divisa: D ? D.preferida() : 'COP'
+      };
     }
 
-    // USD: refleja el descuento y/o el adelanto igual que el COP. Es el monto
-    // cobrado si se paga en dólares por transferencia (PayPal/AstroPay).
-    function usdConDescuento(pct, incluyeAdelanto) {
-      var n = parseFloat(String(estado.precioUSD || '').replace(',', '.'));
-      if (isNaN(n)) return '';
-      n = n * (1 - (Number(pct) || 0) / 100);
-      if (incluyeAdelanto) n += parseFloat(ADELANTO_USD);
-      var r = Math.round(n * 100) / 100;
-      return Number.isInteger(r) ? String(r) : r.toFixed(2);
+    function pedirCotizacion(revisar) {
+      if (!cot) return;
+      cot.pedir(payloadCotizacion(), { revisar: !!revisar });
     }
 
-    // Valor del servicio en USD según el estado actual (descuento/adelanto).
-    function servicioUsdActual() {
-      if (estado.esExtra) return estado.precioUSD || '';
-      return usdConDescuento(estado.esHechizo ? pctActual() : 0, estado.incluyeAdelanto);
-    }
-
-    // Muestra el total a pagar. En dólares por transferencia se muestra solo el
-    // monto en USD; en dólares por Wompi no se muestra la conversión (la muestra
-    // Wompi en su checkout); en pesos, el total en COP con la comisión de Wompi.
-    function refrescarTotal() {
-      if (!totalEl) return;
-      if (estado.moneda === 'usd') {
-        if (esManual()) {
-          var usd = servicioUsdActual();
-          totalEl.innerHTML = 'Total a pagar: ' + (usd || '—') + ' USD' +
-            '<small>se paga por PayPal o AstroPay</small>';
-        } else {
-          totalEl.innerHTML = 'El total se mostrará en el checkout de Wompi' +
-            '<small>el pago se realiza en pesos (COP)</small>';
-        }
-        return;
-      }
-      var esWompi = estado.modo === 'wompi';
-      var total = esWompi ? conComisionWompi(estado.precioFinal) : estado.precioFinal;
-      totalEl.innerHTML = 'Total a pagar: $' + total.toLocaleString('es-CO') + ' COP' +
-        (esWompi ? '<small>incluye comisión Wompi</small>' : '');
+    // Precio base del servicio en la divisa elegida (USD es la base).
+    function pintarPrecioBase() {
+      var usd = estado.adelanto === 'solo' ? ADELANTO_USD : estado.precioUSD;
+      var txt = (D && usd) ? D.formato(usd) : '';
+      precioEl.textContent = txt || estado.precioTexto;
+      precioEl.title = estado.precioTexto;
     }
 
     function actualizarPrecio() {
-      if (estado.esExtra) {
-        estado.precioFinal = estado.precioCOP;
-        precioEl.textContent = estado.precioTexto;
-        refrescarTotal();
-        return;
-      }
-      var extra = estado.incluyeAdelanto ? ADELANTO_COP : 0;
-      var pct = pctActual();
-      if (estado.esHechizo && pct > 0) {
-        var fin = aplicarDescuentoCliente(estado.base, pct) + extra;
-        estado.precioFinal = fin;
-        var usdFin = usdConDescuento(pct, estado.incluyeAdelanto);
-        precioEl.innerHTML = '<span class="wm-precio-tachado">' + estado.precioTexto + '</span> $' +
-          fin.toLocaleString('es-CO') + ' COP' + (usdFin ? ' · ' + usdFin + ' USD' : '') +
-          ' <span class="wm-precio-off">-' + pct + '%' + (extra ? ' + adelanto' : '') + '</span>';
-      } else if (extra) {
-        estado.precioFinal = estado.precioCOP + extra;
-        var usdAde = usdConDescuento(0, true);
-        precioEl.innerHTML = '$' + estado.precioFinal.toLocaleString('es-CO') +
-          ' COP' + (usdAde ? ' · ' + usdAde + ' USD' : '') +
-          ' <span class="wm-precio-off">+ adelanto</span>';
-      } else {
-        estado.precioFinal = estado.precioCOP;
-        precioEl.textContent = estado.precioTexto;
-      }
-      refrescarTotal();
+      pintarPrecioBase();
+      pedirCotizacion(false);
     }
+
+    window.addEventListener('fresa:divisa', function () {
+      if (estado.abierto && !enviando) actualizarPrecio();
+    });
 
     function mostrarMsgCodigo(texto, tipo) {
       codigoMsg.textContent = texto;
@@ -497,6 +448,16 @@
     });
 
     function textoBoton() {
+      if (cot) {
+        var s = cot.estado();
+        if (s.fase === 'cargando' || s.fase === 'expirada' || s.fase === 'vacia') return 'Calculando total…';
+        if (s.fase === 'error') return 'Total no disponible';
+        if (s.revisar) return 'Revisa el total actualizado';
+        if (s.fase === 'lista' && s.datos) {
+          var t = D.fmt(s.datos.total_cop, 'COP');
+          return esManual() ? 'Enviar comprobante · ' + t : 'Pagar ' + t + ' con Wompi ↗';
+        }
+      }
       return esManual() ? 'Enviar comprobante ↗' : 'Pagar con Wompi ↗';
     }
 
@@ -522,20 +483,21 @@
     }
 
     function actualizarBoton() {
-      btnPagar.disabled = !datosCompletos();
-      if (datosCompletos()) limpiarError();
+      if (enviando) return;
+      var listo = !!(cot && cot.listo());
+      btnPagar.disabled = !listo || !datosCompletos();
+      btnPagar.textContent = textoBoton();
     }
 
-    checkbox.addEventListener('change', actualizarBoton);
+    checkbox.addEventListener('change', function () { limpiarError(); actualizarBoton(); });
     [inpCliente, inpContacto, inpObjNombre, inpObjFecha, inpObjFoto, inpComprobante, inpInfo, inpExtraH1, inpExtraH2, inpExtraH3].forEach(function (el) {
-      el.addEventListener('input', actualizarBoton);
-      el.addEventListener('change', actualizarBoton);
+      el.addEventListener('input', function () { limpiarError(); actualizarBoton(); });
+      el.addEventListener('change', function () { limpiarError(); actualizarBoton(); });
     });
 
     adelantoCheck.addEventListener('change', function () {
       estado.incluyeAdelanto = adelantoCheck.checked;
       actualizarPrecio();
-      actualizarBoton();
     });
 
     document.getElementById('wm-cerrar').addEventListener('click', cerrarModal);
@@ -544,7 +506,14 @@
     });
 
     btnPagar.addEventListener('click', function () {
-      if (btnPagar.disabled) return;
+      if (btnPagar.disabled || enviando) return;
+      if (!cot || !cot.listo()) { mostrarError('Espera a que se confirme el total antes de pagar.'); return; }
+      if (!cot.vigente()) {
+        mostrarError('La cotización venció. Actualizamos el precio: revísalo antes de continuar.');
+        cot.expirar();
+        return;
+      }
+      var cotizacion = cot.estado().datos;
       var cliente = inpCliente.value.trim();
       if (!cliente) { mostrarError('Escribe tu nombre y apellido.'); return; }
 
@@ -574,14 +543,15 @@
         return;
       }
       limpiarError();
+      enviando = true;
       btnPagar.disabled = true;
-      var textoOriginal = btnPagar.textContent;
       btnPagar.textContent = 'Procesando...';
 
       var fd = new FormData();
       fd.append('cliente_nombre', cliente);
       fd.append('metodo', esManualPago ? 'transferencia' : 'wompi');
-      fd.append('moneda', estado.moneda === 'usd' ? 'usd' : 'cop');
+      fd.append('moneda', 'cop');
+      fd.append('cotizacion', cotizacion.token);
       if (esExtra) {
         fd.append('tipo', 'extra');
         fd.append('info_extra', hechizos.join(' · '));
@@ -617,25 +587,39 @@
       }
       if (comprobante) fd.append('comprobante', comprobante);
 
-      fetch('/api/booking', { method: 'POST', body: fd })
+      var preparar = esManualPago ? Promise.resolve('') : llavePublica();
+      preparar
+        .then(function () {
+          return fetch('/api/booking', { method: 'POST', body: fd, credentials: 'same-origin' });
+        })
         .then(function (resp) {
-          return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+          return resp.json().catch(function () { return null; }).then(function (data) {
+            return { ok: resp.ok, status: resp.status, data: data };
+          });
         })
         .then(function (res) {
           if (!res.ok || !res.data || !res.data.ok) {
-            throw new Error((res.data && res.data.error) || 'No se pudo registrar.');
+            var err = new Error((res.data && res.data.error) || 'No se pudo registrar.');
+            err.status = res.status;
+            throw err;
           }
           var destino = window.location.origin + '/gracias/' + encodeURIComponent(res.data.ref);
           if (esManualPago) {
             window.location.href = destino;
             return;
           }
-          var precioFinalServidor = parseInt(res.data.precio_cop, 10) || estado.precioCOP;
-          var centavos = precioFinalServidor * 100;
+          // Solo el importe confirmado por el servidor, y debe ser el cotizado.
+          var cobro = parseInt(res.data.total_cop != null ? res.data.total_cop : res.data.precio_cop, 10);
+          if (!(cobro > 0)) throw new Error('El servidor no confirmó el importe a cobrar. No abrimos el pago.');
+          if (cobro !== Number(cotizacion.total_cop)) {
+            var e2 = new Error('El importe cambió respecto a tu cotización. Revisa el nuevo total antes de pagar.');
+            e2.status = 409;
+            throw e2;
+          }
           var url = 'https://checkout.wompi.co/p/'
             + '?public-key=' + encodeURIComponent(WOMPI_PUBLIC_KEY)
             + '&currency=COP'
-            + '&amount-in-cents=' + centavos
+            + '&amount-in-cents=' + (cobro * 100)
             + '&reference=' + encodeURIComponent(res.data.ref)
             + '&redirect-url=' + encodeURIComponent(destino);
           if (res.data.signature) {
@@ -644,9 +628,10 @@
           window.location.href = url;
         })
         .catch(function (e) {
+          enviando = false;
           mostrarError(e.message || 'No se pudo procesar. Intenta de nuevo.');
-          btnPagar.disabled = false;
-          btnPagar.textContent = textoOriginal;
+          if (e.status === 409 || (e.status === 400 && /cotiz/i.test(e.message || ''))) pedirCotizacion(true);
+          else actualizarBoton();
         });
     });
 
@@ -656,9 +641,11 @@
 
     function cerrarModal() {
       overlay.classList.remove('activo');
+      estado.abierto = false;
+      enviando = false;
+      if (cot) cot.reiniciar();
       checkbox.checked = false;
       btnPagar.disabled = true;
-      btnPagar.textContent = textoBoton();
       limpiarError();
     }
 
@@ -690,9 +677,9 @@
       inpExtraH3.value = '';
       inpCodigo.value = '';
       mostrarMsgCodigo('', '');
-      estado.moneda = 'cop';
-      monedaRadios.forEach(function (r) { r.checked = r.value === 'cop'; });
-      aplicarDisponibilidadUsd();
+      estado.abierto = true;
+      enviando = false;
+      if (cot) cot.reiniciar();
       aplicarModoPago();
       actualizarPrecio();
       checkbox.checked = false;
@@ -703,8 +690,7 @@
       inpComprobante.value = '';
       inpInfo.value = '';
       limpiarError();
-      btnPagar.disabled = true;
-      btnPagar.textContent = textoBoton();
+      actualizarBoton();
       overlay.classList.add('activo');
     };
   }

@@ -8,7 +8,16 @@ const assert = require('node:assert/strict');
 // DOM sin motor de navegación: ejecuta los archivos originales, no copias de
 // sus funciones. Solo permite HTTP al servidor local de esta prueba.
 async function navegador(url, html, request) {
-  const { document, Event } = parseHTML(html);
+  const { document, Event, CustomEvent, HTMLSelectElement } = parseHTML(html);
+  // linkedom expone value solo como getter; un navegador permite seleccionarlo.
+  Object.defineProperty(HTMLSelectElement.prototype, 'value', {
+    configurable: true,
+    get() { return (this.querySelector('option[selected]') || this.querySelector('option'))?.value || ''; },
+    set(value) {
+      for (const o of this.querySelectorAll('option')) o.removeAttribute('selected');
+      for (const o of this.querySelectorAll('option')) if (o.value === String(value)) { o.setAttribute('selected', ''); break; }
+    },
+  });
   const storage = new Map();
   const pendientes = new Set();
   const solicitudes = [];
@@ -16,7 +25,10 @@ async function navegador(url, html, request) {
   const timers = new Set();
   const location = { origin: url, href: url + '/' };
   const context = vm.createContext({
-    document, Event, FormData, Blob, console,
+    document, Event, CustomEvent, FormData, Blob, console,
+    navigator: { language: 'es-CO' },
+    addEventListener: (...args) => document.defaultView.addEventListener(...args),
+    dispatchEvent: (...args) => document.defaultView.dispatchEvent(...args),
     location, innerWidth: 1024, innerHeight: 768,
     localStorage: {
       getItem: k => storage.get(k) || null,
@@ -55,7 +67,7 @@ async function navegador(url, html, request) {
     }
     assert.deepEqual(errores, []);
   }
-  for (const archivo of ['cart.js', 'wompi.js']) {
+  for (const archivo of ['divisas.js', 'cart.js', 'wompi.js']) {
     vm.runInContext(fs.readFileSync(require.resolve('../../assets/' + archivo), 'utf8'), context, { filename: archivo });
   }
   await listo();

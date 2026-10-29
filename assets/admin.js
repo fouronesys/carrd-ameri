@@ -11,6 +11,7 @@
     var params = new URLSearchParams(location.search);
     if (tab !== 'catalogo' || params.get('tab') !== 'catalogo') params = new URLSearchParams();
     params.set('tab', tab);
+    params.set('tipo', new URLSearchParams(location.search).get('tipo') || 'trabajo');
     return '/admin?' + params.toString();
   }
   async function cargar(tab, url) {
@@ -64,6 +65,13 @@
       reemplazar(tab, doc);
       document.querySelectorAll('.admin-sec').forEach(function (s) { s.classList.toggle('activo', s.dataset.sec === tab); });
       document.querySelectorAll('.admin-tab').forEach(function (b) { b.classList.toggle('activo', b.dataset.tab === tab); });
+      // Los enlaces de tipo están fuera del contenido que reemplaza AJAX.
+      // Mantener Entregados/Papelera al cambiar entre lecturas y trabajos.
+      document.querySelectorAll('nav[aria-label="Tipo de servicio"] a').forEach(function (a) {
+        var params = new URLSearchParams(a.getAttribute('href').split('?')[1]);
+        params.set('tab', ['agenda', 'realizados', 'eliminados'].indexOf(tab) >= 0 ? tab : 'agenda');
+        a.setAttribute('href', '/admin?' + params.toString());
+      });
       if (guardarHistoria) history.pushState(null, '', tab === 'agenda' ? agendaUrl : urlTab(tab));
       window.scrollTo(0, 0);
     } catch (err) { mostrarToast(err.message, 'error'); }

@@ -12,8 +12,9 @@ const { generarExcel, generarPDF } = require('../lib/exportar');
 // reader dependency or replacing the renderer with a mock.
 function textoPDF(buffer) {
   const source = buffer.toString('latin1');
-  return [...source.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)].map(m => {
-    const content = inflateSync(Buffer.from(m[1], 'latin1')).toString('latin1');
+  return [...source.matchAll(/\/Length (\d+)[\s\S]*?stream\r?\n/g)].map(m => {
+    const inicio = m.index + m[0].length;
+    const content = inflateSync(buffer.subarray(inicio, inicio + Number(m[1]))).toString('latin1');
     return [...content.matchAll(/<([0-9a-f]+)>/gi)]
       .map(hex => Buffer.from(hex[1], 'hex').toString('latin1')).join('');
   }).join('\n');
