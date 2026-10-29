@@ -583,9 +583,21 @@
     var cuerpo = {};
     for (var k in data) cuerpo[k] = data[k];
     if (!cuerpo.divisa) cuerpo.divisa = st.preferida || 'COP';
-    return fetch('/api/cotizacion', {
+    var control = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var temporizador;
+    var limite = new Promise(function (_, reject) {
+      temporizador = setTimeout(function () {
+        var e = new Error('El cálculo del total tardó demasiado. Comprueba tu conexión y pulsa «Volver a calcular». No se inició ningún cobro.');
+        e.status = 408;
+        reject(e);
+        if (control) control.abort();
+      }, 15000);
+    });
+    var solicitud = fetch('/api/cotizacion', {
       method: 'POST',
       credentials: 'same-origin',
+      cache: 'no-store',
+      signal: control ? control.signal : undefined,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cuerpo)
     }).then(function (r) {
@@ -606,6 +618,13 @@
     }, function () {
       var e = new Error('Sin conexión con el servidor. Revisa tu internet e intenta de nuevo.');
       e.status = 0;
+      throw e;
+    });
+    return Promise.race([solicitud, limite]).then(function (d) {
+      clearTimeout(temporizador);
+      return d;
+    }, function (e) {
+      clearTimeout(temporizador);
       throw e;
     });
   }

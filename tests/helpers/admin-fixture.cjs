@@ -108,6 +108,7 @@ const db = {
   listarRealizados: async (tipo = 'todos') => copia([...trabajos.values()].filter(r => r.trabajo_hecho && (tipo === 'todos' || tipoServicio(r) === tipo))),
   crearAgendamiento: async r => { trabajos.set(r.ref, copia(r)); return copia(r); },
   obtenerPorPedido: async ref => copia([...trabajos.values()].filter(r => r.pedido_ref === ref)),
+  crearAgendamiento: async registro => { trabajos.set(registro.ref, copia(registro)); },
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
   actualizarPorRef: async (ref, cambios) => { Object.assign(trabajos.get(ref), cambios); return copia(trabajos.get(ref)); },
   marcarTrabajoRealizado: async ref => {

@@ -8,3 +8,4 @@
 - [Personas y trabajos](agenda-personas-trabajos.md) — una persona es el cliente comprador; varios servicios no deben inflar el contador de personas.
 - [Divisas del catálogo](catalogo-divisas.md) — tarifas COP y USD independientes; COP original fijo, divisas extranjeras desde USD y cobro siempre COP.
 - [Puertos temporales de prueba](puertos-prueba.md) — los servidores aislados pueden añadir puertos a .replit; detenerlos no elimina esa configuración.
+- [Formularios de pago antiguos](checkout-version-compatibility.md) — las pestañas abiertas sobreviven a despliegues; un total visible no garantiza una cotización firmada.

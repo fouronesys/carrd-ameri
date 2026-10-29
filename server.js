@@ -17,6 +17,7 @@ const exportar = require('./lib/exportar');
 const catalogoUtil = require('./lib/catalogo');
 const catalogoCompra = require('./lib/catalogo-compra');
 const catalogoPrecios = require('./lib/catalogo-precios');
+const { versionarScripts } = require('./lib/version-assets');
 const { crearClienteWompi } = require('./lib/wompi');
 const { crearDivisas } = require('./lib/divisas');
 const { crearCotizaciones, datosBooking, huellaCotizacion } = require('./lib/cotizaciones');
@@ -760,6 +761,7 @@ app.post('/api/cotizacion', mismoOrigen, async function (req, res) {
   } catch (e) { res.status(e.status || 503).json({ ok: false, error: e.status ? e.message : 'No se pudo obtener una tasa vigente. Intenta nuevamente.' }); }
 });
 app.get('/api/config', function (req, res) {
+  res.set('Cache-Control', 'no-store');
   res.json({
     wompiPublicKey: WOMPI_PUBLIC_KEY,
     comision: { pct: WOMPI_COM_PCT, fijo: WOMPI_COM_FIJO, iva: WOMPI_IVA },
@@ -2330,7 +2332,11 @@ if (process.env.NODE_ENV !== 'production') {
     next();
   });
 }
-app.use('/assets', express.static(path.join(ROOT, 'assets')));
+app.use('/assets', express.static(path.join(ROOT, 'assets'), {
+  setHeaders: function (res, archivo) {
+    if (archivo.endsWith('.js')) res.setHeader('Cache-Control', 'no-store');
+  },
+}));
 
 /* ---------- SEO: URL base, index con canónica, robots.txt y sitemap.xml ---------- */
 // La URL base se toma de PUBLIC_URL si está definida; si no, del host de la
@@ -2386,12 +2392,13 @@ function renderCatalogoDinamico(items, tipo) {
 async function enviarIndex(req, res, status) {
   try {
     if (indexCache === null || process.env.NODE_ENV !== 'production') {
-      indexCache = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+      indexCache = versionarScripts(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), ROOT);
     }
     const catalogo = await db.listarCatalogoActivo();
     const integrado = catalogoUtil.integrar(indexCache, catalogo, renderServicio, renderCatalogoDinamico);
     const html = catalogoPrecios.aplicarHtml(integrado, ORIGINALES_PRECIOS, catalogo)
       .split('__BASE_URL__').join(urlBase(req));
+    res.set('Cache-Control', 'no-store');
     res.status(status || 200).type('html').send(html);
   } catch (e) {
     console.error('[catalogo publico]', e.message);

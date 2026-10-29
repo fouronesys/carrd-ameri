@@ -118,6 +118,20 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
       url = 'http://127.0.0.1:' + http.address().port;
       const html = await (await request('/')).text();
       const estaticos = [...cargarEstaticos(require('node:fs').readFileSync(require.resolve('../index.html'), 'utf8')).values()];
+      await t.test('Formulario antiguo sin cotización: aviso accionable y ningún pedido creado', async () => {
+        const antes = await count();
+        const form = new FormData();
+        for (const [k, v] of Object.entries(booking(estaticos[0]))) form.append(k, String(v));
+        const r = await request('/api/booking', { method: 'POST', body: form });
+        assert.equal(r.status, 409);
+        assert.match((await r.json()).error, /formulario quedó desactualizado.*Recarga/);
+        assert.equal(await count(), antes);
+        const root = await request('/');
+        assert.equal(root.headers.get('cache-control'), 'no-store');
+        assert.match(await root.text(), /src="\/assets\/wompi\.js\?v=[a-f0-9]{16}"/);
+        const js = await request('/assets/wompi.js');
+        assert.equal(js.headers.get('cache-control'), 'no-store');
+      });
 
       await t.test('Todos los botones originales y dinámicos conservan identidad, COP y USD al añadir al carrito', async () => {
         const b = await navegador(url, html, request);
