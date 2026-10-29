@@ -33,6 +33,7 @@ test('Banderas, formatos y resumen firmado: once divisas sin duplicar COP antes 
   assert.equal(document.querySelector('#servicio .wm-fd').getAttribute('data-fd'), D.fmt(50000, 'COP'));
   D.establecer('USD');
   assert.equal(D.precio(50000, 20), D.fmt(20, 'USD'));
+  assert.equal(D.precio(50000, 0), 'No disponible en esta divisa');
   assert.equal(document.querySelector('#servicio .wm-fd').getAttribute('data-fd'), D.fmt(20, 'USD'));
   D.establecer('COP');
   assert.equal(document.querySelector('#servicio strong').textContent, '$50.000 COP · 20 USD');

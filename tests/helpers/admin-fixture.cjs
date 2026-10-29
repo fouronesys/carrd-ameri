@@ -45,6 +45,21 @@ const db = {
   listarCatalogo: async () => copia([...servicios.values()]),
   listarCatalogoActivo: async () => copia([...servicios.values()].filter(i => i.activo)),
   obtenerCatalogoPorId: async id => servicios.has(id) ? copia(servicios.get(id)) : null,
+  actualizarPreciosCatalogo: async (cambios, originales, actor) => {
+    const precios = require('../../lib/catalogo-precios');
+    const pendientes = cambios.map(cambio => {
+      const actual = servicios.get(cambio.id) || originales.get(cambio.id);
+      precios.validarCambio(actual && precios.publico(actual), cambio);
+      const { html, ...datos } = actual;
+      return { antes: datos, despues: { ...datos, precio_cop: cambio.precio_cop,
+        precio_usd: cambio.precio_usd, actualizado_en: new Date().toISOString() } };
+    });
+    pendientes.forEach(p => {
+      servicios.set(p.despues.id, copia(p.despues));
+      historial.push(require('../../lib/catalogo-historial').evento('edicion', p.antes, p.despues, actor));
+    });
+    return pendientes.length;
+  },
   guardarCatalogoItem: async (i, actor) => {
     historial.push(require('../../lib/catalogo-historial').evento('creacion', null, i, actor));
     servicios.set(i.id, copia(i)); return copia(i);

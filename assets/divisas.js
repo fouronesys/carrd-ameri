@@ -177,6 +177,7 @@
       var n = Number(cop);
       return isFinite(n) && n > 0 ? fmt(n, 'COP') : '';
     }
+    if (!(numUsd(usd) > 0)) return 'No disponible en esta divisa';
     return formato(usd, c);
   }
 

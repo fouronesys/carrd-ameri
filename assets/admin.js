@@ -29,6 +29,17 @@
       if (actual && nuevo) actual.textContent = nuevo.textContent;
     });
   }
+  document.addEventListener('catalogo:precios-guardados', async function () {
+    try {
+      var doc = await cargar('catalogo');
+      // Sin destruir el editor activo: actualizar también tarjetas e historial.
+      ['catalogo-lista', 'historial-catalogo'].forEach(function (id) {
+        var actual = document.getElementById(id), nuevo = doc.getElementById(id);
+        if (actual && nuevo) actual.replaceWith(nuevo);
+      });
+      filtrar();
+    } catch (e) { mostrarToast('Precios guardados. Recarga el catálogo para actualizar su historial.', 'error'); }
+  });
   function reemplazar(tab, doc) {
     var anterior = seccion(tab), nuevo = seccion(tab, doc);
     if (anterior && nuevo) {

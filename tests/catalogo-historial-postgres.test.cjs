@@ -81,6 +81,28 @@ test('Historial PostgreSQL: esquema idempotente, atomicidad, concurrencia, filtr
     assert.equal(new Set([...p1.eventos, ...p2.eventos].map(e => JSON.stringify(e))).size, 39);
     await db.init();
     assert.equal((await db.listarHistorialCatalogo({ h_accion: 'eliminacion' })).eventos.length, 1);
+    // Lotes reales: originales sin fila y administrables en una transacción.
+    const precios = require('../lib/catalogo-precios');
+    const originales = precios.originales(fs.readFileSync(require.resolve('../index.html'), 'utf8'));
+    const base = [...originales.values()][0];
+    const dinamico = await db.obtenerCatalogoPorId('extra-0');
+    const cambios = [base, dinamico].map(i => ({ id: i.id, revision: precios.publico(i).revision,
+      precio_cop: 77000, precio_usd: 33.5 }));
+    assert.equal(await db.actualizarPreciosCatalogo(cambios, originales, actor), 2);
+    assert.equal((await db.obtenerCatalogoPorId(base.id)).precio_cop, 77000);
+    assert.equal((await db.obtenerCatalogoPorId(base.id)).html, undefined);
+    await assert.rejects(db.actualizarPreciosCatalogo(cambios, originales, actor), /cambió/);
+    const actuales = await Promise.all(cambios.map(c => db.obtenerCatalogoPorId(c.id)));
+    const lote = actuales.map(i => ({ id: i.id, revision: precios.publico(i).revision,
+      precio_cop: 88000, precio_usd: 40 }));
+    // Incluso una auditoría fallida revierte el lote entero.
+    await db.pool.query('CREATE TRIGGER fallo_historial BEFORE INSERT ON catalogo_historial FOR EACH ROW EXECUTE FUNCTION rechazar_historial()');
+    await assert.rejects(db.actualizarPreciosCatalogo(lote, originales, actor), /fallo simulado/);
+    for (const c of cambios) assert.equal((await db.obtenerCatalogoPorId(c.id)).precio_cop, 77000);
+    await db.pool.query('DROP TRIGGER fallo_historial ON catalogo_historial');
+    const carreras = await Promise.allSettled([1, 2].map(() => db.actualizarPreciosCatalogo(lote, originales, actor)));
+    assert.equal(carreras.filter(r => r.status === 'fulfilled').length, 1);
+    assert.equal(carreras.filter(r => r.status === 'rejected').length, 1);
   } finally {
     if (db) await db.cerrar();
     if (started) ejecutar('pg_ctl', ['-D', pgdir, '-m', 'immediate', '-w', 'stop']);

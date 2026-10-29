@@ -16,6 +16,7 @@ const templates = require('./lib/templates');
 const exportar = require('./lib/exportar');
 const catalogoUtil = require('./lib/catalogo');
 const catalogoCompra = require('./lib/catalogo-compra');
+const catalogoPrecios = require('./lib/catalogo-precios');
 const { crearClienteWompi } = require('./lib/wompi');
 const { crearDivisas } = require('./lib/divisas');
 const { crearCotizaciones, datosBooking, huellaCotizacion } = require('./lib/cotizaciones');
@@ -25,7 +26,18 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 const ROOT = __dirname;
 const SERVICIOS_ESTATICOS = catalogoCompra.cargarEstaticos(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'));
-function resolverServicioCompra(raw) {
+const ORIGINALES_PRECIOS = catalogoPrecios.originales(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'));
+const confirmarPrecios = catalogoPrecios.crearConfirmaciones(process.env.SESSION_SECRET);
+async function resolverServicioCompra(raw) {
+  if (!raw.catalogo_id) {
+    const original = [...ORIGINALES_PRECIOS.values()].find(i => i.nombre === raw.nombre &&
+      i.precio_cop === Number(raw.precio_cop) && i.precio_usd === Number(raw.precio_usd || 0));
+    if (original) {
+      const editado = await db.obtenerCatalogoPorId(original.id);
+      if (editado && (editado.precio_cop !== Number(raw.precio_cop) ||
+          Number(editado.precio_usd || 0) !== Number(raw.precio_usd || 0))) return null;
+    }
+  }
   return catalogoCompra.resolverCompra(raw, SERVICIOS_ESTATICOS, db.obtenerCatalogoPorId);
 }
 // El adelanto independiente es un artículo fijo, no una bandera que permita
@@ -213,7 +225,9 @@ async function refrescarCatalogoValidado() {
       const clave = item.clave || claveCatalogo(item.nombre);
       const h = { clave: clave, nombre: item.nombre, precio_cop: cop, precios: [cop], dinamico: true };
       HECHIZOS.mapa[clave] = h;
-      HECHIZOS.lista.push(h);
+      const indice = HECHIZOS.lista.findIndex(i => i.clave === clave);
+      if (indice >= 0) HECHIZOS.lista[indice] = h;
+      else HECHIZOS.lista.push(h);
     }
   });
   return items;
@@ -543,6 +557,7 @@ async function construirConsultas(clienteId, baseUrl) {
 
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: false }));
+app.use('/admin/catalogo/precios', express.json({ limit: '512kb' }));
 app.use(express.json());
 app.use(session({
   name: 'fresa.sid',
@@ -1589,7 +1604,7 @@ app.get('/admin', async function (req, res) {
       usuarios: usuarios,
       destinatarios: destinatarios,
       accesos: accesos,
-      catalogo: catalogo,
+      catalogo: catalogo.filter(i => i.origen !== 'original'),
       historialCatalogo: historialCatalogo,
       resumen: resumen,
       resumenCatalogo: tab === 'catalogo' ? catalogoUtil.resumen(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), catalogo) : {},
@@ -2057,6 +2072,42 @@ function actorCatalogo(req) {
   return { usuario: req.session.usuario, usuario_id: req.session.usuario_id, rol: req.session.rol };
 }
 
+function accesoPrecios(req, res, next) {
+  res.set('Cache-Control', 'no-store');
+  if (!req.session?.admin) return res.status(401).json({ ok: false, error: 'Inicia sesión para administrar precios.' });
+  if (req.session.rol !== 'admin') return res.status(403).json({ ok: false, error: 'Solo los administradores pueden modificar precios.' });
+  next();
+}
+
+app.get('/admin/catalogo/precios', accesoPrecios, async function (req, res) {
+  res.json({ ok: true, items: catalogoPrecios.listar(ORIGINALES_PRECIOS, await db.listarCatalogo()) });
+});
+
+app.post('/admin/catalogo/precios/preview', mismoOrigen, accesoPrecios, async function (req, res) {
+  try {
+    const items = catalogoPrecios.listar(ORIGINALES_PRECIOS, await db.listarCatalogo());
+    const cambios = catalogoPrecios.planificar(items, req.body?.cambios);
+    const usuario = req.session.usuario_id || req.session.usuario;
+    const firma = confirmarPrecios.crear(cambios, usuario);
+    res.json({ ok: true, ...firma, total: cambios.length, cambios: cambios.map(c => {
+      const item = items.find(i => i.id === c.id);
+      return { id: c.id, nombre: item.nombre, antes: { precio_cop: item.precio_cop, precio_usd: item.precio_usd },
+        despues: { precio_cop: c.precio_cop, precio_usd: c.precio_usd } };
+    }) });
+  } catch (e) { res.status(e.status || 500).json({ ok: false, error: e.status ? e.message : 'No se pudo preparar la vista previa.' }); }
+});
+
+app.post('/admin/catalogo/precios/aplicar', mismoOrigen, accesoPrecios, async function (req, res) {
+  try {
+    const cambios = confirmarPrecios.validar(req.body?.token, req.session.usuario_id || req.session.usuario);
+    const actualizados = await db.actualizarPreciosCatalogo(cambios, ORIGINALES_PRECIOS, actorCatalogo(req));
+    indexCache = null;
+    // Las compras resuelven el precio autorizado desde la base, no desde caché.
+    await refrescarCatalogoValidado();
+    res.json({ ok: true, actualizados });
+  } catch (e) { res.status(e.status || 500).json({ ok: false, error: e.status ? e.message : 'No se pudieron actualizar los precios. Recarga para comprobar su estado.' }); }
+});
+
 app.post('/admin/catalogo', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const validado = datosCatalogo(req.body);
   if (validado.error) return errorCatalogo(req, res, validado.error, 400, validado.campos);
@@ -2075,6 +2126,7 @@ app.post('/admin/catalogo', mismoOrigen, requiereAdmin, soloAdmin, async functio
 app.post('/admin/catalogo/:id', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const existente = await db.obtenerCatalogoPorId(req.params.id);
   if (!existente) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
+  if (existente.origen === 'original') return errorCatalogo(req, res, 'Usa el editor de precios para los servicios originales.', 400);
   const validado = datosCatalogo(req.body, existente);
   if (validado.error) return errorCatalogo(req, res, validado.error, 400, validado.campos);
   const actualizado = await db.actualizarCatalogoItem(req.params.id, validado.item, actorCatalogo(req));
@@ -2087,6 +2139,7 @@ app.post('/admin/catalogo/:id', mismoOrigen, requiereAdmin, soloAdmin, async fun
 app.post('/admin/catalogo/:id/estado', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const existente = await db.obtenerCatalogoPorId(req.params.id);
   if (!existente) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
+  if (existente.origen === 'original') return errorCatalogo(req, res, 'No se puede ocultar el catálogo original desde esta acción.', 400);
   const actualizado = await db.actualizarCatalogoItem(req.params.id, {}, actorCatalogo(req), 'estado');
   if (!actualizado) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   await refrescarCatalogoValidado();
@@ -2095,6 +2148,8 @@ app.post('/admin/catalogo/:id/estado', mismoOrigen, requiereAdmin, soloAdmin, as
 });
 
 app.post('/admin/catalogo/:id/eliminar', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const existente = await db.obtenerCatalogoPorId(req.params.id);
+  if (existente?.origen === 'original') return errorCatalogo(req, res, 'No se puede eliminar el catálogo original desde esta acción.', 400);
   const eliminado = await db.eliminarCatalogoItem(req.params.id, actorCatalogo(req));
   if (!eliminado) return errorCatalogo(req, res, 'Servicio no encontrado.', 404);
   await refrescarCatalogoValidado();
@@ -2334,7 +2389,8 @@ async function enviarIndex(req, res, status) {
       indexCache = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     }
     const catalogo = await db.listarCatalogoActivo();
-    const html = catalogoUtil.integrar(indexCache, catalogo, renderServicio, renderCatalogoDinamico)
+    const integrado = catalogoUtil.integrar(indexCache, catalogo, renderServicio, renderCatalogoDinamico);
+    const html = catalogoPrecios.aplicarHtml(integrado, ORIGINALES_PRECIOS, catalogo)
       .split('__BASE_URL__').join(urlBase(req));
     res.status(status || 200).type('html').send(html);
   } catch (e) {
