@@ -45,6 +45,9 @@ test('Cotización USD autoritativa: descuentos, urgencia, comisión única y con
   assert.deepEqual(q.items.map(i => i.usd), [26, 15]);
   assert.equal(q.total_cop, 165000);
   assert.equal(q.total_divisa, 825);
+  assert.equal(q.subtotal_divisa, 820);
+  assert.equal(q.comision_divisa, 5);
+  assert.deepEqual(q.items.map(i => i.importe_divisa), [520, 300]);
   assert.equal(q.items[1].tipo, 'lectura');
   assert.equal(cot.validar(q.token, datos).total_cop, q.total_cop);
   await assert.rejects(cot.crear({ ...datos, items: [{ ...items[1], incluye_adelanto: true }] }), /solo/);
@@ -55,4 +58,24 @@ test('Cotización USD autoritativa: descuentos, urgencia, comisión única y con
   assert.equal(manual.total_cop, 164000);
   tiempo += 16 * 60000;
   assert.throws(() => cot.validar(q.token, datos), /venció/);
+});
+
+test('Desglose firmado coherente en las once divisas, incluso al redondear varias filas', async () => {
+  const fx = crearDivisas({ fetchImpl: async () => ({ ok: true, json: async () => tasasPrueba() }) });
+  const cot = crearCotizaciones({ divisas: fx, secreto: 'sintetico',
+    resolver: async raw => ({ ...raw, tipo: 'hechizo' }), descuento: async () => 17,
+    comision: n => n + 1033, adelanto: () => ({ precio_usd: 10 }) });
+  const items = [1.13, 2.17, 3.19].map((precio_usd, i) => ({ nombre: 'Sintético ' + i, precio_cop: 10000, precio_usd, incluye_adelanto: i === 0 }));
+  for (const { codigo: divisa } of DIVISAS) {
+    for (const metodo of ['wompi', 'transferencia']) {
+      const datos = { items, metodo, divisa }, q = await cot.crear(datos);
+      const precision = ['COP', 'CLP', 'PYG'].includes(divisa) ? 1 : 100;
+      const sum = q.items.reduce((n, i) => n + Math.round(i.importe_divisa * precision), 0);
+      assert.equal(sum, Math.round(q.subtotal_divisa * precision), divisa);
+      assert.equal(sum + Math.round(q.comision_divisa * precision), Math.round(q.total_divisa * precision), divisa);
+      assert.equal(q.total_divisa, Math.round(q.total_cop / q.tasa_cop * q.tasa_divisa * precision) / precision);
+      assert.equal(cot.validar(q.token, datos).comision_divisa, q.comision_divisa);
+      if (metodo === 'transferencia') assert.equal(q.comision_divisa, 0);
+    }
+  }
 });

@@ -29,7 +29,7 @@
     'Al pagar por Wompi, el total <strong>incluye la comisión</strong> de la pasarela de pago.',
     'El trabajo se agenda únicamente cuando el pago esté <strong>totalmente cancelado</strong>.',
     '<strong>No se realizan reembolsos</strong> después de haber realizado el pago.',
-    'Si deseas el hechizo con urgencia (mismo día o en los tres días siguientes), se aplica un recargo de <strong>$10 USD / $28.000 COP</strong>.',
+    'Si deseas el hechizo con urgencia (mismo día o en los tres días siguientes), se aplica el recargo indicado en el resumen del pedido.',
     'Al realizar el pago, envía el comprobante junto con tus datos (nombre completo y fecha de nacimiento) por TikTok o WhatsApp.',
     'Si el servicio incluye a otra persona, también debes enviar sus datos o signo zodiacal.',
     'Lunes a viernes: 1:40 p.m. a 9:30 p.m. (hora Colombia). Sábados: 11:30 a.m. a 5:30 p.m.',
@@ -272,7 +272,7 @@
       '<div class="wm-adelanto-add wm-normal-only" id="wm-adelanto-add" style="display:none">',
       '  <label class="wm-check-wrap">',
       '    <input type="checkbox" id="wm-adelanto-check">',
-      '    <span>⚡ <strong>Añadir adelanto (urgencia)</strong>: entrega en un máximo de 3 días. Recargo de <strong>$28.000 COP / $10 USD</strong>.</span>',
+      '    <span>⚡ <strong>Añadir adelanto (urgencia)</strong>: entrega en un máximo de 3 días. El recargo se incluye en el resumen al seleccionarlo.</span>',
       '  </label>',
       '</div>',
       '<div class="wm-transfer-only">',
@@ -297,7 +297,7 @@
       '<a class="wm-aclaraciones-link" href="#aclaraciones" id="wm-link-aclaraciones">→ Leer todas las aclaraciones completas</a>',
       '<label class="wm-check-wrap">',
       '  <input type="checkbox" id="wm-acepto">',
-      '  <span>He leído <strong>todas las aclaraciones</strong> y las acepto. Entiendo que <strong>no hay reembolsos</strong> una vez realizado el pago y que el precio no incluye comisión.</span>',
+      '  <span>He leído <strong>todas las aclaraciones</strong> y las acepto. Entiendo que <strong>no hay reembolsos</strong> una vez realizado el pago. El total del resumen incluye la comisión aplicable.</span>',
       '</label>',
       '<div class="wm-error" id="wm-error"></div>',
       '<button class="wm-btn-pagar" id="wm-btn-pagar" disabled>Pagar con Wompi ↗</button>',
@@ -392,7 +392,7 @@
       var usd = estado.adelanto === 'solo' ? ADELANTO_USD : estado.precioUSD;
       var txt = (D && usd) ? D.formato(usd) : '';
       precioEl.textContent = txt || estado.precioTexto;
-      precioEl.title = estado.precioTexto;
+      precioEl.title = txt || estado.precioTexto;
     }
 
     function actualizarPrecio() {
@@ -455,7 +455,7 @@
         if (s.revisar) return 'Revisa el total actualizado';
         if (s.fase === 'lista' && s.datos) {
           var t = D.fmt(s.datos.total_cop, 'COP');
-          return esManual() ? 'Enviar comprobante · ' + t : 'Pagar ' + t + ' con Wompi ↗';
+          return esManual() ? 'Enviar comprobante · ' + t : 'Continuar con Wompi ↗';
         }
       }
       return esManual() ? 'Enviar comprobante ↗' : 'Pagar con Wompi ↗';

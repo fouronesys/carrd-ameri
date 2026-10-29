@@ -158,6 +158,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         for (const item of [...estaticos, ...dinamicos]) {
           const b = await navegador(url, html, request);
           try {
+            b.divisa('MXN');
             const fichas = [...b.document.querySelectorAll('.p')];
             const ficha = item.id
               ? fichas.find(p => p.getAttribute('data-catalogo-id') === item.id)
@@ -175,6 +176,11 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             b.document.getElementById('wm-acepto').checked = true;
             b.document.getElementById('wm-acepto').dispatchEvent(new b.document.defaultView.Event('change'));
             await b.listo();
+            const resumen = b.document.getElementById('wm-cotizacion');
+            assert.ok(resumen, 'Resumen individual presente');
+            assert.match(resumen.textContent, /MXN/);
+            assert.doesNotMatch(resumen.textContent, /COP\s*[\d$]|[\d]\s*COP/);
+            assert.match(b.document.getElementById('wm-btn-pagar').textContent, /Continuar con Wompi/);
             assert.equal(b.document.getElementById('wm-btn-pagar').disabled, false, b.document.getElementById('wompi-overlay').textContent);
             b.click('wm-btn-pagar');
             await b.listo();
@@ -189,6 +195,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             // Solo se captura la URL; ningún motor abre el checkout externo.
             const destino = new URL(b.location.href);
             assert.equal(destino.origin, 'https://checkout.wompi.co');
+            assert.equal(destino.searchParams.get('currency'), 'COP');
             assert.equal(Number(destino.searchParams.get('amount-in-cents')), res.data.precio_cop * 100);
             assert.equal(destino.searchParams.get('signature:integrity'), res.data.signature);
           } finally { b.cerrar(); }
@@ -202,6 +209,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         ]) {
           const b = await navegador(url, html, request);
           try {
+            b.divisa('EUR');
             // Los artículos entran por sus botones, pasan por sanitizar y
             // enviarCheckout de cart.js, no por un payload construido por el test.
             for (const item of items) {
@@ -221,6 +229,9 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             }
             b.click('fc-siguiente'); b.click('fc-siguiente');
             await b.listo();
+            assert.match(b.document.getElementById('fc-cotizacion').textContent, /EUR/);
+            assert.doesNotMatch(b.document.getElementById('fc-cotizacion').textContent, /COP\s*[\d$]|[\d]\s*COP/);
+            assert.equal(b.document.getElementById('fc-pagar').textContent, 'Continuar con Wompi');
             b.click('fc-pagar');
             await b.listo();
             const res = b.solicitudes.find(r => r.ruta === '/api/checkout');
@@ -237,6 +248,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
               assert.equal(reg.pedido_total_cop, total);
             });
             assert.equal(Number(new URL(b.location.href).searchParams.get('amount-in-cents')), total * 100);
+            assert.equal(new URL(b.location.href).searchParams.get('currency'), 'COP');
           } finally { b.cerrar(); }
         }
       });

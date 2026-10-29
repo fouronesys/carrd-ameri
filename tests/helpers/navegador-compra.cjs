@@ -85,6 +85,7 @@ async function navegador(url, html, request) {
   }
   return {
     document, solicitudes, location, listo, valor, click,
+    divisa: codigo => context.FresaDivisas.establecer(codigo),
     carrito: () => JSON.parse(storage.get('fresa_carrito_v1') || '[]'),
     cerrar() { for (const id of timers) clearTimeout(id); },
   };

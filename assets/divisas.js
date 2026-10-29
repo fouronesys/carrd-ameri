@@ -181,7 +181,21 @@
       '.fd-select:focus-visible{outline:2px solid #F0A3C3;outline-offset:2px;}',
       '.fd-select:disabled{opacity:.6;cursor:not-allowed;}',
       '.fd-select option{background:#1a0710;color:#f4e6ee;}',
-      '.fd-wrap svg{position:absolute;right:11px;width:10px;height:10px;pointer-events:none;color:#F0A3C3;}',
+      '.fd-wrap .fd-chev{position:absolute;right:11px;top:50%;margin-top:-5px;width:10px;height:10px;pointer-events:none;color:#F0A3C3;transition:transform .18s ease;}',
+      '.fd-btn{display:inline-flex;align-items:center;gap:8px;font-family:"Poppins",sans-serif;font-size:13px;font-weight:700;color:#fff;background:#2a1023;border:1px solid #C2A7B7;border-radius:2rem;padding:6px 30px 6px 11px;cursor:pointer;min-width:10.5rem;text-align:left;}',
+      '.fd-btn:focus-visible{outline:2px solid #F0A3C3;outline-offset:2px;}',
+      '.fd-btn:disabled{opacity:.6;cursor:not-allowed;}',
+      '.fd-btn[aria-expanded="true"] + .fd-chev{transform:rotate(180deg);}',
+      '.fd-flag{display:inline-block;flex:0 0 auto;width:20px;height:14px;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,0.22);overflow:hidden;vertical-align:middle;}',
+      '.fd-flag svg{display:block;width:100%;height:100%;position:static;}',
+      '.fd-lista{position:absolute;z-index:60;top:calc(100% + 6px);left:0;min-width:100%;width:max-content;max-width:min(17rem,86vw);max-height:16.5rem;overflow:auto;margin:0;padding:5px;list-style:none;background:#1a0710;border:1px solid rgba(194,167,183,0.55);border-radius:12px;box-shadow:0 14px 30px rgba(16,1,9,0.55);text-align:left;}',
+      '.fd-lista[hidden]{display:none;}',
+      '.fd-lista:focus{outline:none;}',
+      '.fd-op{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;font-size:12.5px;color:#f4e6ee;cursor:pointer;}',
+      '.fd-op b{font-weight:700;color:#fff;min-width:2.4em;}',
+      '.fd-op span.fd-op-n{color:#d6b9c8;font-weight:400;}',
+      '.fd-op.activa{background:rgba(240,163,195,0.16);outline:1px solid rgba(240,163,195,0.5);}',
+      '.fd-op[aria-selected="true"] b{color:#F0A3C3;}',
       '.fd-nota{flex-basis:100%;margin:0;text-align:center;font-size:10.5px;line-height:1.45;color:#b58ca1;}',
       '.fd-nota a{color:#d6b9c8;text-decoration:underline;text-underline-offset:2px;}',
       '.fd-nota.err{color:#f3b6cd;}',
@@ -223,7 +237,90 @@
   /* ---------- Selector público ---------- */
   var selectores = [];
   var uid = 0;
-  var CHEVRON = '<svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><path d="M1.5 3.5L5 7l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+  var CHEVRON = '<svg class="fd-chev" viewBox="0 0 10 10" aria-hidden="true" focusable="false"><path d="M1.5 3.5L5 7l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+
+  /* Banderas vectoriales locales (viewBox 30x20), sin emoji. */
+  function estrellasCirculo(cx, cy, r, n, rad, color, desde, hasta) {
+    var s = '';
+    for (var i = 0; i < n; i++) {
+      var a = desde + (hasta - desde) * (n === 1 ? 0 : i / (desde === 0 && hasta === 360 ? n : n - 1));
+      var rr = a * Math.PI / 180;
+      s += '<circle cx="' + (cx + r * Math.cos(rr)).toFixed(2) + '" cy="' + (cy + r * Math.sin(rr)).toFixed(2) + '" r="' + rad + '" fill="' + color + '"/>';
+    }
+    return s;
+  }
+  var BANDERAS = {
+    COP: '<rect width="30" height="10" fill="#FCD116"/><rect y="10" width="30" height="5" fill="#003893"/><rect y="15" width="30" height="5" fill="#CE1126"/>',
+    USD: (function () {
+      var s = '<rect width="30" height="20" fill="#fff"/>';
+      for (var i = 0; i < 7; i++) s += '<rect y="' + (i * 20 / 6.5).toFixed(2) + '" width="30" height="1.54" fill="#B22234"/>';
+      return s + '<rect width="13" height="10.77" fill="#3C3B6E"/>' +
+        '<g fill="#fff"><circle cx="2.5" cy="2.2" r=".55"/><circle cx="6.5" cy="2.2" r=".55"/><circle cx="10.5" cy="2.2" r=".55"/><circle cx="4.5" cy="5.4" r=".55"/><circle cx="8.5" cy="5.4" r=".55"/><circle cx="2.5" cy="8.6" r=".55"/><circle cx="6.5" cy="8.6" r=".55"/><circle cx="10.5" cy="8.6" r=".55"/></g>';
+    })(),
+    EUR: '<rect width="30" height="20" fill="#003399"/>' + estrellasCirculo(15, 10, 6, 12, 0.8, '#FFCC00', 0, 360),
+    MXN: '<rect width="10" height="20" fill="#006847"/><rect x="10" width="10" height="20" fill="#fff"/><rect x="20" width="10" height="20" fill="#CE1126"/><circle cx="15" cy="10" r="2.6" fill="#8C5A2B"/><path d="M12.4 11.2q2.6 2.6 5.2 0" fill="none" stroke="#006847" stroke-width=".8"/>',
+    PEN: '<rect width="10" height="20" fill="#D91023"/><rect x="10" width="10" height="20" fill="#fff"/><rect x="20" width="10" height="20" fill="#D91023"/>',
+    DOP: '<rect width="30" height="20" fill="#fff"/><rect width="12.5" height="8.5" fill="#002D62"/><rect x="17.5" width="12.5" height="8.5" fill="#CE1126"/><rect y="11.5" width="12.5" height="8.5" fill="#CE1126"/><rect x="17.5" y="11.5" width="12.5" height="8.5" fill="#002D62"/><circle cx="15" cy="10" r="1.3" fill="#2E7D32"/>',
+    ARS: '<rect width="30" height="20" fill="#74ACDF"/><rect y="6.67" width="30" height="6.66" fill="#fff"/><circle cx="15" cy="10" r="2" fill="#F6B40E" stroke="#85340A" stroke-width=".3"/>',
+    BRL: '<rect width="30" height="20" fill="#009C3B"/><path d="M15 2.2L27 10 15 17.8 3 10z" fill="#FFDF00"/><circle cx="15" cy="10" r="4.2" fill="#002776"/><path d="M11 9.2q4-1.4 8 .9" fill="none" stroke="#fff" stroke-width=".7"/>',
+    CLP: '<rect width="30" height="10" fill="#fff"/><rect y="10" width="30" height="10" fill="#D52B1E"/><rect width="10" height="10" fill="#0039A6"/><path d="M5 2.3l.9 2.7h2.8L6.4 6.7l.9 2.7L5 7.7 2.7 9.4l.9-2.7-2.3-1.7h2.8z" fill="#fff"/>',
+    PYG: '<rect width="30" height="6.67" fill="#D52B1E"/><rect y="6.67" width="30" height="6.66" fill="#fff"/><rect y="13.33" width="30" height="6.67" fill="#0038A8"/><circle cx="15" cy="10" r="1.9" fill="none" stroke="#2E7D32" stroke-width=".6"/>',
+    VES: '<rect width="30" height="6.67" fill="#FFCC00"/><rect y="6.67" width="30" height="6.66" fill="#00247D"/><rect y="13.33" width="30" height="6.67" fill="#CF142B"/>' + estrellasCirculo(15, 13.6, 4.6, 8, 0.5, '#fff', 200, 340)
+  };
+  function bandera(c) {
+    var b = BANDERAS[c];
+    if (!b) return '';
+    return '<span class="fd-flag" aria-hidden="true"><svg viewBox="0 0 30 20" preserveAspectRatio="none" focusable="false">' + b + '</svg></span>';
+  }
+
+  var abierto = null;
+  function cerrarLista(w, foco) {
+    if (!w) return;
+    var btn = w.querySelector('.fd-btn'), ul = w.querySelector('.fd-lista');
+    ul.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    ul.removeAttribute('aria-activedescendant');
+    if (abierto === w) abierto = null;
+    if (foco) btn.focus();
+  }
+  function opciones(w) { return Array.prototype.slice.call(w.querySelectorAll('.fd-op')); }
+  function activar(w, i) {
+    var ops = opciones(w), ul = w.querySelector('.fd-lista');
+    if (!ops.length) return;
+    i = Math.max(0, Math.min(ops.length - 1, i));
+    ops.forEach(function (o, k) { o.classList.toggle('activa', k === i); });
+    ul.setAttribute('aria-activedescendant', ops[i].id);
+    w._activa = i;
+    var o = ops[i];
+    if (o.offsetTop < ul.scrollTop) ul.scrollTop = o.offsetTop;
+    else if (o.offsetTop + o.offsetHeight > ul.scrollTop + ul.clientHeight) ul.scrollTop = o.offsetTop + o.offsetHeight - ul.clientHeight;
+  }
+  function abrirLista(w, idx) {
+    var btn = w.querySelector('.fd-btn'), ul = w.querySelector('.fd-lista');
+    if (btn.disabled) return;
+    if (abierto && abierto !== w) cerrarLista(abierto);
+    ul.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    abierto = w;
+    var ops = opciones(w), sel = w.querySelector('select'), cur = 0;
+    ops.forEach(function (o, k) { if (o.getAttribute('data-v') === sel.value) cur = k; });
+    activar(w, idx == null ? cur : (idx < 0 ? ops.length - 1 : idx));
+    ul.focus();
+  }
+  function elegir(w, i) {
+    var ops = opciones(w), sel = w.querySelector('select');
+    var o = ops[i];
+    cerrarLista(w, true);
+    if (!o) return;
+    var v = o.getAttribute('data-v');
+    if (sel.value !== v) {
+      sel.value = v;
+      sel.dispatchEvent(new Event('change', { bubbles: true })); // contrato nativo .fd-select
+    }
+  }
+  document.addEventListener('mousedown', function (e) {
+    if (abierto && !abierto.querySelector('.fd-wrap').contains(e.target)) cerrarLista(abierto);
+  }, true);
 
   function montarSelector(padre, antesDe) {
     if (!padre) return null;
@@ -233,12 +330,54 @@
     w.setAttribute('role', 'group');
     w.setAttribute('aria-label', 'Moneda para ver los precios');
     w.innerHTML =
-      '<label class="fd-lbl" for="' + id + '">Ver precios en</label>' +
-      '<span class="fd-wrap"><select id="' + id + '" class="fd-select" aria-describedby="' + id + '-n"></select>' + CHEVRON + '</span>' +
+      '<span class="fd-lbl" id="' + id + '-l">Ver precios en</span>' +
+      '<span class="fd-wrap">' +
+      '<select id="' + id + '" class="fd-select fd-oculto" tabindex="-1" aria-hidden="true"></select>' +
+      '<button type="button" class="fd-btn" id="' + id + '-b" aria-haspopup="listbox" aria-expanded="false" aria-controls="' + id + '-lb" aria-labelledby="' + id + '-l ' + id + '-b" aria-describedby="' + id + '-n"></button>' +
+      CHEVRON +
+      '<ul class="fd-lista" id="' + id + '-lb" role="listbox" tabindex="-1" aria-labelledby="' + id + '-l" hidden></ul>' +
+      '</span>' +
       '<p class="fd-nota" id="' + id + '-n" aria-live="polite"></p>';
     padre.insertBefore(w, antesDe || null);
-    var sel = w.querySelector('select');
+    var sel = w.querySelector('select'), btn = w.querySelector('.fd-btn'), ul = w.querySelector('.fd-lista');
     sel.addEventListener('change', function () { establecer(sel.value); });
+    btn.addEventListener('click', function () {
+      if (btn.getAttribute('aria-expanded') === 'true') cerrarLista(w, true); else abrirLista(w);
+    });
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        abrirLista(w);
+      }
+    });
+    ul.addEventListener('keydown', function (e) {
+      var n = opciones(w).length, i = w._activa || 0;
+      switch (e.key) {
+        case 'ArrowDown': e.preventDefault(); activar(w, i + 1); break;
+        case 'ArrowUp': e.preventDefault(); activar(w, i - 1); break;
+        case 'Home': e.preventDefault(); activar(w, 0); break;
+        case 'End': e.preventDefault(); activar(w, n - 1); break;
+        case 'Enter': case ' ': e.preventDefault(); elegir(w, i); break;
+        case 'Escape': e.preventDefault(); cerrarLista(w, true); break;
+        case 'Tab': cerrarLista(w); break;
+        default:
+          if (/^[a-z]$/i.test(e.key)) {
+            var ops = opciones(w), k = e.key.toUpperCase();
+            for (var j = 1; j <= n; j++) {
+              var o = ops[(i + j) % n];
+              if (o.getAttribute('data-v').charAt(0) === k) { activar(w, (i + j) % n); break; }
+            }
+          }
+      }
+    });
+    ul.addEventListener('click', function (e) {
+      var o = e.target.closest && e.target.closest('.fd-op');
+      if (o) elegir(w, opciones(w).indexOf(o));
+    });
+    ul.addEventListener('mousemove', function (e) {
+      var o = e.target.closest && e.target.closest('.fd-op');
+      if (o) { var k = opciones(w).indexOf(o); if (k !== w._activa) activar(w, k); }
+    });
     selectores.push(w);
     pintarSelector(w);
     return w;
@@ -247,13 +386,35 @@
   function pintarSelector(w) {
     var sel = w.querySelector('select');
     var nota = w.querySelector('.fd-nota');
+    var btn = w.querySelector('.fd-btn');
+    var ul = w.querySelector('.fd-lista');
     var lista = disponibles();
     var html = lista.map(function (d) {
       return '<option value="' + esc(d.codigo) + '">' + esc(d.codigo + ' · ' + d.nombre) + '</option>';
     }).join('');
     if (sel.innerHTML !== html) sel.innerHTML = html;
     sel.value = actual();
-    sel.disabled = st.cargando || !hayTasas();
+    var bloqueado = st.cargando || !hayTasas();
+    sel.disabled = bloqueado;
+    if (btn && ul) {
+      var lid = ul.id;
+      var opsHtml = lista.map(function (d, k) {
+        var si = d.codigo === sel.value;
+        return '<li class="fd-op" role="option" id="' + lid + '-o' + k + '" data-v="' + esc(d.codigo) + '" aria-selected="' + si + '">' +
+          bandera(d.codigo) + '<b>' + esc(d.codigo) + '</b><span class="fd-op-n">' + esc(d.nombre) + '</span></li>';
+      }).join('');
+      if (ul.getAttribute('data-h') !== opsHtml) {
+        ul.innerHTML = opsHtml;
+        ul.setAttribute('data-h', opsHtml);
+      }
+      var cur = null;
+      lista.forEach(function (d) { if (d.codigo === sel.value) cur = d; });
+      cur = cur || { codigo: actual(), nombre: NOMBRES[actual()] };
+      btn.innerHTML = bandera(cur.codigo) + '<span>' + esc(cur.codigo) + '</span><span class="fd-oculto">' + esc(cur.nombre) + '</span>';
+      btn.title = cur.nombre;
+      btn.disabled = bloqueado;
+      if (bloqueado) cerrarLista(w);
+    }
     nota.className = 'fd-nota';
     if (st.cargando) {
       nota.textContent = 'Cargando tasas de referencia…';
@@ -370,6 +531,9 @@
           e.status = r.status;
           throw e;
         }
+        if (d.divisa !== String(cuerpo.divisa || 'COP').toUpperCase() || !desgloseCompleto(d)) {
+          throw new Error('El resumen de tu divisa no está disponible. Vuelve a calcular antes de pagar.');
+        }
         return d;
       });
     }, function () {
@@ -380,6 +544,14 @@
   }
 
   var MARGEN_MS = 20000;
+
+  function desgloseCompleto(d) {
+    if (d.divisa === 'COP') return true;
+    var fin = function (v) { return typeof v === 'number' && isFinite(v) && v >= 0; };
+    return fin(d.subtotal_divisa) && fin(d.comision_divisa) && fin(d.total_divisa) &&
+      fin(d.tasa_divisa) && d.tasa_divisa > 0 && Array.isArray(d.items) && d.items.length > 0 &&
+      d.items.every(function (it) { return fin(it.importe_divisa); });
+  }
 
   function cotizador(alCambiar) {
     var seq = 0, timer = null;
@@ -439,32 +611,50 @@
       html = '';
     } else if (s.fase === 'cargando' || s.fase === 'expirada') {
       html = '<div class="fd-cot-carga" aria-busy="true"><i></i><i></i><i></i><p>' +
-        (s.fase === 'expirada' ? 'La cotización venció. Actualizando el precio…' : 'Calculando tu total en COP…') + '</p></div>';
+        (s.fase === 'expirada' ? 'La cotización venció. Actualizando el precio…' : 'Calculando tu total…') + '</p></div>';
     } else if (s.fase === 'error') {
       html = '<div class="fd-cot-err" role="alert">' + esc(s.error || 'No pudimos calcular el total.') +
         ' No es posible pagar sin un total confirmado.</div>' +
         '<button type="button" class="fd-cot-btn" data-fd-accion="reintentar">Volver a calcular</button>';
     } else {
       var d = s.datos;
-      var filas = (d.items || []).map(function (it) {
-        var off = Number(it.descuento_pct) > 0 ? '<span class="fd-cot-off">\u2212' + esc(it.descuento_pct) + '%</span>' : '';
-        return '<div class="fd-cot-fila"><span>' + esc(it.nombre) + off + '</span><b>' + esc(fmt(it.cop, 'COP')) + '</b></div>';
-      }).join('');
-      var comision = Number(d.total_cop) - Number(d.subtotal_cop);
-      var div = d.divisa || 'COP';
-      var eq = (div !== 'COP' && d.total_divisa != null && isFinite(Number(d.total_divisa)))
-        ? '<div class="fd-cot-eq">\u2248 ' + esc(fmt(d.total_divisa, div)) + '</div>' : '';
+      var ped = d.pedido || {};
+      var div = d.divisa || ped.divisa || 'COP';
+      var metodo = String(ped.metodo || d.metodo || 'wompi').toLowerCase();
+      var esTransf = metodo.indexOf('transf') === 0;
+      var items = d.items || [];
+      var extranjera = div !== 'COP';
+      // Montos solo de la cotización firmada; nunca de la tasa actual del navegador.
+      var completa = desgloseCompleto(d);
       var hasta = aFecha(d.expires_at);
       var hastaTxt = hasta ? hasta.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' }) : '';
-      html = filas +
-        '<hr class="fd-cot-sep">' +
-        '<div class="fd-cot-fila"><span>Subtotal</span><b>' + esc(fmt(d.subtotal_cop, 'COP')) + '</b></div>' +
-        (comision > 0 ? '<div class="fd-cot-fila"><span>Comisión de la pasarela</span><b>' + esc(fmt(comision, 'COP')) + '</b></div>' : '') +
-        '<div class="fd-cot-total"><span>Total a pagar</span><strong>' + esc(fmt(d.total_cop, 'COP')) + '</strong></div>' + eq +
-        '<div class="fd-cot-pie">El cobro se realiza en pesos colombianos (COP).' +
-        (eq ? ' El equivalente es de referencia; tu banco puede usar otra conversión.' : '') +
-        (hastaTxt ? ' Precio reservado hasta las ' + esc(hastaTxt) + '.' : '') + '</div>' +
-        (s.revisar ? '<div class="fd-cot-revisar" role="alert">Tu cotización anterior venció y actualizamos el precio. Revisa el nuevo total antes de continuar.' +
+      var reservado = hastaTxt ? ' Precio reservado hasta las ' + esc(hastaTxt) + '.' : '';
+      var off = function (it) { return Number(it.descuento_pct) > 0 ? '<span class="fd-cot-off">\u2212' + esc(it.descuento_pct) + '%</span>' : ''; };
+      var fila = function (a, b) { return '<div class="fd-cot-fila"><span>' + a + '</span><b>' + esc(b) + '</b></div>'; };
+      if (!completa) {
+        html = '<div class="fd-cot-err" role="alert">No pudimos mostrar tu total en ' + esc(div) +
+          '. No es posible pagar sin un total confirmado.</div>' +
+          '<button type="button" class="fd-cot-btn" data-fd-accion="reintentar">Volver a calcular</button>';
+      } else if (extranjera && !esTransf) {
+        html = items.map(function (it) { return fila(esc(it.nombre) + off(it), fmt(it.importe_divisa, div)); }).join('') +
+          '<hr class="fd-cot-sep">' +
+          fila('Subtotal', fmt(d.subtotal_divisa, div)) +
+          (Number(d.comision_divisa) > 0 ? fila('Comisión de la pasarela', fmt(d.comision_divisa, div)) : '') +
+          '<div class="fd-cot-total"><span>Total aproximado</span><strong>\u2248 ' + esc(fmt(d.total_divisa, div)) + '</strong></div>' +
+          '<div class="fd-cot-pie">Wompi cobra en pesos colombianos (COP); la conversión de tu banco puede variar.' + reservado + '</div>';
+      } else {
+        var comision = Number(d.total_cop) - Number(d.subtotal_cop);
+        var eq = extranjera ? '<div class="fd-cot-eq">\u2248 ' + esc(fmt(d.total_divisa, div)) + '</div>' : '';
+        html = items.map(function (it) { return fila(esc(it.nombre) + off(it), fmt(it.cop, 'COP')); }).join('') +
+          '<hr class="fd-cot-sep">' +
+          fila('Subtotal', fmt(d.subtotal_cop, 'COP')) +
+          (comision > 0 ? fila('Comisión de la pasarela', fmt(comision, 'COP')) : '') +
+          '<div class="fd-cot-total"><span>' + (esTransf ? 'Total exacto a transferir' : 'Total a pagar') + '</span><strong>' + esc(fmt(d.total_cop, 'COP')) + '</strong></div>' + eq +
+          '<div class="fd-cot-pie">' + (esTransf ? 'Transfiere exactamente este valor en pesos colombianos (COP).' : 'El cobro se realiza en pesos colombianos (COP).') +
+          (eq ? ' El equivalente es de referencia; tu banco puede usar otra conversión.' : '') + reservado + '</div>';
+      }
+      html +=
+        (s.revisar && completa ? '<div class="fd-cot-revisar" role="alert">Tu cotización anterior venció y actualizamos el precio. Revisa el nuevo total antes de continuar.' +
           '<br><button type="button" class="fd-cot-btn" data-fd-accion="confirmar">He revisado el nuevo total</button></div>' : '');
     }
     el.classList.add('fd-cot');

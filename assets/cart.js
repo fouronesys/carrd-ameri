@@ -518,7 +518,7 @@
         ? '<div class="fc-vacio">Tu carrito está vacío.<br>Agrega servicios desde el catálogo con “＋ Carrito”.</div>'
         : filas +
           '<div class="fc-total"><span>Subtotal de referencia</span><span>' + esc(subtotalRef) + '</span></div>' +
-          '<p class="fc-nota">Precios base sin descuentos ni comisión. El total exacto se calcula en COP en el paso de pago, antes de pagar.</p>') +
+          '<p class="fc-nota">Precios base sin descuentos ni comisión. Revisa el total actualizado en el paso de pago. Wompi realiza el cobro en COP.</p>') +
       '</div>' +
       '<div class="fc-foot">' +
       (vacio ? '' :
@@ -1010,7 +1010,7 @@
     if (s.fase === 'error') return 'Total no disponible';
     if (s.fase !== 'lista' || !s.datos) return 'Calculando total…';
     if (s.revisar) return 'Revisa el total actualizado';
-    return (trans ? 'Confirmar ' : 'Pagar ') + D.fmt(s.datos.total_cop, 'COP');
+    return trans ? 'Confirmar ' + D.fmt(s.datos.total_cop, 'COP') : 'Continuar con Wompi';
   }
 
   function actualizarBotonPagar() {
