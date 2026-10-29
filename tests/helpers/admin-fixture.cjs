@@ -109,7 +109,8 @@ const db = {
       personas_agendadas: require('../../lib/agenda-clientes').agruparClientes(pagados).length,
       verificar: activos.filter(r => r.estado === 'pendiente_verificacion').length,
       realizados: [...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en && (tipo === 'todos' || tipoServicio(r) === tipo)).length,
-      ingresos: 50000, catalogo: servicios.size,
+      ingresos: [...trabajos.values()].filter(r => r.estado === 'agendado' && (tipo === 'todos' || tipoServicio(r) === tipo))
+        .reduce((s, r) => s + (Number(r.precio_cop) || 0), 0), catalogo: servicios.size,
     };
   },
   listarPromos: async () => [], listarCodigosConUsos: async () => [],
@@ -131,7 +132,8 @@ const db = {
     destinatarios.set(d.id, copia(d)); return copia(d);
   },
   eliminarDestinatarioNotificaciones: async id => destinatarios.delete(id),
-  listarAccesos: async () => [], listarEliminados: async () => [],
+  listarAccesos: async () => [],
+  listarEliminados: async (tipo = 'todos') => copia([...trabajos.values()].filter(r => r.eliminado_en && (tipo === 'todos' || tipoServicio(r) === tipo))),
   registrarAcceso: async () => {}, verificarConexion: async () => {},
 };
 for (const nombre of Object.keys(db)) {

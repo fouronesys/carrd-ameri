@@ -7,6 +7,47 @@ const { inflateSync } = require('node:zlib');
 const XLSX = require('xlsx');
 const { parseHTML } = require('linkedom');
 const { generarExcel, generarPDF } = require('../lib/exportar');
+const { describirTarifa } = require('../lib/reporte-tarifas');
+
+function tarifasSinteticas() {
+  return [
+    { ref: 'LOCAL', base_divisa: 'COP', divisa_vista: 'COP', tasa_usd_cop: 4000, precio_cop: 23000 },
+    { ref: 'DOLAR', base_divisa: 'USD', divisa_vista: 'USD', tasa_usd_cop: 4000, precio_cop: 40000 },
+    { ref: 'EURO', base_divisa: 'USD', divisa_vista: 'EUR', tasa_usd_cop: 4100, precio_cop: 41000 },
+    { ref: 'SIN-TASA', base_divisa: 'USD', divisa_vista: 'MXN', precio_cop: 40500 },
+    { ref: 'ANTIGUO', precio_cop: 17000 },
+    { ref: 'PARCIAL', divisa_vista: 'EUR', precio_cop: 25000 },
+    { ref: 'SIN-PAGO', base_divisa: 'USD', divisa_vista: 'USD', tasa_usd_cop: 5000, precio_cop: 50000, estado: 'pendiente_pago' },
+  ].map(r => ({ producto: 'Mismo servicio', metodo: 'transferencia', estado: 'agendado', ...r }));
+}
+
+test('Tarifas independientes en Excel y PDF: preserva COP, distingue divisa vista y no inventa tasas ni tarifas', async () => {
+  const registros = tarifasSinteticas(), original = structuredClone(registros);
+  const { filas, resumen } = excel(generarExcel(registros));
+  assert.deepEqual(filas.map(r => r['Importe registrado (COP)']), registros.map(r => r.precio_cop));
+  assert.deepEqual(filas.map(r => r['Tarifa aplicada']), ['COP', 'USD', 'USD', 'USD', 'No registrada', 'No registrada', 'USD']);
+  assert.deepEqual(filas.map(r => r['Divisa vista']), ['COP', 'USD', 'EUR', 'MXN', 'No registrada', 'EUR', 'USD']);
+  assert.deepEqual(filas.map(r => r['Tasa USD/COP registrada']), [4000, 4000, 4100, 'No registrada', 'No registrada', 'No registrada', 5000]);
+  assert.match(filas[4]['Metadatos de tarifa'], /Sin metadatos/);
+  assert.equal(filas[5]['Metadatos de tarifa'], 'Metadatos incompletos');
+  assert.ok(Object.keys(resumen).some(k => k.includes('Tarifas COP y USD independientes')));
+  const text = textoPDF(await pdf(registros));
+  for (const r of registros) {
+    assert.ok(text.includes('Importe registrado: ' + r.precio_cop + ' COP'), r.ref);
+    assert.ok(text.includes(describirTarifa(r).detalle), r.ref);
+  }
+  assert.ok(text.includes('Tarifas COP y USD independientes'));
+  assert.deepEqual(registros, original);
+});
+
+test('Metadatos inválidos, vacíos y parciales no permiten inferir datos históricos', () => {
+  for (const tasa of [null, '', 0, -1, 'NaN', Infinity]) {
+    assert.equal(describirTarifa({ base_divisa: 'USD', divisa_vista: 'EUR', tasa_usd_cop: tasa }).tasa, null);
+  }
+  assert.equal(describirTarifa({ tasa_usd_cop: 4000 }).tarifa, 'No registrada');
+  assert.equal(describirTarifa({ base_divisa: 'COP' }).vista, 'No registrada');
+  assert.equal(describirTarifa({ base_divisa: 'EUR' }).tarifa, 'No reconocida');
+});
 
 // Inspect PDFKit's actual compressed text operators, without requiring a PDF
 // reader dependency or replacing the renderer with a mock.
@@ -122,6 +163,51 @@ after(async () => {
   if (!server) return;
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
+});
+
+test('Panel conserva ingresos históricos COP, explica tarifas en agenda, realizados y papelera y escapa metadatos', async () => {
+  fixture.trabajos.clear();
+  const registros = tarifasSinteticas().concat([
+    { ref: 'ENTREGADO', producto: 'Entregado', estado: 'agendado', precio_cop: 12000, trabajo_hecho: true, base_divisa: 'USD', divisa_vista: 'EUR', tasa_usd_cop: 3900 },
+    { ref: 'BORRADO', producto: 'Borrado', estado: 'agendado', precio_cop: 13000, eliminado_en: '2026-01-01' },
+    { ref: 'MALICIOSO', estado: 'rechazado', base_divisa: '<script>mal()</script>', divisa_vista: '<img src=x>' },
+  ]);
+  registros.forEach(r => fixture.trabajos.set(r.ref, structuredClone(r)));
+  const antes = structuredClone([...fixture.trabajos.values()]);
+  const panel = await (await fetch(url + '/admin?tipo=todos', { headers: { Cookie: cookie } })).text();
+  const d = parseHTML(panel).document;
+  const ingresos = registros.filter(r => r.estado === 'agendado').reduce((s, r) => s + r.precio_cop, 0);
+  assert.ok(d.querySelector('.stats').textContent.includes('$' + ingresos.toLocaleString('es-CO')));
+  assert.ok(d.body.textContent.includes('Tarifas COP y USD independientes'));
+  for (const r of registros.filter(r => !r.trabajo_hecho && !r.eliminado_en)) {
+    assert.ok(d.body.textContent.includes(describirTarifa(r).detalle), r.ref);
+  }
+  for (const [tab, ref] of [['realizados', 'ENTREGADO'], ['eliminados', 'BORRADO']]) {
+    const html = await (await fetch(url + '/admin?tipo=todos&tab=' + tab, { headers: { Cookie: cookie } })).text();
+    const documento = parseHTML(html).document;
+    const seccion = documento.querySelector('.admin-sec.activo[data-sec="' + tab + '"]');
+    assert.ok(seccion, 'La pestaña solicitada está activa: ' + tab);
+    const fila = [...seccion.querySelectorAll('tbody tr')].find(tr => tr.textContent.includes(ref));
+    assert.ok(fila, 'El registro correcto aparece en la sección: ' + ref);
+    assert.ok(fila.textContent.includes(describirTarifa(registros.find(r => r.ref === ref)).detalle), tab);
+  }
+  assert.ok(!panel.includes('<script>mal()</script>'));
+  const login = await fetch(url + '/admin/login', {
+    method: 'POST', redirect: 'manual', headers: { Origin: url },
+    body: new URLSearchParams({ password: 'isolated-assistant-test' }),
+  });
+  const asistente = login.headers.get('set-cookie').split(';')[0];
+  for (const formato of ['excel', 'pdf']) {
+    const respuesta = await fetch(url + '/admin/exportar/' + formato, { headers: { Cookie: asistente } });
+    assert.equal(respuesta.status, 200, 'Conserva el permiso de exportación existente del asistente');
+    await respuesta.arrayBuffer();
+  }
+  const editar = await fetch(url + '/admin/editar/LOCAL', {
+    method: 'POST', headers: { Cookie: asistente, Origin: url },
+    body: new URLSearchParams({ precio_cop: 1 }),
+  });
+  assert.equal(editar.status, 403, 'Editar importes sigue siendo exclusivo del administrador');
+  assert.deepEqual([...fixture.trabajos.values()], antes);
 });
 
 test('Rutas protegidas exportan la agenda completa y coinciden con el panel tras entregas parciales', async () => {
