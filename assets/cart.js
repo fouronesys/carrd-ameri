@@ -1011,7 +1011,7 @@
     if (s.fase === 'error') return 'Total no disponible';
     if (s.fase !== 'lista' || !s.datos) return 'Calculando total…';
     if (s.revisar) return 'Revisa el total actualizado';
-    return trans ? 'Confirmar ' + D.fmt(s.datos.total_cop, 'COP') : 'Continuar con Wompi';
+    return trans ? 'Confirmar ' + D.fmt(s.datos.total_divisa, s.datos.divisa) : 'Continuar con Wompi';
   }
 
   function actualizarBotonPagar() {
@@ -1136,7 +1136,7 @@
     if (!box) return;
     if (esTransfer) {
       box.innerHTML =
-        '<div class="fc-transfer-info">Transfiere exactamente el <strong>total en COP</strong> que aparece arriba ' +
+        '<div class="fc-transfer-info">Transfiere el <strong>total en la divisa indicada</strong> que aparece arriba ' +
         'y sube el comprobante. Verificaremos tu pago manualmente antes de agendar.</div>' +
         '<label class="fc-label">Comprobante de pago <span class="fc-req">*</span></label>' +
         '<input class="fc-input" id="fc-comprobante" type="file" accept="image/*">';

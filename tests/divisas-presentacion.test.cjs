@@ -60,8 +60,12 @@ test('Banderas, formatos y resumen firmado: once divisas sin duplicar COP antes 
     }
     const manual = await cot.crear({ ...datos, metodo: 'transferencia' });
     D.pintarCotizacion(resumen, { fase: 'lista', datos: manual });
-    assert.match(resumen.textContent, /Total exacto a transferir/);
-    assert.ok(resumen.textContent.includes(D.fmt(manual.total_cop, 'COP')));
+    assert.match(resumen.textContent, divisa === 'COP' ? /Total exacto a transferir/ : /Total a transferir/);
+    assert.equal(resumen.querySelector('.fd-cot-total strong').textContent, D.fmt(manual.total_divisa, divisa));
+    if (divisa !== 'COP') {
+      assert.doesNotMatch(resumen.textContent, /COP|pesos colombianos|Wompi cobra/);
+      assert.match(resumen.textContent, new RegExp('acepte ' + divisa));
+    }
     respuesta = { ...quote, items: quote.items.map(({ importe_divisa, ...i }) => i), divisa: 'MXN' };
     await assert.rejects(D.cotizar({ ...datos, divisa: 'MXN' }), /resumen/);
   }

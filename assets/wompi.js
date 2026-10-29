@@ -455,7 +455,7 @@
         if (s.fase === 'error') return 'Total no disponible';
         if (s.revisar) return 'Revisa el total actualizado';
         if (s.fase === 'lista' && s.datos) {
-          var t = D.fmt(s.datos.total_cop, 'COP');
+          var t = D.fmt(s.datos.total_divisa, s.datos.divisa);
           return esManual() ? 'Enviar comprobante · ' + t : 'Continuar con Wompi ↗';
         }
       }

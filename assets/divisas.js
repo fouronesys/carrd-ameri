@@ -721,13 +721,13 @@
         html = '<div class="fd-cot-err" role="alert">No pudimos mostrar tu total en ' + esc(div) +
           '. No es posible pagar sin un total confirmado.</div>' +
           '<button type="button" class="fd-cot-btn" data-fd-accion="reintentar">Volver a calcular</button>';
-      } else if (extranjera && !esTransf) {
+      } else if (extranjera) {
         html = items.map(function (it) { return fila(esc(it.nombre) + off(it), fmt(it.importe_divisa, div)); }).join('') +
           '<hr class="fd-cot-sep">' +
           fila('Subtotal', fmt(d.subtotal_divisa, div)) +
           (Number(d.comision_divisa) > 0 ? fila('Comisión de la pasarela', fmt(d.comision_divisa, div)) : '') +
-          '<div class="fd-cot-total"><span>Total aproximado</span><strong>\u2248 ' + esc(fmt(d.total_divisa, div)) + '</strong></div>' +
-          '<div class="fd-cot-pie">Wompi cobra en pesos colombianos (COP); la conversión de tu banco puede variar.' + reservado + '</div>';
+          '<div class="fd-cot-total"><span>' + (esTransf ? 'Total a transferir' : 'Total aproximado') + '</span><strong>' + (esTransf ? '' : '\u2248 ') + esc(fmt(d.total_divisa, div)) + '</strong></div>' +
+          '<div class="fd-cot-pie">' + (esTransf ? 'Usa un método de transferencia que acepte ' + esc(div) + ' y adjunta el comprobante.' : 'Wompi cobra en pesos colombianos (COP); la conversión de tu banco puede variar.') + reservado + '</div>';
       } else {
         var comision = Number(d.total_cop) - Number(d.subtotal_cop);
         var eq = extranjera ? '<div class="fd-cot-eq">\u2248 ' + esc(fmt(d.total_divisa, div)) + '</div>' : '';
