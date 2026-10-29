@@ -1503,7 +1503,7 @@ app.get('/admin', async function (req, res) {
     const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados'] : ['agenda', 'realizados'];
     const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
     const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios, historialCatalogo] = await Promise.all([
-      tab === 'agenda' ? db.listarAgendaPanel() : [],
+      tab === 'agenda' ? db.listarAgendaPanel(req.query) : null,
       tab === 'promos' ? db.listarPromos() : [],
       tab === 'promos' ? db.listarCodigosConUsos() : [],
       tab === 'usuarios' ? db.listarUsuariosAdmin() : [],
@@ -1517,7 +1517,8 @@ app.get('/admin', async function (req, res) {
     ]);
     res.set('Cache-Control', 'no-store');
     return res.send(templates.adminDashboard({
-      registros: registros,
+      registros: registros ? registros.registros : [],
+      agenda: registros,
       eliminados: eliminados,
       realizados: realizados,
       rol: req.session.rol || 'admin',

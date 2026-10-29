@@ -1,9 +1,7 @@
 'use strict';
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const { parseHTML } = require('linkedom');
-const vm = require('node:vm');
 const { agruparClientes, claveCliente } = require('../lib/agenda-clientes');
 const templates = require('../lib/templates');
 
@@ -67,33 +65,20 @@ test('Panel agrupado: conserva cada referencia, estados, edición, evidencia y p
   }
 });
 
-test('Buscador y filtros ocultan grupos vacíos, mantienen acciones y distinguen coincidencias de trabajos', async () => {
+test('Búsqueda y filtros se resuelven en servidor y devuelven el comprador completo', async () => {
   fixture.sembrarAgendaAgrupada();
-  const dom = await pagina(), d = dom.window.document;
-  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/admin.js'), 'utf8'), {
-    document: d, window: { addEventListener() {} },
-  });
-  assert.equal(d.querySelector('#stat-personas').textContent, '2');
-  assert.equal(d.querySelector('#stat-agendados').textContent, '4');
-  assert.equal(d.querySelectorAll('[data-cliente-grupo]').length, 3);
-  const buscar = texto => {
-    d.querySelector('#buscador').value = texto;
-    d.querySelector('#buscador').dispatchEvent(new dom.window.Event('input', { bubbles: true }));
-  };
-  buscar('3000000002');
-  const invitados = [...d.querySelectorAll('#cuerpo-tabla tr[data-ref]')].filter(r => r.style.display !== 'none');
-  assert.deepEqual(invitados.map(r => r.dataset.ref), ['INVITADO-1', 'INVITADO-2']);
-  buscar('servicio segundo');
-  assert.equal(d.querySelector('[data-trabajos-grupo="3"]').textContent, '1 de 3 trabajos');
-  assert.equal([...d.querySelectorAll('[data-cliente-grupo]')].filter(r => r.style.display !== 'none').length, 1);
-  buscar('no existe');
-  assert.equal([...d.querySelectorAll('[data-cliente-grupo]')].filter(r => r.style.display !== 'none').length, 0);
-  assert.equal(d.querySelector('#sin-resultados').style.display, 'block');
-  buscar('');
-  d.querySelector('[data-filtro=pendiente_verificacion]').click();
-  assert.equal(d.querySelector('[data-ref=CLIENTE-A-3]').style.display, '');
-  assert.equal(d.querySelector('[data-ref=CLIENTE-A-1]').style.display, 'none');
-  assert.equal(d.querySelector('#stat-personas').textContent, '2', 'Los filtros no cambian los totales globales');
+  for (const [query, refs] of [
+    ['buscar=3000000002', ['INVITADO-1', 'INVITADO-2']],
+    ['buscar=servicio+segundo', ['CLIENTE-A-1', 'CLIENTE-A-2', 'CLIENTE-A-3']],
+    ['estado=pendiente_verificacion', ['CLIENTE-A-1', 'CLIENTE-A-2', 'CLIENTE-A-3']],
+    ['buscar=no+existe', []],
+  ]) {
+    const d = parseHTML(await (await fetch(url + '/admin?' + query, { headers: { cookie } })).text()).document;
+    assert.deepEqual([...d.querySelectorAll('#cuerpo-tabla tr[data-ref]')].map(r => r.dataset.ref), refs);
+    assert.equal(d.querySelector('#stat-personas').textContent, '2', 'Los filtros no cambian los totales globales');
+    assert.equal(d.querySelector('#stat-agendados').textContent, '4');
+    assert.ok(d.querySelector('#agenda-busqueda'));
+  }
 });
 
 test('Entregar servicios reduce trabajos, y solo el último confirmado reduce personas; persiste tras recargar', async () => {

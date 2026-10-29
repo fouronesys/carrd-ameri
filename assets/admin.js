@@ -2,16 +2,19 @@
   'use strict';
   var navegacion = 0;
   var mutando = false;
+  var agendaInicial = document.querySelector('#agenda-busqueda');
+  var agendaUrl = agendaInicial ? agendaInicial.dataset.url : '/admin?tab=agenda';
   function seccion(id, root) { return (root || document).querySelector('[data-sec="' + id + '"]'); }
   function activa() { var el = document.querySelector('.admin-sec.activo'); return el ? el.dataset.sec : 'agenda'; }
   function urlTab(tab) {
+    if (tab === 'agenda') return agendaUrl;
     var params = new URLSearchParams(location.search);
     if (tab !== 'catalogo' || params.get('tab') !== 'catalogo') params = new URLSearchParams();
     params.set('tab', tab);
     return '/admin?' + params.toString();
   }
-  async function cargar(tab) {
-    var r = await fetch(urlTab(tab), { credentials: 'same-origin', cache: 'no-store' });
+  async function cargar(tab, url) {
+    var r = await fetch(url || urlTab(tab), { credentials: 'same-origin', cache: 'no-store' });
     if (!r.ok) throw new Error('No se pudo cargar el panel. Inténtalo nuevamente.');
     var doc = new DOMParser().parseFromString(await r.text(), 'text/html');
     if (!doc.querySelector('.admin-nav')) throw new Error('Tu sesión caducó. Recarga la página e inicia sesión.');
@@ -29,19 +32,20 @@
     var anterior = seccion(tab), nuevo = seccion(tab, doc);
     if (anterior && nuevo) {
       var visible = anterior.classList.contains('activo');
-      var buscar = anterior.querySelector('#buscador, #catalogo-buscador');
+      var buscar = anterior.querySelector('#catalogo-buscador');
       var valor = buscar ? buscar.value : '';
-      var filtro = anterior.querySelector('.filtro.activo');
-      var filtroValor = filtro ? filtro.dataset.filtro : '';
       var select = anterior.querySelector('#catalogo-filtro');
       var seleccionado = select ? select.value : '';
       anterior.innerHTML = nuevo.innerHTML;
       anterior.classList.toggle('activo', visible);
-      buscar = anterior.querySelector('#buscador, #catalogo-buscador');
+      buscar = anterior.querySelector('#catalogo-buscador');
       if (buscar) buscar.value = valor;
-      if (filtroValor) anterior.querySelectorAll('.filtro').forEach(function (b) { b.classList.toggle('activo', b.dataset.filtro === filtroValor); });
       select = anterior.querySelector('#catalogo-filtro');
       if (select && seleccionado) select.value = seleccionado;
+    }
+    if (tab === 'agenda') {
+      var formulario = seccion(tab).querySelector('#agenda-busqueda');
+      if (formulario) agendaUrl = formulario.dataset.url;
     }
     contadores(doc);
     filtrar();
@@ -50,53 +54,27 @@
       if (crear) sugerir(crear, true);
     }
   }
-  async function navegar(tab, guardarHistoria) {
+  async function navegar(tab, guardarHistoria, url) {
     var turno = ++navegacion;
     var indicador = document.createElement('div'); indicador.className = 'admin-loading';
     document.body.appendChild(indicador);
     try {
-      var doc = await cargar(tab);
+      var doc = await cargar(tab, url);
       if (turno !== navegacion) return;
       reemplazar(tab, doc);
       document.querySelectorAll('.admin-sec').forEach(function (s) { s.classList.toggle('activo', s.dataset.sec === tab); });
       document.querySelectorAll('.admin-tab').forEach(function (b) { b.classList.toggle('activo', b.dataset.tab === tab); });
-      if (guardarHistoria) history.pushState(null, '', urlTab(tab));
+      if (guardarHistoria) history.pushState(null, '', tab === 'agenda' ? agendaUrl : urlTab(tab));
       window.scrollTo(0, 0);
     } catch (err) { mostrarToast(err.message, 'error'); }
     finally { indicador.remove(); }
   }
   function filtrar() {
-    var buscador = document.getElementById('buscador');
+    var buscador = document.getElementById('catalogo-buscador');
     var texto = (buscador ? buscador.value : '').trim().toLowerCase();
-    var filtro = document.querySelector('.filtro.activo');
-    var estado = filtro ? filtro.dataset.filtro : 'todos';
-    var visibles = 0;
-    var clientesVisibles = Object.create(null);
-    document.querySelectorAll('#cuerpo-tabla tr[data-estado]').forEach(function (tr) {
-      var mostrar = (estado === 'todos' || tr.dataset.estado === estado) && (!texto || (tr.dataset.buscar || '').includes(texto));
-      tr.style.display = mostrar ? '' : 'none';
-      if (mostrar) {
-        visibles++;
-        clientesVisibles[tr.dataset.cliente] = (clientesVisibles[tr.dataset.cliente] || 0) + 1;
-      }
-      var edicion = document.getElementById('edit-' + tr.dataset.ref);
-      if (!mostrar && edicion) edicion.style.display = 'none';
-    });
-    document.querySelectorAll('#cuerpo-tabla [data-cliente-grupo]').forEach(function (cabecera) {
-      var cantidad = clientesVisibles[cabecera.dataset.clienteGrupo] || 0;
-      cabecera.style.display = cantidad ? '' : 'none';
-      var contador = cabecera.querySelector('[data-trabajos-grupo]');
-      if (contador) contador.textContent = cantidad === Number(contador.dataset.trabajosGrupo)
-        ? cantidad + (cantidad === 1 ? ' trabajo' : ' trabajos')
-        : cantidad + ' de ' + contador.dataset.trabajosGrupo + ' trabajos';
-    });
-    var vacio = document.getElementById('sin-resultados');
-    if (vacio) vacio.style.display = visibles ? 'none' : 'block';
-    buscador = document.getElementById('catalogo-buscador');
-    texto = (buscador ? buscador.value : '').trim().toLowerCase();
-    filtro = document.getElementById('catalogo-filtro');
+    var filtro = document.getElementById('catalogo-filtro');
     var tipo = filtro ? filtro.value : 'todos';
-    visibles = 0;
+    var visibles = 0;
     document.querySelectorAll('[data-catalogo-item]').forEach(function (el) {
       var mostrar = (tipo === 'todos' || tipo === el.dataset.tipo || tipo === el.dataset.estado) && (!texto || el.dataset.buscar.includes(texto));
       el.style.display = mostrar ? '' : 'none';
@@ -104,7 +82,7 @@
     });
     var lista = document.getElementById('catalogo-lista');
     if (lista) {
-      vacio = lista.querySelector('.catalog-empty-results');
+      var vacio = lista.querySelector('.catalog-empty-results');
       if (!vacio) { vacio = document.createElement('p'); vacio.className = 'catalog-empty-results'; vacio.textContent = 'No hay servicios que coincidan con tu búsqueda.'; lista.appendChild(vacio); }
       vacio.hidden = !!visibles || !lista.querySelector('[data-catalogo-item]');
     }
@@ -137,16 +115,13 @@
     else el.scrollIntoView({ block: 'nearest' });
   }
   document.addEventListener('click', function (e) {
+    var agenda = e.target.closest('[data-agenda-nav]');
+    if (agenda) { e.preventDefault(); if (!mutando) navegar('agenda', true, agenda.getAttribute('href')); return; }
     var tab = e.target.closest('.admin-tab');
     if (tab) { e.preventDefault(); if (!mutando) navegar(tab.dataset.tab, true); return; }
-    var filtro = e.target.closest('.filtro');
-    if (filtro) {
-      document.querySelectorAll('.filtro').forEach(function (b) { b.classList.toggle('activo', b === filtro); });
-      filtrar();
-    }
   });
   document.addEventListener('input', function (e) {
-    if (e.target.matches('#buscador, #catalogo-buscador')) filtrar();
+    if (e.target.matches('#catalogo-buscador')) filtrar();
     if (e.target.matches('.catalog-panel input, .catalog-panel textarea, .catalog-panel select, [data-usuarios-form] input')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
   });
   document.addEventListener('change', function (e) {
@@ -156,6 +131,11 @@
   });
   document.addEventListener('submit', async function (e) {
     var form = e.target;
+    if (form.id === 'agenda-busqueda') {
+      e.preventDefault();
+      if (!mutando) navegar('agenda', true, '/admin?' + new URLSearchParams(new FormData(form)).toString());
+      return;
+    }
     if (form.method.toLowerCase() !== 'post') return;
     var trabajo = form.matches('.trabajo-form');
     var catalogo = !!form.closest('.catalog-panel');
@@ -184,6 +164,7 @@
       if (trabajo) {
         var docs = await Promise.all([cargar('agenda'), cargar('realizados')]);
         reemplazar('agenda', docs[0]); reemplazar('realizados', docs[1]);
+        if (activa() === 'agenda') history.replaceState(null, '', agendaUrl);
         mostrarToast(d.realizado ? 'Trabajo marcado como entregado' : 'Trabajo devuelto a la agenda');
       } else if (usuarios) {
         reemplazar('usuarios', await cargar('usuarios'));
@@ -199,7 +180,9 @@
       btn.disabled = false; btn.textContent = original; form.removeAttribute('aria-busy'); mutando = false;
     }
   });
-  window.addEventListener('popstate', function () { navegar(new URLSearchParams(location.search).get('tab') || 'agenda', false); });
+  window.addEventListener('popstate', function () {
+    if (!mutando) navegar(new URLSearchParams(location.search).get('tab') || 'agenda', false, location.pathname + location.search);
+  });
   filtrar();
   var crear = document.querySelector('.catalog-create form');
   if (crear) sugerir(crear, true);

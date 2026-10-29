@@ -71,8 +71,20 @@ const db = {
     const offset = (filtros.pagina - 1) * 30;
     return { filtros, eventos: copia(eventos.slice(offset, offset + 30)), hayMas: eventos.length > offset + 30 };
   },
-  listarAgendaPanel: async () => copia([...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en)),
   listarAgendamientos: async () => copia([...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en)),
+  listarAgendaPanel: async query => {
+    const filtros = require('../../lib/agenda-panel').opcionesAgenda(query);
+    const grupos = require('../../lib/agenda-clientes').agruparClientes(
+      [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en)
+    ).filter(g => (filtros.estado === 'todos' || g.registros.some(r => r.estado === filtros.estado)) &&
+      (!filtros.buscar || g.registros.some(r => [r.ref, r.pedido_ref, r.cliente_nombre, r.contacto, r.producto, r.objetivo_nombre, r.cliente_email]
+        .join(' ').toLowerCase().includes(filtros.buscar.toLowerCase()))));
+    const paginas = Math.max(1, Math.ceil(grupos.length / filtros.tamano));
+    const pagina = Math.min(filtros.pagina, paginas);
+    return { ...filtros, pagina, paginas, personas: grupos.length,
+      trabajos: grupos.reduce((n, g) => n + g.registros.length, 0),
+      registros: copia(grupos.slice((pagina - 1) * filtros.tamano, pagina * filtros.tamano).flatMap(g => g.registros)) };
+  },
   listarRealizados: async () => copia([...trabajos.values()].filter(r => r.trabajo_hecho)),
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
   actualizarPorRef: async (ref, cambios) => { Object.assign(trabajos.get(ref), cambios); return copia(trabajos.get(ref)); },
@@ -135,6 +147,20 @@ app.get('/__test/state', (req, res) => res.json({
 }));
 if (require.main === module) {
   if (process.argv.includes('--agenda-clientes')) sembrarAgendaAgrupada();
+  if (process.argv.includes('--agenda-paginacion')) {
+    trabajos.clear();
+    for (let i = 0; i < 31; i++) {
+      for (let j = 0; j < (i === 30 ? 1 : 3); j++) {
+        const ref = 'PAG-' + i + '-' + j;
+        trabajos.set(ref, {
+          ref, cliente_id: 'PAG-C-' + i, pedido_ref: 'PED-' + i,
+          cliente_nombre: 'Comprador ' + i, contacto: 'contacto-' + i,
+          producto: 'Servicio ' + j, estado: j === 2 ? 'pendiente_verificacion' : 'agendado',
+          creado_en: '2026-01-01',
+        });
+      }
+    }
+  }
   const servidor = app.listen(Number(process.env.PORT || 5052), '0.0.0.0', () => console.log('Isolated admin fixture ready'));
   process.on('SIGTERM', () => servidor.close(() => process.exit(0)));
 }
