@@ -16,6 +16,7 @@ const templates = require('./lib/templates');
 const exportar = require('./lib/exportar');
 const catalogoUtil = require('./lib/catalogo');
 const catalogoCompra = require('./lib/catalogo-compra');
+const { crearClienteWompi } = require('./lib/wompi');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -34,7 +35,8 @@ function esAdelantoIndependiente(raw) {
 }
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ASSISTANT_PASSWORD = process.env.ASSISTANT_PASSWORD || '';
-const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx';
+const WOMPI_PUBLIC_KEY = (process.env.WOMPI_PUBLIC_KEY || 'pub_test_gjhaZFqRwKaZMBcAEBYOjYNGqzGUyPXx').trim();
+const wompi = crearClienteWompi({ publicKey: WOMPI_PUBLIC_KEY, privateKey: process.env.WOMPI_PRIVATE_KEY });
 // Secreto de integridad de Wompi (dashboard → Desarrolladores). Necesario para
 // firmar el checkout: Wompi rechaza la transacción sin `signature:integrity`.
 const WOMPI_INTEGRITY_SECRET = process.env.WOMPI_INTEGRITY_SECRET || '';
@@ -571,17 +573,8 @@ const upload = multer({
 });
 
 /* ---------- Verificación de la transacción en Wompi ---------- */
-function baseApiWompi() {
-  return WOMPI_PUBLIC_KEY.indexOf('pub_prod') === 0
-    ? 'https://production.wompi.co/v1'
-    : 'https://sandbox.wompi.co/v1';
-}
-
 async function verificarTransaccionWompi(txId) {
-  const resp = await fetch(baseApiWompi() + '/transactions/' + encodeURIComponent(txId));
-  if (!resp.ok) return null;
-  const json = await resp.json();
-  return json && json.data ? json.data : null;
+  return wompi.transaccion(txId);
 }
 
 // Busca transacciones por REFERENCIA (sin conocer el id). Sirve para
@@ -595,15 +588,19 @@ async function verificarTransaccionWompi(txId) {
 // "no se sabe". Nunca se debe borrar un pendiente cuando el estado es "no se
 // sabe", para no perder un pago real durante una caída de Wompi.
 async function buscarTransaccionesPorReferencia(referencia) {
-  try {
-    const resp = await fetch(baseApiWompi() + '/transactions?reference=' + encodeURIComponent(referencia));
-    if (!resp.ok) return null;
-    const json = await resp.json();
-    return Array.isArray(json && json.data) ? json.data : [];
-  } catch (e) {
-    console.error('[wompi] Falló la búsqueda por referencia:', referencia, e.message);
-    return null;
+  return wompi.porReferencia(referencia);
+}
+
+function validarPagoWompi(tx, referencia, montoCop) {
+  const esperado = Number(montoCop) * 100;
+  const montoOk = Number.isSafeInteger(esperado) && esperado > 0 && Number(tx.amount_in_cents) === esperado;
+  const monedaOk = tx.currency === 'COP';
+  const refOk = tx.reference === referencia;
+  if (!montoOk || !monedaOk || !refOk) {
+    wompi.registrar('pago_no_coincide', { referenciaCoincide: refOk, montoCoincide: montoOk, monedaCoincide: monedaOk });
+    return false;
   }
+  return true;
 }
 
 /* ---------- Confirmación de pago (compartida por el regreso web y el webhook) ---------- */
@@ -614,19 +611,20 @@ async function confirmarPagoRef(ref, txId) {
   const registro = await db.obtenerPorRef(ref);
   if (!registro) return { encontrado: false };
   if (registro.estado === 'agendado') return { encontrado: true, yaAgendado: true };
-  if (registro.estado === 'pendiente_verificacion') return { encontrado: true, manual: true };
+  if (registro.metodo !== 'wompi' || registro.estado === 'pendiente_verificacion') return { encontrado: true, manual: true };
   if (!txId) return { encontrado: true };
 
   const tx = await verificarTransaccionWompi(txId);
-  const montoOk = tx && Number(tx.amount_in_cents) === registro.precio_cop * 100;
-  const monedaOk = tx && tx.currency === 'COP';
-  const refOk = tx && tx.reference === ref;
-  if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
-    const actualizado = await db.actualizarPorRef(ref, {
+  if (!validarPagoWompi(tx, ref, registro.precio_cop)) return { encontrado: true, discrepancia: true };
+  if (tx.status === 'APPROVED') {
+    const ganadores = await db.actualizarEstadoWompi(ref, {
       estado: 'agendado',
       wompi_tx: txId,
       pagado_en: new Date().toISOString(),
-    });
+    }, false);
+    if (!ganadores.length) return { encontrado: true, yaAgendado: (await db.obtenerPorRef(ref))?.estado === 'agendado' };
+    const actualizado = ganadores[0];
+    wompi.registrar('pago_confirmado', { tipo: 'individual' });
     if (!registro.correo_enviado) {
       try {
         const r = await mailer.enviarNotificacion(actualizado);
@@ -640,21 +638,24 @@ async function confirmarPagoRef(ref, txId) {
   }
   // Pago fallido definitivo (rechazado, error o anulado): se marca como
   // 'rechazado' para que NO quede como "pendiente_pago" (donde, además, la
-  // limpieza de 48h lo borraría). Se exige refOk para no marcar el registro por
-  // una transacción ajena. No bloquea un reintento posterior: si más tarde llega
+  // limpieza de 48h lo borraría). También exige referencia, monto y moneda
+  // correctos. No bloquea un reintento posterior: si más tarde llega
   // una transacción APROBADA con la misma referencia, el guardado de arriba
   // permite pasar de 'rechazado' a 'agendado'.
-  if (tx && refOk && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+  if (['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
     if (registro.estado !== 'rechazado') {
-      await db.actualizarPorRef(ref, {
+      const cambiados = await db.actualizarEstadoWompi(ref, {
         estado: 'rechazado',
         wompi_tx: txId,
         wompi_estado: tx.status,
         pago_rechazado_en: new Date().toISOString(),
-      });
+      }, false);
+      if (!cambiados.length) return { encontrado: true, yaAgendado: (await db.obtenerPorRef(ref))?.estado === 'agendado' };
     }
+    wompi.registrar('pago_rechazado', { tipo: 'individual' });
     return { encontrado: true, rechazado: true };
   }
+  wompi.registrar(tx.status === 'PENDING' ? 'pago_pendiente' : 'estado_desconocido', { tipo: 'individual' });
   return { encontrado: true };
 }
 
@@ -665,20 +666,23 @@ async function confirmarPagoPedido(pedidoRef, txId) {
   if (!registros.length) return { encontrado: false };
   const primero = registros[0];
   if (primero.estado === 'agendado') return { encontrado: true, yaAgendado: true, registros: registros };
-  if (primero.estado === 'pendiente_verificacion') return { encontrado: true, manual: true, registros: registros };
+  if (primero.metodo !== 'wompi' || primero.estado === 'pendiente_verificacion') return { encontrado: true, manual: true, registros: registros };
   if (!txId) return { encontrado: true, registros: registros };
 
-  const totalPedido = parseInt(primero.pedido_total_cop, 10) || 0;
+  const totalPedido = Number(primero.pedido_total_cop);
   const tx = await verificarTransaccionWompi(txId);
-  const montoOk = tx && Number(tx.amount_in_cents) === totalPedido * 100;
-  const monedaOk = tx && tx.currency === 'COP';
-  const refOk = tx && tx.reference === pedidoRef;
-  if (tx && tx.status === 'APPROVED' && refOk && montoOk && monedaOk) {
-    await db.actualizarPorPedido(pedidoRef, {
+  if (!validarPagoWompi(tx, pedidoRef, totalPedido)) return { encontrado: true, discrepancia: true, registros };
+  if (tx.status === 'APPROVED') {
+    const ganadores = await db.actualizarEstadoWompi(pedidoRef, {
       estado: 'agendado',
       wompi_tx: txId,
       pagado_en: new Date().toISOString(),
-    });
+    }, true);
+    if (!ganadores.length) {
+      registros = await db.obtenerPorPedido(pedidoRef);
+      return { encontrado: true, yaAgendado: registros.every(r => r.estado === 'agendado'), registros };
+    }
+    wompi.registrar('pago_confirmado', { tipo: 'pedido', servicios: ganadores.length });
     if (primero.cliente_id) {
       try { await db.guardarCarritoCliente(primero.cliente_id, []); } catch (e) { /* noop */ }
     }
@@ -695,18 +699,21 @@ async function confirmarPagoPedido(pedidoRef, txId) {
     return { encontrado: true, agendado: true, registros: registros };
   }
   // Pago fallido definitivo del pedido: se marca 'rechazado' (ver confirmarPagoRef).
-  if (tx && refOk && ['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
+  if (['DECLINED', 'ERROR', 'VOIDED'].indexOf(tx.status) !== -1) {
     if (primero.estado !== 'rechazado') {
-      await db.actualizarPorPedido(pedidoRef, {
+      const cambiados = await db.actualizarEstadoWompi(pedidoRef, {
         estado: 'rechazado',
         wompi_tx: txId,
         wompi_estado: tx.status,
         pago_rechazado_en: new Date().toISOString(),
-      });
+      }, true);
       registros = await db.obtenerPorPedido(pedidoRef);
+      if (!cambiados.length) return { encontrado: true, yaAgendado: registros.every(r => r.estado === 'agendado'), registros };
     }
+    wompi.registrar('pago_rechazado', { tipo: 'pedido' });
     return { encontrado: true, rechazado: true, registros: registros };
   }
+  wompi.registrar(tx.status === 'PENDING' ? 'pago_pendiente' : 'estado_desconocido', { tipo: 'pedido' });
   return { encontrado: true, registros: registros };
 }
 
@@ -1407,21 +1414,29 @@ app.post('/wompi/webhook', async function (req, res) {
     const evento = req.body || {};
     // Si hay secreto de eventos configurado, exige una firma válida.
     if (WOMPI_EVENTS_SECRET && !firmaEventoValida(evento)) {
-      console.error('[wompi webhook] Firma de evento inválida');
+      wompi.registrar('webhook_firma_invalida');
       return res.status(401).json({ ok: false });
     }
     const tx = evento.data && evento.data.transaction;
-    if (!tx || !tx.id) return res.status(200).json({ ok: true });
+    if (!tx || typeof tx.id !== 'string' || typeof tx.reference !== 'string') {
+      wompi.registrar('webhook_ignorado');
+      return res.status(200).json({ ok: true });
+    }
 
     const referencia = tx.reference || '';
+    wompi.registrar('webhook_recibido', { tipo: /^FRESA-PED-/.test(referencia) ? 'pedido' : 'individual' });
+    let resultado;
     if (/^FRESA-PED-/.test(referencia)) {
-      await confirmarPagoPedido(referencia, tx.id);
+      resultado = await confirmarPagoPedido(referencia, tx.id);
     } else if (referencia) {
-      await confirmarPagoRef(referencia, tx.id);
+      resultado = await confirmarPagoRef(referencia, tx.id);
     }
+    wompi.registrar('webhook_procesado', { resultado: !resultado?.encontrado ? 'sin_registro' :
+      resultado.agendado ? 'confirmado' : resultado.yaAgendado ? 'ya_confirmado' :
+      resultado.rechazado ? 'rechazado' : resultado.discrepancia ? 'discrepancia' : resultado.manual ? 'manual' : 'pendiente' });
     return res.status(200).json({ ok: true });
   } catch (e) {
-    console.error('[wompi webhook]', e.message);
+    wompi.registrar('webhook_reintentable', { motivo: e.codigo || 'error_interno' });
     // 500 → Wompi reintentará el evento más tarde.
     return res.status(500).json({ ok: false });
   }
@@ -2343,8 +2358,8 @@ function reconciliarPagosPendientes() {
 }
 
 // Devuelve { agendados, rechazados, huboFallos }. huboFallos=true si alguna
-// consulta a Wompi no se pudo resolver (estado "no se sabe"): en ese caso la
-// limpieza NO debe borrar, para no perder un pago real durante una caída de Wompi.
+// consulta a Wompi no se pudo resolver, hay discrepancias o hay pagos PENDING:
+// en esos casos la limpieza NO debe borrar registros potencialmente pagados.
 async function ejecutarReconciliacion() {
   const resultado = { agendados: 0, rechazados: 0, huboFallos: false };
   try {
@@ -2366,9 +2381,15 @@ async function ejecutarReconciliacion() {
         // definitivo, se marca 'rechazado' para que no quede en "pendiente_pago".
         const rechazado = await marcarRechazadoDesdeTransacciones(referencia, txs, esPedido);
         if (rechazado) resultado.rechazados++;
+        else if (txs.length) {
+          // Una aprobación no confirmada (discrepancia) o un pago PENDING no
+          // equivalen a ausencia de pago, ni siquiera después de 48 horas.
+          resultado.huboFallos = true;
+          wompi.registrar('reconciliacion_sin_resolver');
+        }
       } catch (e) {
         resultado.huboFallos = true;
-        console.error('[reconciliacion]', referencia, e.message);
+        wompi.registrar('reconciliacion_error', { motivo: e.codigo || 'error_interno' });
       }
     }
     if (resultado.agendados > 0) {
@@ -2379,8 +2400,9 @@ async function ejecutarReconciliacion() {
     }
   } catch (e) {
     resultado.huboFallos = true;
-    console.error('[reconciliacion]', e.message);
+    wompi.registrar('reconciliacion_error', { motivo: e.codigo || 'error_interno' });
   }
+  wompi.registrar('reconciliacion_finalizada', resultado);
   return resultado;
 }
 
@@ -2516,6 +2538,7 @@ async function iniciar() {
   servidor = app.listen(PORT, '0.0.0.0', function () {
     console.log('Fresatanika escuchando en el puerto ' + PORT);
     console.log('Datos en: ' + db.DATA_DIR);
+    wompi.registrar('configuracion', wompi.configuracion());
     if (!process.env.SMTP_PASS) console.warn('Aviso: SMTP_PASS no está configurado; las notificaciones por correo están desactivadas.');
     colaAvisos.iniciar();
     lanzarLimpieza();
@@ -2587,4 +2610,5 @@ module.exports = {
   reconciliarPagosPendientes,
   confirmarPagoRef,
   confirmarPagoPedido,
+  limpiarPendientes,
 };

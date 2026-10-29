@@ -330,6 +330,24 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         const publico = await (await request('/')).text();
         assert.ok(!publico.includes('data-catalogo-id="' + item.id + '"'));
       });
+      await t.test('Confirmación SQL atómica: un ganador por pago, pedido completo y rechazo tardío protegido', async () => {
+        for (const esPedido of [false, true]) {
+          const referencia = esPedido ? 'ATOMIC-PEDIDO' : 'ATOMIC-INDIVIDUAL';
+          for (let i = 0; i < (esPedido ? 2 : 1); i++) {
+            await db.crearAgendamiento({ ref: referencia + '-' + i,
+              pedido_ref: esPedido ? referencia : '', estado: 'pendiente_pago', metodo: 'wompi' });
+          }
+          const ref = esPedido ? referencia : referencia + '-0';
+          const resultados = await Promise.all([1, 2, 3].map(() => db.actualizarEstadoWompi(ref,
+            { estado: 'agendado', wompi_tx: 'TRANSACCION-SINTETICA' }, esPedido)));
+          assert.equal(resultados.filter(r => r.length).length, 1);
+          assert.equal(resultados.flat().length, esPedido ? 2 : 1);
+          assert.deepEqual(await db.actualizarEstadoWompi(ref, { estado: 'rechazado' }, esPedido), []);
+        }
+        await db.crearAgendamiento({ ref: 'ATOMIC-MANUAL', estado: 'pendiente_verificacion', metodo: 'transferencia' });
+        assert.deepEqual(await db.actualizarEstadoWompi('ATOMIC-MANUAL', { estado: 'agendado' }, false), []);
+        await assert.rejects(db.actualizarEstadoWompi('ATOMIC-MANUAL', { estado: 'arbitrario' }, false));
+      });
       assert.deepEqual(correos, [], 'No enviar correos');
       assert.deepEqual(externas, [], 'No consultar Wompi ni otros destinos');
     } finally {

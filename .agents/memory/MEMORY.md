@@ -4,3 +4,4 @@
 - [Catalog and validation boundaries](catalog-validation-boundaries.md) — preserve the original Carrd services; use isolated fixtures for mutating tests.
 - [Delivery notification guarantees](delivery-notification-guarantees.md) — favor recovery; SMTP cannot guarantee exactly-once delivery across a crash before the database commit.
 - [Notification roles](notification-roles.md) — assistants receive operational notices only; access alerts are admin-only; keep customer messages private.
+- [Wompi query authentication](wompi-api-authentication.md) — transaction lookups require a private key; authentication failures are unknown payment states, never absent payments.
