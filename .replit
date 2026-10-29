@@ -16,7 +16,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Start application"
+args = "artifacts/fresatanika: web"
 
 [[workflows.workflow]]
 name = "Start application"
@@ -27,7 +27,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "DATA_DIR=./data node server.js"
+args = "FRESA_PREVIEW=1 DATA_DIR=./data node server.js"
 waitForPort = 5000
 
 [userenv]

@@ -2601,9 +2601,12 @@ function lanzarReconciliacion() {
 }
 
 async function iniciar() {
+  const preview = process.env.FRESA_PREVIEW === '1' && process.env.NODE_ENV !== 'production';
   // 1) Prepara el esquema en PostgreSQL y migra los datos del JSON solo si las
   //    tablas están vacías (idempotente: no duplica ni sobrescribe nada).
-  await db.init();
+  // El preview puede compartir la base de CapRover: no migrar ni ejecutar
+  // limpieza, conciliación o notificaciones automáticas desde desarrollo.
+  if (!preview) await db.init();
   await refrescarCatalogoValidado();
 
   // 2) Levanta el servidor HTTP.
@@ -2611,6 +2614,10 @@ async function iniciar() {
     console.log('Fresatanika escuchando en el puerto ' + PORT);
     console.log('Datos en: ' + db.DATA_DIR);
     wompi.registrar('configuracion', wompi.configuracion());
+    if (preview) {
+      console.log('[preview] Sin migraciones ni tareas automáticas; los cambios manuales siguen usando la base configurada.');
+      return;
+    }
     if (!process.env.SMTP_PASS) console.warn('Aviso: SMTP_PASS no está configurado; las notificaciones por correo están desactivadas.');
     colaAvisos.iniciar();
     lanzarLimpieza();
