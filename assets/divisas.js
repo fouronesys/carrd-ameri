@@ -39,12 +39,64 @@
       var c = localStorage.getItem(KEY);
       if (c && ADMITIDAS.indexOf(c) >= 0) return c;
     } catch (e) {}
-    var l = String((navigator && navigator.language) || '').toLowerCase();
-    var mapa = {
-      'es-mx': 'MXN', 'es-pe': 'PEN', 'es-do': 'DOP', 'es-ar': 'ARS', 'pt-br': 'BRL', 'pt': 'BRL',
-      'es-cl': 'CLP', 'es-py': 'PYG', 'es-ve': 'VES', 'es-es': 'EUR', 'en-us': 'USD', 'en': 'USD'
+    // Solo se guarda una selección explícita. La detección puede adaptarse en
+    // futuras visitas y nunca sustituye una moneda que la persona ya eligió.
+    var zonas = {
+      COP: ['America/Bogota'],
+      USD: ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix',
+        'America/Detroit', 'America/Indiana/Indianapolis', 'America/Indianapolis', 'America/Kentucky/Louisville',
+        'America/Louisville', 'America/Boise', 'America/Anchorage', 'America/Juneau', 'America/Nome',
+        'America/Sitka', 'America/Metlakatla', 'America/Yakutat', 'America/Adak', 'Pacific/Honolulu',
+        'US/Eastern', 'US/Central', 'US/Mountain', 'US/Pacific', 'US/Alaska', 'US/Hawaii',
+        'America/Puerto_Rico', 'America/Guayaquil', 'Pacific/Galapagos', 'America/El_Salvador'],
+      EUR: ['Europe/Madrid', 'Atlantic/Canary', 'Europe/Paris', 'Europe/Berlin', 'Europe/Rome',
+        'Europe/Lisbon', 'Atlantic/Azores', 'Atlantic/Madeira', 'Europe/Amsterdam', 'Europe/Brussels',
+        'Europe/Luxembourg', 'Europe/Vienna', 'Europe/Dublin', 'Europe/Helsinki', 'Europe/Athens',
+        'Europe/Tallinn', 'Europe/Riga', 'Europe/Vilnius', 'Europe/Bratislava', 'Europe/Ljubljana',
+        'Europe/Zagreb', 'Europe/Malta', 'Asia/Nicosia', 'Asia/Famagusta', 'Europe/Nicosia',
+        'Europe/Andorra', 'Europe/Monaco', 'Europe/San_Marino', 'Europe/Vatican', 'Europe/Podgorica',
+        'Europe/Sofia', 'Europe/Mariehamn', 'Europe/Busingen'],
+      MXN: ['America/Mexico_City', 'America/Cancun', 'America/Merida', 'America/Monterrey',
+        'America/Matamoros', 'America/Chihuahua', 'America/Ciudad_Juarez', 'America/Ojinaga',
+        'America/Hermosillo', 'America/Mazatlan', 'America/Bahia_Banderas', 'America/Tijuana',
+        'Mexico/General', 'Mexico/BajaSur', 'Mexico/BajaNorte'],
+      PEN: ['America/Lima'], DOP: ['America/Santo_Domingo'],
+      ARS: ['America/Buenos_Aires', 'America/Cordoba', 'America/Catamarca', 'America/Jujuy', 'America/Mendoza'],
+      BRL: ['America/Sao_Paulo', 'America/Rio_Branco', 'America/Porto_Acre', 'America/Eirunepe',
+        'America/Manaus', 'America/Porto_Velho', 'America/Boa_Vista', 'America/Cuiaba',
+        'America/Campo_Grande', 'America/Belem', 'America/Fortaleza', 'America/Recife',
+        'America/Araguaina', 'America/Maceio', 'America/Bahia', 'America/Santarem',
+        'America/Noronha', 'Brazil/East', 'Brazil/West', 'Brazil/Acre', 'Brazil/DeNoronha'],
+      CLP: ['America/Santiago', 'America/Punta_Arenas', 'America/Coyhaique', 'Pacific/Easter', 'Chile/Continental', 'Chile/EasterIsland'],
+      PYG: ['America/Asuncion'], VES: ['America/Caracas']
     };
-    return mapa[l] || 'COP';
+    try {
+      var zona = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (zona && zona.indexOf('America/Argentina/') === 0) return 'ARS';
+      if (zona && (zona.indexOf('America/Indiana/') === 0 || zona.indexOf('America/Kentucky/') === 0 ||
+        zona.indexOf('America/North_Dakota/') === 0)) return 'USD';
+      for (var codigo in zonas) if (zonas[codigo].indexOf(zona) >= 0) return codigo;
+    } catch (e) {}
+    var regiones = {
+      CO: 'COP', US: 'USD', PR: 'USD', EC: 'USD', SV: 'USD', MX: 'MXN', PE: 'PEN', DO: 'DOP', AR: 'ARS', BR: 'BRL', CL: 'CLP', PY: 'PYG', VE: 'VES',
+      ES: 'EUR', FR: 'EUR', DE: 'EUR', IT: 'EUR', PT: 'EUR', NL: 'EUR', BE: 'EUR', LU: 'EUR', AT: 'EUR',
+      IE: 'EUR', FI: 'EUR', GR: 'EUR', EE: 'EUR', LV: 'EUR', LT: 'EUR', SK: 'EUR', SI: 'EUR', HR: 'EUR',
+      MT: 'EUR', CY: 'EUR', AD: 'EUR', MC: 'EUR', SM: 'EUR', VA: 'EUR', ME: 'EUR', BG: 'EUR', AX: 'EUR', XK: 'EUR'
+    };
+    var nav = typeof navigator === 'undefined' ? {} : navigator;
+    var idiomas = nav.languages && nav.languages.length ? nav.languages : [nav.language || ''];
+    for (var i = 0; i < idiomas.length; i++) {
+      // Acepta etiquetas con escritura y extensiones, p. ej. es-Latn-MX-u-nu-latn.
+      var partes = String(idiomas[i]).replace(/_/g, '-').split('-');
+      for (var j = 1; j < partes.length && partes[j].length !== 1; j++) {
+        if (/^[a-z]{2}$/i.test(partes[j])) {
+          var moneda = regiones[partes[j].toUpperCase()];
+          if (moneda) return moneda;
+          break;
+        }
+      }
+    }
+    return 'COP';
   }
 
   function esc(s) {
