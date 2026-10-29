@@ -45,8 +45,9 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
     const browsers = [];
     const actorCatalogo = { rol: 'admin', usuario: 'administrador-contratos', usuario_id: 'TEST-ADMIN-CONTRATOS' };
     const cobro = base => Math.ceil((base + 700 * 1.19) / (1 - 0.0265 * 1.19));
-    const neto = (item, pct = 0, urgencia = false) => Math.round(
-      (Math.round(Number(item.precio_usd) * (1 - pct / 100) * 100) / 100 + (urgencia ? 10 : 0)) * 4000);
+    const neto = (item, pct = 0, urgencia = false, divisa = 'COP') => divisa === 'COP'
+      ? Math.round(Number(item.precio_cop) * (1 - pct / 100)) + (urgencia ? 28000 : 0)
+      : Math.round((Math.round(Number(item.precio_usd) * (1 - pct / 100) * 100) / 100 + (urgencia ? 10 : 0)) * 4000);
     const firma = (ref, total) => crypto.createHash('sha256')
       .update(ref + String(total * 100) + 'COPcontratos-integridad-sintetica').digest('hex');
     async function request(ruta, options) {
@@ -158,7 +159,8 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         for (const item of [...estaticos, ...dinamicos]) {
           const b = await navegador(url, html, request);
           try {
-            b.divisa('MXN');
+            const divisa = item === dinamicos[0] ? 'COP' : 'MXN';
+            b.divisa(divisa);
             const fichas = [...b.document.querySelectorAll('.p')];
             const ficha = item.id
               ? fichas.find(p => p.getAttribute('data-catalogo-id') === item.id)
@@ -178,8 +180,8 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             await b.listo();
             const resumen = b.document.getElementById('wm-cotizacion');
             assert.ok(resumen, 'Resumen individual presente');
-            assert.match(resumen.textContent, /MXN/);
-            assert.doesNotMatch(resumen.textContent, /COP\s*[\d$]|[\d]\s*COP/);
+            assert.match(resumen.textContent, new RegExp(divisa));
+            if (divisa !== 'COP') assert.doesNotMatch(resumen.textContent, /COP\s*[\d$]|[\d]\s*COP/);
             assert.match(b.document.getElementById('wm-btn-pagar').textContent, /Continuar con Wompi/);
             assert.equal(b.document.getElementById('wm-btn-pagar').disabled, false, b.document.getElementById('wompi-overlay').textContent);
             b.click('wm-btn-pagar');
@@ -187,7 +189,7 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             const res = b.solicitudes.find(r => r.ruta === '/api/booking');
             assert.ok(res, item.nombre + ': formulario enviado');
             assert.equal(res.status, 200, item.nombre + ': ' + JSON.stringify(res.data));
-            assert.equal(res.data.precio_cop, cobro(neto(item)));
+            assert.equal(res.data.precio_cop, cobro(neto(item, 0, false, divisa)));
             const reg = await db.obtenerPorRef(res.data.ref);
             assert.equal(reg.producto, item.nombre);
             assert.equal(reg.estado, 'pendiente_pago');
@@ -209,7 +211,8 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         ]) {
           const b = await navegador(url, html, request);
           try {
-            b.divisa('EUR');
+            const divisa = items === dinamicos ? 'COP' : 'EUR';
+            b.divisa(divisa);
             // Los artículos entran por sus botones, pasan por sanitizar y
             // enviarCheckout de cart.js, no por un payload construido por el test.
             for (const item of items) {
@@ -229,22 +232,22 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
             }
             b.click('fc-siguiente'); b.click('fc-siguiente');
             await b.listo();
-            assert.match(b.document.getElementById('fc-cotizacion').textContent, /EUR/);
-            assert.doesNotMatch(b.document.getElementById('fc-cotizacion').textContent, /COP\s*[\d$]|[\d]\s*COP/);
+            assert.match(b.document.getElementById('fc-cotizacion').textContent, new RegExp(divisa));
+            if (divisa !== 'COP') assert.doesNotMatch(b.document.getElementById('fc-cotizacion').textContent, /COP\s*[\d$]|[\d]\s*COP/);
             assert.equal(b.document.getElementById('fc-pagar').textContent, 'Continuar con Wompi');
             b.click('fc-pagar');
             await b.listo();
             const res = b.solicitudes.find(r => r.ruta === '/api/checkout');
             assert.ok(res, 'Carrito enviado');
             assert.equal(res.status, 200, JSON.stringify(res.data));
-            const total = cobro(items.reduce((s, it) => s + neto(it), 0));
+            const total = cobro(items.reduce((s, it) => s + neto(it, 0, false, divisa), 0));
             assert.equal(res.data.total_cop, total);
             assert.equal(res.data.signature, firma(res.data.pedido_ref, total));
             const registros = await db.obtenerPorPedido(res.data.pedido_ref);
             assert.equal(registros.length, items.length);
             registros.forEach((reg, i) => {
               assert.equal(reg.producto, items[i].nombre);
-              assert.equal(reg.precio_cop, neto(items[i]));
+              assert.equal(reg.precio_cop, neto(items[i], 0, false, divisa));
               assert.equal(reg.pedido_total_cop, total);
             });
             assert.equal(Number(new URL(b.location.href).searchParams.get('amount-in-cents')), total * 100);

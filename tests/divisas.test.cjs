@@ -64,7 +64,7 @@ test('Desglose firmado coherente en las once divisas, incluso al redondear varia
   const fx = crearDivisas({ fetchImpl: async () => ({ ok: true, json: async () => tasasPrueba() }) });
   const cot = crearCotizaciones({ divisas: fx, secreto: 'sintetico',
     resolver: async raw => ({ ...raw, tipo: 'hechizo' }), descuento: async () => 17,
-    comision: n => n + 1033, adelanto: () => ({ precio_usd: 10 }) });
+    comision: n => n + 1033, adelanto: () => ({ precio_usd: 10, precio_cop: 28000 }) });
   const items = [1.13, 2.17, 3.19].map((precio_usd, i) => ({ nombre: 'Sintético ' + i, precio_cop: 10000, precio_usd, incluye_adelanto: i === 0 }));
   for (const { codigo: divisa } of DIVISAS) {
     for (const metodo of ['wompi', 'transferencia']) {
@@ -76,6 +76,38 @@ test('Desglose firmado coherente en las once divisas, incluso al redondear varia
       assert.equal(q.total_divisa, Math.round(q.total_cop / q.tasa_cop * q.tasa_divisa * precision) / precision);
       assert.equal(cot.validar(q.token, datos).comision_divisa, q.comision_divisa);
       if (metodo === 'transferencia') assert.equal(q.comision_divisa, 0);
+    }
+  }
+});
+
+test('Tarifas independientes: COP original fijo; USD y otras divisas usan USD sin alterar pedidos', async () => {
+  let tasaCop = 4000;
+  const cot = crearCotizaciones({ secreto: 'sintetico',
+    divisas: { obtener: async () => ({ tasas: { ...tasasPrueba().rates, COP: tasaCop },
+      actualizado_en: new Date().toISOString(), vigente_hasta: new Date(Date.now() + 3600000).toISOString() }) },
+    resolver: async i => ({ ...i, tipo: i.nombre === 'Lectura' ? 'lectura' : 'hechizo' }),
+    descuento: async () => 20, comision: n => n + 1000,
+    adelanto: () => ({ precio_usd: 10, precio_cop: 28000 }) });
+  const datos = { items: [
+    { nombre: 'Hechizo', precio_cop: 50000, precio_usd: 20, incluye_adelanto: true },
+    { nombre: 'Lectura', precio_cop: 40000, precio_usd: 15 },
+  ], metodo: 'wompi' };
+  for (const tasa of [4000, 3200]) {
+    tasaCop = tasa;
+    const cop = await cot.crear({ ...datos, divisa: 'COP' });
+    assert.deepEqual(cop.items.map(i => i.cop), [68000, 40000]);
+    assert.deepEqual(cop.items.map(i => i.base_cop), [50000, 40000]);
+    assert.equal(cop.total_cop, 109000);
+    assert.equal(cop.total_divisa, 109000);
+    assert.equal(cop.tarifa, 'COP');
+    assert.equal(cot.validar(cop.token, datos).total_cop, 109000);
+    const manual = await cot.crear({ ...datos, divisa: 'COP', metodo: 'transferencia' });
+    assert.equal(manual.total_cop, 108000);
+    for (const divisa of ['USD', 'EUR', 'MXN']) {
+      const q = await cot.crear({ ...datos, divisa });
+      assert.equal(q.subtotal_cop, 41 * tasa);
+      assert.equal(q.total_cop, 41 * tasa + 1000);
+      assert.equal(q.tarifa, 'USD');
     }
   }
 });

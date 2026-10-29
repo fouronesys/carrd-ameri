@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const { parseHTML } = require('linkedom');
 
 // Executes production scripts with the original catalog; no HTTP, DB or payments.
-function catalogoDOM({ nativePopover = false, html } = {}) {
+function catalogoDOM({ nativePopover = false, html, divisas } = {}) {
   const { window, document, Event, HTMLElement, HTMLSelectElement } = parseHTML(
     html || fs.readFileSync(require.resolve('../../index.html'), 'utf8'));
   const listeners = new Map();
@@ -29,6 +29,7 @@ function catalogoDOM({ nativePopover = false, html } = {}) {
   HTMLElement.prototype.showPopover = nativePopover ? function () { this.setAttribute('data-test-open', ''); } : undefined;
   HTMLElement.prototype.hidePopover = nativePopover ? function () { this.removeAttribute('data-test-open'); } : undefined;
   const context = vm.createContext({
+    FresaDivisas: divisas,
     document, Event, console, innerWidth: 390, innerHeight: 700,
     addEventListener(name, fn) {
       if (!listeners.has(name)) listeners.set(name, new Set());

@@ -9,7 +9,7 @@ const { crearCotizaciones } = require('../lib/cotizaciones');
 const { tasasPrueba } = require('./helpers/tasas.cjs');
 
 test('Banderas, formatos y resumen firmado: once divisas sin duplicar COP antes de Wompi', async () => {
-  const { document, Event, CustomEvent, HTMLSelectElement } = parseHTML('<html><head></head><body><section id="prueba"></section><div id="resumen"></div></body></html>');
+  const { document, Event, CustomEvent, HTMLSelectElement } = parseHTML('<html><head></head><body><section id="prueba"></section><div id="resumen"></div><span class="p" id="servicio"><strong>$50.000 COP · 20 USD</strong></span></body></html>');
   Object.defineProperty(HTMLSelectElement.prototype, 'value', {
     configurable: true,
     get() { return (this.querySelector('option[selected]') || this.querySelector('option'))?.value || ''; },
@@ -28,12 +28,21 @@ test('Banderas, formatos y resumen firmado: once divisas sin duplicar COP antes 
   vm.runInContext(fs.readFileSync(require.resolve('../assets/divisas.js'), 'utf8'), ctx);
   const D = ctx.FresaDivisas;
   await D.listo;
+  D.establecer('COP');
+  assert.equal(D.precio(50000, 20), D.fmt(50000, 'COP'));
+  assert.equal(document.querySelector('#servicio .wm-fd').getAttribute('data-fd'), D.fmt(50000, 'COP'));
+  D.establecer('USD');
+  assert.equal(D.precio(50000, 20), D.fmt(20, 'USD'));
+  assert.equal(document.querySelector('#servicio .wm-fd').getAttribute('data-fd'), D.fmt(20, 'USD'));
+  D.establecer('COP');
+  assert.equal(document.querySelector('#servicio strong').textContent, '$50.000 COP · 20 USD');
+  assert.equal(document.querySelector('#servicio .wm-fd').getAttribute('data-fd'), D.fmt(50000, 'COP'));
   const selector = D.montarSelector(document.getElementById('prueba'));
   assert.equal(selector.querySelectorAll('.fd-op svg').length, 11);
   assert.equal(selector.querySelector('[data-v="EUR"]').textContent.includes('Euro'), true);
   const cot = crearCotizaciones({ divisas: fx, secreto: 'sintetico',
     resolver: async i => ({ ...i, tipo: 'hechizo' }), descuento: async () => 10,
-    comision: n => n + 1000, adelanto: () => ({ precio_usd: 10 }) });
+    comision: n => n + 1000, adelanto: () => ({ precio_usd: 10, precio_cop: 28000 }) });
   const resumen = document.getElementById('resumen');
   for (const { codigo: divisa } of DIVISAS) {
     D.establecer(divisa);

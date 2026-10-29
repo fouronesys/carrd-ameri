@@ -125,3 +125,22 @@ test('Hechizos y lecturas conservan filtros independientes y admiten servicios d
   ui.click(hechizos.querySelector('.fsb-reset'));
   assert.equal(hechizos.querySelector('.fsb-count').textContent, '84 hechizos');
 });
+
+test('El presupuesto COP usa la tarifa original, no la conversión USD', () => {
+  const ui = catalogoDOM({ divisas: {
+    actual: () => 'COP',
+    disponibles: () => [{ codigo: 'COP', nombre: 'Peso colombiano' }],
+    convertir: usd => usd * 4000,
+    fmt: (n, c) => c + ' ' + n,
+    sinDecimales: () => true,
+  } });
+  const sec = ui.section('hechizos'), p = ui.panel('hechizos'), node = ui.document.createElement('span');
+  node.className = 'p catalogo-servicio';
+  node.innerHTML = '<strong>Tarifa independiente sintética</strong><br>$12.000 (5 USD)<br>Prueba';
+  sec.querySelector('span.p').parentNode.appendChild(node);
+  ui.set(p.querySelector('.fsb-q'), 'tarifa independiente sintetica');
+  ui.set(p.querySelector('.fsb-m'), '12.000');
+  assert.equal(sec.querySelector('.fsb-item > span.p'), node);
+  ui.set(p.querySelector('.fsb-m'), '11.000');
+  assert.equal(sec.querySelectorAll('.fsb-item').length, 0);
+});

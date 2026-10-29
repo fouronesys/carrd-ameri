@@ -387,10 +387,11 @@
       cot.pedir(payloadCotizacion(), { revisar: !!revisar });
     }
 
-    // Precio base del servicio en la divisa elegida (USD es la base).
+    // COP original o tarifa USD convertida, según la divisa elegida.
     function pintarPrecioBase() {
       var usd = estado.adelanto === 'solo' ? ADELANTO_USD : estado.precioUSD;
-      var txt = (D && usd) ? D.formato(usd) : '';
+      var cop = estado.adelanto === 'solo' ? ADELANTO_COP : estado.precioCOP;
+      var txt = D ? D.precio(cop, usd) : '';
       precioEl.textContent = txt || estado.precioTexto;
       precioEl.title = txt || estado.precioTexto;
     }

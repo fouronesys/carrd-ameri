@@ -35,9 +35,9 @@
     return '$' + Number(n || 0).toLocaleString('es-CO') + ' COP';
   }
 
-  // Precio de un servicio en la divisa elegida (base USD); texto original si no hay USD.
+  // Tarifas independientes: COP original; las divisas extranjeras parten de USD.
   function precioVisible(it) {
-    var t = (D && it.precio_usd) ? D.formato(it.precio_usd) : '';
+    var t = D ? D.precio(it.precio_cop, it.precio_usd) : '';
     return t || it.precio_texto || fmtCOP(it.precio_cop);
   }
 
@@ -508,7 +508,8 @@
 
     var vacio = estado.items.length === 0;
     var usdTot = sumaUsd();
-    var subtotalRef = (D && usdTot !== null) ? D.formato(usdTot) : fmtCOP(totalNeto());
+    var subtotalRef = D && D.actual() === 'COP' ? D.fmt(totalNeto(), 'COP') :
+      (D && usdTot !== null) ? D.formato(usdTot) : fmtCOP(totalNeto());
 
     var html =
       '<div class="fc-panel">' +

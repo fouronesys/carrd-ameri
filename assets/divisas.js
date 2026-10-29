@@ -169,6 +169,16 @@
     return fmt(v, c);
   }
 
+  // COP y USD son tarifas independientes del catálogo, no equivalencias.
+  function precio(cop, usd, codigo) {
+    var c = codigo || actual();
+    if (c === 'COP') {
+      var n = Number(cop);
+      return isFinite(n) && n > 0 ? fmt(n, 'COP') : '';
+    }
+    return formato(usd, c);
+  }
+
   function fechaReferencia() {
     var d = aFecha(st.actualizado);
     if (!d) return '';
@@ -503,6 +513,8 @@
     var m = (precio ? precio.textContent : txt).match(RE_USD);
     if (!precio || !m) return; // sin precio USD: se deja el texto original intacto
     p.setAttribute('data-fd-usd', m[1].replace(',', '.'));
+    var originalCop = (precio.textContent || '').match(/\$\s*([0-9][0-9.]*)/);
+    if (originalCop) p.setAttribute('data-fd-cop', originalCop[1].replace(/\./g, ''));
     var pill = document.createElement('span');
     pill.className = 'wm-fd';
     pill.setAttribute('data-fd', '');
@@ -516,8 +528,8 @@
     var pill = p.querySelector('.wm-fd');
     if (!pill) return;
     var usd = p.getAttribute('data-fd-usd');
-    pill.setAttribute('data-fd', formato(usd));
-    pill.setAttribute('title', 'Precio base ' + fmt(numUsd(usd), 'USD'));
+    pill.setAttribute('data-fd', precio(p.getAttribute('data-fd-cop'), usd));
+    pill.setAttribute('title', actual() === 'COP' ? 'Tarifa COP original' : 'Precio base ' + fmt(numUsd(usd), 'USD'));
   }
 
   function pintarInsignias() {
@@ -529,7 +541,8 @@
       else if (isFinite(pct)) b.setAttribute('data-fd-pct', String(pct));
       var usd = p && p.getAttribute('data-fd-usd');
       if (!usd || !isFinite(pct)) continue;
-      b.textContent = '\u2212' + pct + '% \u2192 ' + formato(numUsd(usd) * (1 - pct / 100));
+      var cop = Number(p.getAttribute('data-fd-cop'));
+      b.textContent = '\u2212' + pct + '% \u2192 ' + precio(Math.round(cop * (1 - pct / 100)), numUsd(usd) * (1 - pct / 100));
     }
   }
 
@@ -735,6 +748,7 @@
     disponibles: disponibles,
     convertir: convertir,
     formato: formato,
+    precio: precio,
     fmt: fmt,
     sinDecimales: function (c) { return !!SIN_DECIMALES[c || actual()]; },
     hayTasas: hayTasas,

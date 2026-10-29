@@ -8,10 +8,11 @@
   var uid = 0;
   var filtros = window.FresaCatalogoFiltros;
   var norm = filtros.normalizar;
-  // Divisa global: misma conversión que el resto del sitio (FresaDivisas, base USD).
+  // Divisa global: COP original o conversión de la tarifa USD, como el catálogo.
   function D() { return window.FresaDivisas || null; }
   function monedaActual() { return D() ? D().actual() : 'USD'; }
-  function convertir(usd, c) {
+  function convertir(usd, c, cop) {
+    if (c === 'COP') return cop > 0 ? cop : null;
     if (usd === null || usd === undefined) return null;
     if (D()) return D().convertir(usd, c);
     return c === 'USD' ? usd : null;
@@ -261,7 +262,7 @@
       var activo = tokens.length || cat || max !== null || orden !== 'orig';
       x.hidden = !q.value;
       controles(cat, maxTxt, max, invalido, orden, moneda, Boolean(q.value || cat || maxTxt || orden !== 'orig'));
-      datos.items.forEach(function (it) { it.precioSel = convertir(it.usd, moneda); });
+      datos.items.forEach(function (it) { it.precioSel = convertir(it.usd, moneda, it.cop); });
       var total = datos.items.length;
       if (!activo) {
         sec.classList.remove('fsb-activo');
