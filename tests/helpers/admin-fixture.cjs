@@ -72,6 +72,7 @@ const db = {
     return { filtros, eventos: copia(eventos.slice(offset, offset + 30)), hayMas: eventos.length > offset + 30 };
   },
   listarAgendaPanel: async () => copia([...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en)),
+  listarAgendamientos: async () => copia([...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en)),
   listarRealizados: async () => copia([...trabajos.values()].filter(r => r.trabajo_hecho)),
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
   actualizarPorRef: async (ref, cambios) => { Object.assign(trabajos.get(ref), cambios); return copia(trabajos.get(ref)); },

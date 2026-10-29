@@ -1585,6 +1585,8 @@ app.post('/admin/logout', mismoOrigen, function (req, res) {
 
 app.get('/admin/exportar/excel', requiereAdmin, async function (req, res) {
   try {
+    // Exportación completa de la agenda activa, no solo los confirmados:
+    // conservar cliente_id/pedido_ref para contar compradores sin usar nombres.
     const registros = await db.listarAgendamientos();
     const buf = exportar.generarExcel(registros);
     const nombre = 'fresatanika-agendamientos-' + new Date().toISOString().slice(0, 10) + '.xlsx';
@@ -1599,6 +1601,7 @@ app.get('/admin/exportar/excel', requiereAdmin, async function (req, res) {
 
 app.get('/admin/exportar/pdf', requiereAdmin, async function (req, res) {
   try {
+    // Mismo conjunto que Excel: excluye trabajos entregados o eliminados.
     const registros = await db.listarAgendamientos();
     const nombre = 'fresatanika-agendamientos-' + new Date().toISOString().slice(0, 10) + '.pdf';
     res.setHeader('Content-Type', 'application/pdf');
