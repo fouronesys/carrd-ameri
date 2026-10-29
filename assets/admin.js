@@ -71,12 +71,24 @@
     var filtro = document.querySelector('.filtro.activo');
     var estado = filtro ? filtro.dataset.filtro : 'todos';
     var visibles = 0;
+    var clientesVisibles = Object.create(null);
     document.querySelectorAll('#cuerpo-tabla tr[data-estado]').forEach(function (tr) {
       var mostrar = (estado === 'todos' || tr.dataset.estado === estado) && (!texto || (tr.dataset.buscar || '').includes(texto));
       tr.style.display = mostrar ? '' : 'none';
-      if (mostrar) visibles++;
+      if (mostrar) {
+        visibles++;
+        clientesVisibles[tr.dataset.cliente] = (clientesVisibles[tr.dataset.cliente] || 0) + 1;
+      }
       var edicion = document.getElementById('edit-' + tr.dataset.ref);
       if (!mostrar && edicion) edicion.style.display = 'none';
+    });
+    document.querySelectorAll('#cuerpo-tabla [data-cliente-grupo]').forEach(function (cabecera) {
+      var cantidad = clientesVisibles[cabecera.dataset.clienteGrupo] || 0;
+      cabecera.style.display = cantidad ? '' : 'none';
+      var contador = cabecera.querySelector('[data-trabajos-grupo]');
+      if (contador) contador.textContent = cantidad === Number(contador.dataset.trabajosGrupo)
+        ? cantidad + (cantidad === 1 ? ' trabajo' : ' trabajos')
+        : cantidad + ' de ' + contador.dataset.trabajosGrupo + ' trabajos';
     });
     var vacio = document.getElementById('sin-resultados');
     if (vacio) vacio.style.display = visibles ? 'none' : 'block';

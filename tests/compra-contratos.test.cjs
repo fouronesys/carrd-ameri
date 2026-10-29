@@ -348,6 +348,32 @@ if (process.env.COMPRA_CONTRATOS_AISLADOS !== '1') {
         assert.deepEqual(await db.actualizarEstadoWompi('ATOMIC-MANUAL', { estado: 'agendado' }, false), []);
         await assert.rejects(db.actualizarEstadoWompi('ATOMIC-MANUAL', { estado: 'arbitrario' }, false));
       });
+      await t.test('Resumen SQL distingue personas y trabajos con pedidos, estados y entregas parciales', async () => {
+        const base = await db.resumenPanel();
+        const filas = [
+          { ref: 'CONTEO-A1', cliente_id: 'CONTEO-CLIENTE', pedido_ref: 'CONTEO-PED1' },
+          { ref: 'CONTEO-A2', cliente_id: 'CONTEO-CLIENTE', pedido_ref: 'CONTEO-PED2' },
+          { ref: 'CONTEO-B1', pedido_ref: 'CONTEO-INVITADO' },
+          { ref: 'CONTEO-B2', pedido_ref: 'CONTEO-INVITADO' },
+          { ref: 'CONTEO-C1', estado: 'pendiente_pago' },
+          { ref: 'CONTEO-C2', estado: 'pendiente_verificacion' },
+          { ref: 'CONTEO-C3', estado: 'rechazado' },
+          { ref: 'CONTEO-C4', trabajo_hecho: true },
+          { ref: 'CONTEO-C5', eliminado_en: new Date().toISOString() },
+        ];
+        for (const r of filas) await db.crearAgendamiento({ estado: 'agendado', cliente_nombre: 'Mismo nombre', ...r });
+        let resumen = await db.resumenPanel();
+        assert.equal(resumen.personas_agendadas, base.personas_agendadas + 2);
+        assert.equal(resumen.agendados, base.agendados + 4);
+        for (const [ref, personas, trabajos] of [
+          ['CONTEO-A1', 2, 3], ['CONTEO-A2', 1, 2], ['CONTEO-B1', 1, 1], ['CONTEO-B2', 0, 0],
+        ]) {
+          await db.actualizarPorRef(ref, { trabajo_hecho: true });
+          resumen = await db.resumenPanel();
+          assert.equal(resumen.personas_agendadas, base.personas_agendadas + personas);
+          assert.equal(resumen.agendados, base.agendados + trabajos);
+        }
+      });
       assert.deepEqual(correos, [], 'No enviar correos');
       assert.deepEqual(externas, [], 'No consultar Wompi ni otros destinos');
     } finally {

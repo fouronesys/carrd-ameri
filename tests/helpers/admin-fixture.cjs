@@ -22,6 +22,20 @@ const trabajos = new Map([
 ]);
 const llamadas = {};
 const copia = x => JSON.parse(JSON.stringify(x));
+function sembrarAgendaAgrupada() {
+  trabajos.clear();
+  const datos = [
+    { ref: 'CLIENTE-A-1', cliente_id: 'CLIENTE-A', pedido_ref: 'PEDIDO-A-1', producto: 'Servicio primero', estado: 'agendado', cliente_nombre: 'Cliente de prueba', contacto: '3000000001' },
+    { ref: 'CLIENTE-A-2', cliente_id: 'CLIENTE-A', pedido_ref: 'PEDIDO-A-2', producto: 'Servicio segundo', estado: 'agendado', cliente_nombre: 'Cliente de prueba', contacto: '3000000001' },
+    { ref: 'CLIENTE-A-3', cliente_id: 'CLIENTE-A', producto: 'Servicio por verificar', estado: 'pendiente_verificacion', cliente_nombre: 'Cliente de prueba' },
+    { ref: 'INVITADO-1', pedido_ref: 'PEDIDO-INVITADO', producto: 'Lectura invitado', estado: 'agendado', cliente_nombre: 'Invitado de prueba', contacto: '3000000002' },
+    { ref: 'INVITADO-2', pedido_ref: 'PEDIDO-INVITADO', producto: 'Servicio adicional invitado', estado: 'agendado', cliente_nombre: 'Invitado de prueba' },
+    { ref: 'SIN-PAGO', producto: 'Servicio sin pagar', estado: 'pendiente_pago', cliente_nombre: 'Cliente de prueba', contacto: '3000000003' },
+  ];
+  datos.forEach((r, i) => trabajos.set(r.ref, {
+    precio_cop: 20000, creado_en: '2026-01-01', objetivo_nombre: 'Persona objetivo ' + (i + 1), metodo: 'wompi', ...r,
+  }));
+}
 const db = {
   DATA_DIR: '/tmp', UPLOADS_DIR: '/tmp', pool: {},
   listarCatalogo: async () => copia([...servicios.values()]),
@@ -57,7 +71,7 @@ const db = {
     const offset = (filtros.pagina - 1) * 30;
     return { filtros, eventos: copia(eventos.slice(offset, offset + 30)), hayMas: eventos.length > offset + 30 };
   },
-  listarAgendaPanel: async () => copia([...trabajos.values()].filter(r => !r.trabajo_hecho)),
+  listarAgendaPanel: async () => copia([...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en)),
   listarRealizados: async () => copia([...trabajos.values()].filter(r => r.trabajo_hecho)),
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
   actualizarPorRef: async (ref, cambios) => { Object.assign(trabajos.get(ref), cambios); return copia(trabajos.get(ref)); },
@@ -67,12 +81,17 @@ const db = {
   },
   procesarSiguienteAvisoRealizado: async () => false,
   obtenerClientePorId: async () => ({ email: 'cliente@example.invalid' }),
-  resumenPanel: async () => ({
-    total: [...trabajos.values()].filter(r => !r.trabajo_hecho).length,
-    agendados: [...trabajos.values()].filter(r => !r.trabajo_hecho).length,
-    verificar: 0, realizados: [...trabajos.values()].filter(r => r.trabajo_hecho).length,
-    ingresos: 50000, catalogo: servicios.size,
-  }),
+  resumenPanel: async () => {
+    const activos = [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en);
+    const pagados = activos.filter(r => r.estado === 'agendado');
+    return {
+      total: activos.length, agendados: pagados.length,
+      personas_agendadas: require('../../lib/agenda-clientes').agruparClientes(pagados).length,
+      verificar: activos.filter(r => r.estado === 'pendiente_verificacion').length,
+      realizados: [...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en).length,
+      ingresos: 50000, catalogo: servicios.size,
+    };
+  },
   listarPromos: async () => [], listarCodigosConUsos: async () => [],
   listarUsuariosAdmin: async () => copia([...usuarios.values()]),
   obtenerUsuarioAdmin: async nombre => copia([...usuarios.values()].find(u => u.usuario === nombre) || null),
@@ -114,7 +133,8 @@ app.get('/__test/state', (req, res) => res.json({
   destinatarios: [...destinatarios.values()],
 }));
 if (require.main === module) {
+  if (process.argv.includes('--agenda-clientes')) sembrarAgendaAgrupada();
   const servidor = app.listen(Number(process.env.PORT || 5052), '0.0.0.0', () => console.log('Isolated admin fixture ready'));
   process.on('SIGTERM', () => servidor.close(() => process.exit(0)));
 }
-module.exports = { app, servicios, historial, trabajos, llamadas, usuarios, destinatarios };
+module.exports = { app, servicios, historial, trabajos, llamadas, usuarios, destinatarios, sembrarAgendaAgrupada };
