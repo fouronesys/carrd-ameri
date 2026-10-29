@@ -6,3 +6,4 @@
 - [Notification roles](notification-roles.md) — assistants receive operational notices only; access alerts are admin-only; keep customer messages private.
 - [Wompi query authentication](wompi-api-authentication.md) — transaction lookups require a private key; authentication failures are unknown payment states, never absent payments.
 - [Personas y trabajos](agenda-personas-trabajos.md) — una persona es el cliente comprador; varios servicios no deben inflar el contador de personas.
+- [Divisas del catálogo](catalogo-divisas.md) — precios basados en USD y tasas automáticas; distinguir conversión visible de moneda real de cobro.
