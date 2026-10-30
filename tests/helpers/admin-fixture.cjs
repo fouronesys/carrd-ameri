@@ -19,6 +19,8 @@ const servicios = new Map();
 const historial = [];
 const usuarios = new Map();
 const destinatarios = new Map();
+const promos = new Map();
+const codigos = new Map();
 const trabajos = new Map([
   ['TEST-OLD', { ref: 'TEST-OLD', estado: 'agendado', producto: 'Trabajo de prueba antiguo', precio_cop: 20000, creado_en: '2026-01-01', cliente_id: 'TEST-CLIENT' }],
   ['TEST-NEW', { ref: 'TEST-NEW', estado: 'agendado', producto: 'Trabajo de prueba reciente', precio_cop: 30000, creado_en: '2026-02-01' }],
@@ -111,6 +113,9 @@ const db = {
   crearAgendamiento: async registro => { trabajos.set(registro.ref, copia(registro)); },
   obtenerPorRef: async ref => trabajos.has(ref) ? copia(trabajos.get(ref)) : null,
   actualizarPorRef: async (ref, cambios) => { Object.assign(trabajos.get(ref), cambios); return copia(trabajos.get(ref)); },
+  eliminarPorRef: async ref => { Object.assign(trabajos.get(ref), { eliminado_en: new Date().toISOString() }); },
+  restaurarPorRef: async ref => { Object.assign(trabajos.get(ref), { eliminado_en: '' }); },
+  eliminarDefinitivamentePorRef: async ref => trabajos.delete(ref),
   marcarTrabajoRealizado: async ref => {
     Object.assign(trabajos.get(ref), { trabajo_hecho: true, trabajo_hecho_en: new Date().toISOString() });
     return copia(trabajos.get(ref));
@@ -129,7 +134,12 @@ const db = {
         .reduce((s, r) => s + (Number(r.precio_cop) || 0), 0), catalogo: servicios.size,
     };
   },
-  listarPromos: async () => [], listarCodigosConUsos: async () => [],
+  listarPromos: async () => copia([...promos.values()]),
+  crearPromo: async p => { promos.set(p.id, copia(p)); },
+  eliminarPromo: async id => promos.delete(id),
+  listarCodigosConUsos: async () => copia([...codigos.values()]),
+  crearCodigo: async c => { codigos.set(c.id, copia(c)); },
+  eliminarCodigo: async id => codigos.delete(id),
   listarUsuariosAdmin: async () => copia([...usuarios.values()]),
   obtenerUsuarioAdmin: async nombre => copia([...usuarios.values()].find(u => u.usuario === nombre) || null),
   obtenerUsuarioAdminPorId: async id => copia(usuarios.get(id) || null),

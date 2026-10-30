@@ -2,6 +2,7 @@
   'use strict';
   var navegacion = 0;
   var mutando = false;
+  var busquedaTimer;
   var agendaInicial = document.querySelector('#agenda-busqueda');
   var agendaUrl = agendaInicial ? agendaInicial.dataset.url : '/admin?tab=agenda';
   function seccion(id, root) { return (root || document).querySelector('[data-sec="' + id + '"]'); }
@@ -48,7 +49,15 @@
       var valor = buscar ? buscar.value : '';
       var select = anterior.querySelector('#catalogo-filtro');
       var seleccionado = select ? select.value : '';
+      var abiertos = Array.from(anterior.querySelectorAll('details[open]')).map(function (el) {
+        var form = el.querySelector('form[action]');
+        return form && form.getAttribute('action');
+      }).filter(Boolean);
       anterior.innerHTML = nuevo.innerHTML;
+      anterior.querySelectorAll('details').forEach(function (el) {
+        var form = el.querySelector('form[action]');
+        if (form && abiertos.includes(form.getAttribute('action'))) el.open = true;
+      });
       anterior.classList.toggle('activo', visible);
       buscar = anterior.querySelector('#catalogo-buscador');
       if (buscar) buscar.value = valor;
@@ -66,13 +75,18 @@
       if (crear) sugerir(crear, true);
     }
   }
-  async function navegar(tab, guardarHistoria, url) {
+  async function navegar(tab, guardarHistoria, url, conservarPosicion) {
+    clearTimeout(busquedaTimer);
     var turno = ++navegacion;
     var indicador = document.createElement('div'); indicador.className = 'admin-loading';
     document.body.appendChild(indicador);
     try {
       var doc = await cargar(tab, url);
       if (turno !== navegacion) return;
+      var y = window.scrollY;
+      var campo = document.activeElement;
+      var focoBusqueda = campo && campo.id === 'buscador';
+      var cursor = focoBusqueda ? campo.selectionStart : null;
       reemplazar(tab, doc);
       document.querySelectorAll('.admin-sec').forEach(function (s) { s.classList.toggle('activo', s.dataset.sec === tab); });
       document.querySelectorAll('.admin-tab').forEach(function (b) { b.classList.toggle('activo', b.dataset.tab === tab); });
@@ -83,9 +97,15 @@
         params.set('tab', ['agenda', 'realizados', 'eliminados'].indexOf(tab) >= 0 ? tab : 'agenda');
         a.setAttribute('href', '/admin?' + params.toString());
       });
-      if (guardarHistoria) history.pushState(null, '', tab === 'agenda' ? agendaUrl : urlTab(tab));
-      window.scrollTo(0, 0);
-    } catch (err) { mostrarToast(err.message, 'error'); }
+      var destino = tab === 'agenda' ? agendaUrl : (url || urlTab(tab));
+      if (guardarHistoria) history.pushState(null, '', destino);
+      else if (conservarPosicion) history.replaceState(null, '', destino);
+      if (focoBusqueda && conservarPosicion) {
+        campo = document.getElementById('buscador');
+        if (campo) { campo.focus({ preventScroll: true }); campo.setSelectionRange(cursor, cursor); }
+      }
+      window.scrollTo(0, conservarPosicion ? y : 0);
+    } catch (err) { if (turno === navegacion) mostrarToast(err.message, 'error'); }
     finally { indicador.remove(); }
   }
   function filtrar() {
@@ -135,11 +155,30 @@
   }
   document.addEventListener('click', function (e) {
     var agenda = e.target.closest('[data-agenda-nav]');
-    if (agenda) { e.preventDefault(); if (!mutando) navegar('agenda', true, agenda.getAttribute('href')); return; }
+    if (agenda) {
+      e.preventDefault();
+      var destino = new URL(agenda.getAttribute('href'), location.href);
+      var campo = document.getElementById('buscador');
+      if (campo && (agenda.hasAttribute('data-filtro') || agenda.closest('[aria-label="Páginas de la agenda"]'))) {
+        destino.searchParams.set('buscar', campo.value);
+      }
+      if (!mutando) navegar('agenda', true, destino.pathname + destino.search, true);
+      return;
+    }
     var tab = e.target.closest('.admin-tab');
     if (tab) { e.preventDefault(); if (!mutando) navegar(tab.dataset.tab, true); return; }
   });
   document.addEventListener('input', function (e) {
+    if (e.target.matches('#agenda-busqueda [name=buscar]')) {
+      clearTimeout(busquedaTimer);
+      ++navegacion; // Una respuesta anterior nunca debe sustituir lo recién escrito.
+      var form = e.target.closest('form');
+      busquedaTimer = setTimeout(function () {
+        if (!mutando && form.isConnected && activa() === 'agenda') {
+          navegar('agenda', false, '/admin?' + new URLSearchParams(new FormData(form)).toString(), true);
+        }
+      }, 300);
+    }
     if (e.target.matches('#catalogo-buscador')) filtrar();
     if (e.target.matches('.catalog-panel input, .catalog-panel textarea, .catalog-panel select, [data-usuarios-form] input')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
   });
@@ -152,32 +191,43 @@
     var form = e.target;
     if (form.id === 'agenda-busqueda') {
       e.preventDefault();
-      if (!mutando) navegar('agenda', true, '/admin?' + new URLSearchParams(new FormData(form)).toString());
+      if (!mutando) navegar('agenda', false, '/admin?' + new URLSearchParams(new FormData(form)).toString(), true);
       return;
     }
     if (form.method.toLowerCase() !== 'post') return;
     var trabajo = form.matches('.trabajo-form');
     var catalogo = !!form.closest('.catalog-panel');
     var usuarios = form.matches('[data-usuarios-form]');
-    if (!trabajo && !catalogo && !usuarios) return;
+    var panel = form.closest('.admin-sec');
+    if (!panel || !new URL(form.getAttribute('action'), location.href).pathname.startsWith('/admin/')) return;
     if (e.defaultPrevented) return;
     e.preventDefault();
     if (mutando) return;
     mutando = true;
+    clearTimeout(busquedaTimer);
     ++navegacion;
-    var btn = form.querySelector('[type=submit]'), original = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Guardando…'; form.setAttribute('aria-busy', 'true');
+    var tabActual = activa(), y = window.scrollY;
+    var btn = e.submitter || form.querySelector('[type=submit], button:not([type])');
+    var original = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+    form.setAttribute('aria-busy', 'true');
     var guardado = false;
     try {
-      var datos = new URLSearchParams();
-      new FormData(form).forEach(function (v, k) { datos.append(k, v); });
+      var datos = new FormData(form);
+      if (e.submitter && e.submitter.name) datos.append(e.submitter.name, e.submitter.value);
+      if (form.enctype !== 'multipart/form-data') datos = new URLSearchParams(datos);
       var r = await fetch(form.getAttribute('action'), {
         method: 'POST', body: datos, credentials: 'same-origin', headers: { Accept: 'application/json' }
       });
-      if (!(r.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error(r.redirected ? 'Tu sesión caducó. Inicia sesión otra vez.' : 'El servidor no pudo procesar la solicitud. Inténtalo de nuevo.');
+      var d;
+      if ((r.headers.get('content-type') || '').includes('application/json')) d = await r.json();
+      else {
+        var texto = await r.text();
+        if (!r.ok) throw new Error(new DOMParser().parseFromString(texto, 'text/html').body.textContent.slice(0, 500) || 'No se pudo guardar.');
+        var respuesta = new DOMParser().parseFromString(texto, 'text/html');
+        if (!respuesta.querySelector('.admin-nav')) throw new Error('Tu sesión caducó. Inicia sesión otra vez.');
+        d = { ok: true };
       }
-      var d = await r.json();
       if (!r.ok || !d.ok) { errorFormulario(form, d.error || 'No se pudo guardar.', d.campos); return; }
       guardado = true;
       if (trabajo) {
@@ -188,15 +238,21 @@
       } else if (usuarios) {
         reemplazar('usuarios', await cargar('usuarios'));
         mostrarToast(d.mensaje || 'Usuarios y notificaciones actualizados');
-      } else {
+      } else if (catalogo) {
         reemplazar('catalogo', await cargar('catalogo'));
         mostrarToast(d.mensaje || 'Catálogo actualizado');
+      } else {
+        reemplazar(tabActual, await cargar(tabActual));
+        if (tabActual === 'agenda') history.replaceState(null, '', agendaUrl);
+        mostrarToast(d.mensaje || 'Cambio guardado');
       }
+      window.scrollTo(0, y);
     } catch (err) {
       var mensaje = guardado ? 'El cambio se guardó, pero no se pudo actualizar la vista. Recarga el panel para verlo.' : err.message;
       if (guardado) mostrarToast(mensaje, 'error'); else errorFormulario(form, mensaje);
     } finally {
-      btn.disabled = false; btn.textContent = original; form.removeAttribute('aria-busy'); mutando = false;
+      if (btn) { btn.disabled = false; btn.textContent = original; }
+      form.removeAttribute('aria-busy'); mutando = false;
     }
   });
   window.addEventListener('popstate', function () {

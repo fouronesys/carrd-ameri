@@ -14,7 +14,7 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
     producto: 'Servicio', estado: 'agendado',
   }));
   const solicitudes = [], eventos = {}, mensajes = [];
-  const location = { pathname: '/admin', search: '?tab=agenda&pagina=2' };
+  const location = { pathname: '/admin', search: '?tab=agenda&pagina=2', href: 'http://fixture/admin' };
   function render(url) {
     const params = Object.fromEntries(new URL(url, 'http://fixture').searchParams);
     const filtros = opcionesAgenda(params);
@@ -36,7 +36,7 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
     forEach(fn) { this.pares.forEach(([k, v]) => fn(v, k)); }
   }
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/admin.js'), 'utf8'), {
-    document, location, URLSearchParams, FormData: FormDataFixture,
+    document, location, URL, URLSearchParams, FormData: FormDataFixture, setTimeout, clearTimeout,
     history: { pushState: cambiarUrl, replaceState: cambiarUrl },
     window: { addEventListener: (tipo, fn) => { eventos[tipo] = fn; }, scrollTo() {} },
     DOMParser: class { parseFromString(html) { return parseHTML(html).document; } },
@@ -72,7 +72,8 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
   assert.equal(new URLSearchParams(location.search).get('pagina'), '2');
   const buscar = document.querySelector('#agenda-busqueda');
   buscar.querySelector('[name=buscar]').value = 'Comprador 2';
-  buscar.dispatchEvent(new (parseHTML('').window.Event)('submit', { bubbles: true, cancelable: true }));
+  buscar.querySelector('[name=buscar]').dispatchEvent(new (parseHTML('').window.Event)('input', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 350));
   await terminar();
   assert.equal(new URLSearchParams(location.search).get('pagina'), '1');
   assert.equal(document.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 11);
