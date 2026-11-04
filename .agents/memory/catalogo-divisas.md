@@ -34,3 +34,9 @@ En transferencias, mostrar desglose, total y botón de confirmación en la divis
 **Why:** El usuario indicó «Para las transferencias, el total debe mostrarse en la moneda que corresponda, no en COP».
 
 **How to apply:** Usar los importes en divisa de la cotización firmada, tanto en compra individual como en carrito; no recalcular pedidos históricos ni cambiar la moneda obligatoria de Wompi.
+
+No ofrecer PayPal ni sus enlaces, correo receptor o instrucciones en la aplicación.
+
+**Why:** El usuario pidió quitar la opción de pago y todas las referencias a ese proveedor.
+
+**How to apply:** Mantener esta exclusión al actualizar métodos e instrucciones de pago, sin borrar ni alterar registros históricos.

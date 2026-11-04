@@ -49,7 +49,6 @@
   ];
 
   var URL_ASTROPAY = 'https://onetouch.astropay.com/payment?external_reference_id=D90q4hqQNtroahncdgks9jBSIKMwxV89';
-  var CORREO_PAYPAL = 'galvisestefania038@gmail.com';
 
   // Adelanto (urgencia): mismo valor que la "urgencia" del catálogo. Debe
   // coincidir con ADELANTO_COP/ADELANTO_USD en server.js.
@@ -278,14 +277,12 @@
       '<div class="wm-transfer-only">',
       '  <hr class="wm-divider">',
       '  <div class="wm-metodos">',
-      '    <div class="wm-metodos-tit">Transfiere el total en COP indicado arriba a cualquiera de estos métodos:</div>',
+      '    <div class="wm-metodos-tit">Transfiere el total en la divisa indicada arriba usando un método que acepte esa moneda:</div>',
       '    ' + metodosItems,
       '  </div>',
-      '  <p class="wm-pago-cap">Si usas PayPal o AstroPay, envía el equivalente del total en COP; la conversión de esa plataforma puede variar.</p>',
+      '  <p class="wm-pago-cap">Antes de confirmar en AstroPay, revisa la moneda, el importe y las comisiones aplicables.</p>',
       '  <div class="wm-pagos">',
       '    <a class="wm-pago-btn" href="' + URL_ASTROPAY + '" target="_blank" rel="noopener">Pagar por AstroPay ↗</a>',
-      '    <a class="wm-pago-btn" href="https://www.paypal.com/myaccount/transfer/homepage/pay" target="_blank" rel="noopener">Pagar por PayPal ↗</a>',
-      '    <div class="wm-pago-cap">Envía tu pago de PayPal a: <b>' + CORREO_PAYPAL + '</b></div>',
       '  </div>',
       '  <label class="wm-label">Sube el comprobante de tu pago <span class="wm-req">*</span>',
       '    <input type="file" class="wm-input wm-file" id="wm-comprobante" accept="image/*">',
