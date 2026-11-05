@@ -29,6 +29,14 @@
       var nuevo = btn.querySelector('.tab-count');
       if (actual && nuevo) actual.textContent = nuevo.textContent;
     });
+    // Los resumenes viven fuera de las secciones que se reemplazan por AJAX.
+    // Sin sincronizarlos, la tabla se actualiza pero el conteo queda obsoleto.
+    ['stat-personas', 'stat-agendados', 'stat-total', 'stat-verificar', 'stat-ingresos'].forEach(function (id) {
+      var actual = document.getElementById(id), nuevo = doc.getElementById(id);
+      if (!actual || !nuevo) return;
+      actual.textContent = nuevo.textContent;
+      if (id === 'stat-verificar') actual.parentElement.className = nuevo.parentElement.className;
+    });
   }
   document.addEventListener('catalogo:precios-guardados', async function () {
     try {

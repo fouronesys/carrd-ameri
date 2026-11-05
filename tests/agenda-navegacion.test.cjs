@@ -25,7 +25,8 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
       tabActiva: params.tab || 'agenda', cargaPorPestana: true,
       registros: lista.slice((pagina - 1) * 15, pagina * 15),
       agenda: { ...filtros, pagina, paginas, personas: lista.length, trabajos: lista.length },
-      resumen: { total: trabajos.length, agendados: trabajos.length, personas_agendadas: trabajos.length },
+      resumen: { total: trabajos.length, agendados: trabajos.filter(r => r.estado === 'agendado' && !r.trabajo_hecho).length,
+        personas_agendadas: trabajos.filter(r => r.estado === 'agendado' && !r.trabajo_hecho).length },
     });
   }
   const { document } = parseHTML(render('/admin' + location.search));
@@ -65,6 +66,8 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
   assert.ok(mensajes.includes('Trabajo marcado como entregado'));
   assert.equal(new URLSearchParams(location.search).get('pagina'), '2', 'Se ajusta la página al entregar el último comprador');
   assert.equal(document.querySelector('#stat-personas').textContent, '30');
+  assert.equal(document.querySelector('#stat-agendados').textContent, '30', 'El contador baja al entregar un trabajo');
+  assert.equal(document.querySelector('#stat-total').textContent, '30', 'El total activo se sincroniza también');
   assert.equal(document.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 15);
   assert.ok(solicitudes.some(u => u.includes('tab=realizados')));
   await click('[data-tab="realizados"]');
