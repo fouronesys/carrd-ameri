@@ -222,6 +222,178 @@ test('Cola durable: transacciones, concurrencia, caída forzada, reintentos y SM
       assert.equal(smtp.mensajes.length, antes + 1);
     });
 
+    await t.test('Restaurar recupera solo el aviso cancelado y conserva intentos tras reiniciar el proceso', async () => {
+      await crear('RESTAURADO');
+      await db.marcarTrabajoRealizado('RESTAURADO');
+      smtp.fallar(true);
+      await db.procesarSiguienteAvisoRealizado(enviar);
+      smtp.fallar(false);
+      await db.eliminarPorRef('RESTAURADO');
+      await inmediato('RESTAURADO');
+      await db.procesarSiguienteAvisoRealizado(enviar);
+      const cancelado = await aviso('RESTAURADO');
+      assert.equal(cancelado.estado, 'cancelado');
+      assert.equal(cancelado.intentos, 1);
+      await Promise.all(Array.from({ length: 5 }, () => db.restaurarPorRef('RESTAURADO')));
+      const recuperado = await aviso('RESTAURADO');
+      assert.equal(recuperado.estado, 'pendiente');
+      assert.equal(recuperado.intentos, cancelado.intentos);
+      assert.equal(recuperado.ultimo_error, cancelado.ultimo_error);
+      assert.deepEqual(recuperado.creado_en, cancelado.creado_en);
+      assert.equal((await db.obtenerPorRef('RESTAURADO')).eliminado_en, null);
+      const antes = smtp.mensajes.length;
+      // Un proceso nuevo solo conoce PostgreSQL, no el despertar en memoria.
+      hijo = spawn(process.execPath, ['-e', `
+        const db = require('./lib/db');
+        const mailer = require('./lib/mailer');
+        db.procesarSiguienteAvisoRealizado((reg, to, messageId) =>
+          mailer.enviarEstadoCliente('realizado', reg, to, { messageId }))
+          .catch(() => { process.exitCode = 1; }).finally(() => db.cerrar());
+      `], {
+        cwd: path.resolve(__dirname, '..'), stdio: 'ignore',
+        env: { ...env, POSTGRES_URL: `postgresql://test@127.0.0.1:${puerto}/postgres`,
+          DATA_DIR: path.join(tmp, 'data'), SMTP_HOST: '127.0.0.1',
+          SMTP_PORT: process.env.SMTP_PORT, SMTP_USER: 'test@example.invalid',
+          SMTP_FROM: 'test@example.invalid', SMTP_PASS: 'synthetic-test-only' },
+      });
+      const [codigo] = await once(hijo, 'exit');
+      hijo = null;
+      assert.equal(codigo, 0);
+      assert.equal(smtp.mensajes.length, antes + 1);
+      assert.equal((await aviso('RESTAURADO')).intentos, 2);
+      assert.equal((await aviso('RESTAURADO')).estado, 'enviado');
+      assert.ok((await db.obtenerPorRef('RESTAURADO')).cliente_aviso_realizado);
+      await db.eliminarPorRef('RESTAURADO');
+      await db.restaurarPorRef('RESTAURADO');
+      await db.marcarTrabajoRealizado('RESTAURADO');
+      assert.equal(await db.procesarSiguienteAvisoRealizado(enviar), false);
+      assert.equal(smtp.mensajes.length, antes + 1);
+    });
+
+    await t.test('Un fallo al recuperar el aviso revierte también la restauración', async () => {
+      await crear('REST-ROLLBACK');
+      await db.marcarTrabajoRealizado('REST-ROLLBACK');
+      await db.eliminarPorRef('REST-ROLLBACK');
+      await db.procesarSiguienteAvisoRealizado(enviar);
+      await db.pool.query(`CREATE TRIGGER fallo_restauracion BEFORE UPDATE ON avisos_realizado
+        FOR EACH ROW WHEN (OLD.ref = 'REST-ROLLBACK')
+        EXECUTE FUNCTION rechazar_aviso_test()`);
+      await assert.rejects(db.restaurarPorRef('REST-ROLLBACK'), /fallo simulado/);
+      assert.ok((await db.obtenerPorRef('REST-ROLLBACK')).eliminado_en);
+      assert.equal((await aviso('REST-ROLLBACK')).estado, 'cancelado');
+      await db.pool.query('DROP TRIGGER fallo_restauracion ON avisos_realizado');
+      await db.restaurarPorRef('REST-ROLLBACK');
+      await db.procesarSiguienteAvisoRealizado(enviar);
+      assert.equal((await aviso('REST-ROLLBACK')).estado, 'enviado');
+    });
+
+    await t.test('Restaurar no reactiva avisos no elegibles, confirmados ni entregas sin aviso', async () => {
+      await db.crearCliente({ id: 'INVALIDO', email: 'correo-invalido' });
+      await db.crearCliente({ id: 'VACIO', email: '' });
+      for (const [ref, cambios, avisoCambios = ''] of [
+        ['REST-SIN-ENTREGA', { trabajo_hecho: false }],
+        ['REST-IMPAGO', { estado: 'pendiente_pago' }],
+        ['REST-RECHAZADO', { estado: 'rechazado' }],
+        ['REST-INVITADO', { cliente_id: null }],
+        ['REST-CLIENTE-AUSENTE', { cliente_id: 'NO-EXISTE' }],
+        ['REST-SIN-CORREO', { cliente_id: 'VACIO' }],
+        ['REST-CORREO-INVALIDO', { cliente_id: 'INVALIDO' }],
+        ['REST-ADELANTO', { adelanto: 'solo' }],
+        ['REST-MARCA', { cliente_aviso_realizado: '2026-01-01' }],
+        ['REST-HEREDADO', { aviso_realizado_enviado: true }],
+        ['REST-CONFIRMADO', {}, ", enviado_en = now()"],
+        ['REST-ENVIADO', {}, ", estado = 'enviado'"],
+      ]) {
+        await crear(ref);
+        await db.marcarTrabajoRealizado(ref);
+        await db.eliminarPorRef(ref);
+        await db.procesarSiguienteAvisoRealizado(enviar);
+        await db.actualizarPorRef(ref, cambios);
+        if (avisoCambios) await db.pool.query(`UPDATE avisos_realizado SET ultimo_error = NULL ${avisoCambios} WHERE ref=$1`, [ref]);
+        const original = await aviso(ref);
+        await db.restaurarPorRef(ref);
+        await db.restaurarPorRef(ref);
+        assert.deepEqual(await aviso(ref), original, ref);
+      }
+      await crear('REST-SIN-AVISO', { trabajo_hecho: true, eliminado_en: '2026-01-01' });
+      await db.restaurarPorRef('REST-SIN-AVISO');
+      assert.equal(await aviso('REST-SIN-AVISO'), undefined);
+      assert.equal(await db.restaurarPorRef('NO-EXISTE'), null);
+      const antes = smtp.mensajes.length;
+      assert.equal(await db.procesarSiguienteAvisoRealizado(enviar), false);
+      assert.equal(smtp.mensajes.length, antes);
+    });
+
+    await t.test('Restaurar antes de cancelar conserva el backoff y el intento pendiente', async () => {
+      await crear('REST-PENDIENTE');
+      await db.marcarTrabajoRealizado('REST-PENDIENTE');
+      smtp.fallar(true);
+      await db.procesarSiguienteAvisoRealizado(enviar);
+      smtp.fallar(false);
+      await db.eliminarPorRef('REST-PENDIENTE');
+      const pendiente = await aviso('REST-PENDIENTE');
+      await db.restaurarPorRef('REST-PENDIENTE');
+      await db.restaurarPorRef('REST-PENDIENTE');
+      assert.deepEqual(await aviso('REST-PENDIENTE'), pendiente);
+      assert.equal(await db.procesarSiguienteAvisoRealizado(enviar), false);
+      await inmediato('REST-PENDIENTE');
+      await db.procesarSiguienteAvisoRealizado(enviar);
+      assert.equal((await aviso('REST-PENDIENTE')).estado, 'enviado');
+    });
+
+    await t.test('Una cancelación en curso termina antes de recuperar el aviso, sin bloqueos cruzados', async () => {
+      await crear('REST-CANCELANDO');
+      await db.marcarTrabajoRealizado('REST-CANCELANDO');
+      await db.eliminarPorRef('REST-CANCELANDO');
+      const consumidor = await db.pool.connect();
+      let restauracion;
+      try {
+        await consumidor.query('BEGIN');
+        await consumidor.query("SELECT ref FROM avisos_realizado WHERE ref='REST-CANCELANDO' FOR UPDATE");
+        await consumidor.query("UPDATE avisos_realizado SET estado='cancelado' WHERE ref='REST-CANCELANDO'");
+        restauracion = db.restaurarPorRef('REST-CANCELANDO');
+        await esperar(async () => (await db.pool.query(`SELECT 1 FROM pg_stat_activity
+          WHERE query LIKE 'SELECT estado, enviado_en FROM avisos_realizado%'
+          AND wait_event_type = 'Lock'`)).rowCount > 0);
+        assert.ok((await db.obtenerPorRef('REST-CANCELANDO')).eliminado_en);
+        await consumidor.query('COMMIT');
+        await restauracion;
+      } finally {
+        await consumidor.query('ROLLBACK');
+        consumidor.release();
+        if (restauracion) await restauracion;
+      }
+      assert.equal((await aviso('REST-CANCELANDO')).estado, 'pendiente');
+      const antes = smtp.mensajes.length;
+      await Promise.all([
+        ...Array.from({ length: 4 }, () => db.restaurarPorRef('REST-CANCELANDO')),
+        ...Array.from({ length: 3 }, () => db.procesarSiguienteAvisoRealizado(enviar)),
+      ]);
+      assert.equal(smtp.mensajes.length, antes + 1);
+      assert.equal((await aviso('REST-CANCELANDO')).estado, 'enviado');
+      assert.equal((await aviso('REST-CANCELANDO')).intentos, 1);
+    });
+
+    await t.test('Restaurar durante SMTP respeta su confirmación y no vuelve a enviar', async () => {
+      await crear('REST-SMTP');
+      await db.marcarTrabajoRealizado('REST-SMTP');
+      const antes = smtp.mensajes.length;
+      smtp.demorar(true);
+      const procesando = db.procesarSiguienteAvisoRealizado(enviar);
+      await esperar(() => smtp.mensajes.length === antes + 1);
+      await db.eliminarPorRef('REST-SMTP');
+      const restaurando = db.restaurarPorRef('REST-SMTP');
+      smtp.aceptar();
+      smtp.demorar(false);
+      await Promise.all([procesando, restaurando]);
+      const confirmado = await aviso('REST-SMTP');
+      assert.equal(confirmado.estado, 'enviado');
+      await db.restaurarPorRef('REST-SMTP');
+      assert.deepEqual(await aviso('REST-SMTP'), confirmado);
+      assert.equal(await db.procesarSiguienteAvisoRealizado(enviar), false);
+      assert.equal(smtp.mensajes.length, antes + 1);
+    });
+
     await t.test('La ruta HTTP real responde mientras SMTP sigue esperando y luego confirma el aviso', async () => {
       Object.assign(process.env, {
         ADMIN_PASSWORD: 'isolated-admin-test', ASSISTANT_PASSWORD: '',
@@ -258,6 +430,29 @@ test('Cola durable: transacciones, concurrencia, caída forzada, reintentos y SM
         smtp.aceptar();
         smtp.demorar(false);
         await esperar(async () => (await aviso('HTTP')).estado === 'enviado');
+        await crear('HTTP-RESTAURAR');
+        await db.marcarTrabajoRealizado('HTTP-RESTAURAR');
+        await db.eliminarPorRef('HTTP-RESTAURAR');
+        await db.procesarSiguienteAvisoRealizado(enviar);
+        assert.equal((await aviso('HTTP-RESTAURAR')).estado, 'cancelado');
+        smtp.demorar(true);
+        const mensajesAntes = smtp.mensajes.length;
+        const restaurar = () => fetch(url + '/admin/restaurar/HTTP-RESTAURAR', {
+          method: 'POST', redirect: 'manual', headers: { Cookie: cookie, Origin: url },
+        });
+        const inicioRestauracion = performance.now();
+        const restaurada = await restaurar();
+        assert.equal(restaurada.status, 302);
+        assert.equal(restaurada.headers.get('location'), '/admin?tab=eliminados');
+        assert.ok(performance.now() - inicioRestauracion < 1000);
+        await esperar(() => smtp.mensajes.length === mensajesAntes + 1);
+        assert.equal((await aviso('HTTP-RESTAURAR')).estado, 'pendiente');
+        assert.equal((await restaurar()).status, 302);
+        smtp.aceptar();
+        smtp.demorar(false);
+        await esperar(async () => (await aviso('HTTP-RESTAURAR')).estado === 'enviado');
+        await restaurar();
+        assert.equal(smtp.mensajes.length, mensajesAntes + 1);
       } finally {
         http.closeAllConnections();
         await new Promise(r => http.close(r));

@@ -1882,7 +1882,9 @@ app.post('/admin/restaurar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async f
   if (!reg.eliminado_en) {
     return res.redirect('/admin?tab=eliminados');
   }
-  await db.restaurarPorRef(req.params.ref);
+  const restaurado = await db.restaurarPorRef(req.params.ref);
+  // La recuperación ya está persistida; no esperar la confirmación SMTP.
+  if (restaurado?.trabajo_hecho) colaAvisos.despertar();
   res.redirect('/admin?tab=eliminados');
 });
 

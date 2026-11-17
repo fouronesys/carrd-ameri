@@ -46,7 +46,7 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
           if (pausaSmtp) await pausaSmtp;
           if (falloSmtp) throw new Error('SMTP simulado no confirma');
         }
-        return { messageId: 'synthetic-message' };
+        return { messageId: 'synthetic-message', accepted: mail.to ? [mail.to] : [], rejected: [] };
       },
     });
     const session = require('express-session');
@@ -138,6 +138,31 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.equal(correos.length, antes, 'Un reintento explícito nunca repite un SMTP ambiguo');
     assert.equal((await (await enviar('SIN-CORREO', randomUUID())).json()).correo, 'sin_destinatario');
     assert.equal(correos.length, antes);
+    // Recuperar un aviso automático de entrega no autoriza a repetir evidencia
+    // manual cuyo SMTP quedó ambiguo, ni altera sus operaciones o adjuntos.
+    const evidenciaAntes = await db.obtenerPorRef('ERROR');
+    const operacionAntes = (await db.pool.query('SELECT * FROM evidencia_operaciones WHERE ref=$1 AND clave=$2',
+      ['ERROR', errorClave])).rows[0];
+    const fotosAntes = cantidad();
+    await db.marcarTrabajoRealizado('ERROR');
+    await db.eliminarPorRef('ERROR');
+    await db.procesarSiguienteAvisoRealizado(() => assert.fail('Un eliminado no debe enviar correo'));
+    assert.equal((await db.pool.query("SELECT estado FROM avisos_realizado WHERE ref='ERROR'")).rows[0].estado, 'cancelado');
+    for (let i = 0; i < 2; i++) {
+      assert.equal((await fetch(base + '/admin/restaurar/ERROR', {
+        method: 'POST', redirect: 'manual', headers: { Cookie: cookie, Origin: base },
+      })).status, 302);
+    }
+    for (let i = 0; i < 200; i++) {
+      if ((await db.pool.query("SELECT estado FROM avisos_realizado WHERE ref='ERROR'")).rows[0].estado === 'enviado') break;
+      await new Promise(r => setTimeout(r, 10));
+    }
+    assert.equal((await db.pool.query("SELECT estado FROM avisos_realizado WHERE ref='ERROR'")).rows[0].estado, 'enviado');
+    assert.deepEqual((await db.pool.query('SELECT * FROM evidencia_operaciones WHERE ref=$1 AND clave=$2',
+      ['ERROR', errorClave])).rows[0], operacionAntes);
+    assert.deepEqual((await db.obtenerPorRef('ERROR')).evidencia_fotos, evidenciaAntes.evidencia_fotos);
+    assert.equal(cantidad(), fotosAntes);
+    assert.equal(correos.length, antes, 'Restaurar solo envía el aviso de entrega, no la evidencia manual');
     const archivosAntes = cantidad();
     assert.equal((await enviar('NO-EXISTE', randomUUID())).status, 404);
     assert.equal((await enviar('PERDIDA', undefined)).status, 400);
