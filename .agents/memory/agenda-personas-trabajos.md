@@ -17,7 +17,9 @@ La búsqueda de agenda selecciona compradores completos. Los filtros explícitos
 
 Los servicios comprados con adelanto incluido (`adelanto: "incluido"`) se buscan también con “adelanto” o “urgencia” y se muestran en una zona prioritaria separada en la agenda.
 
-**Why:** El usuario indicó que los adelantos incluidos en el servicio deben encontrarse al buscarlos y que esos trabajos requieren una zona aparte.
+Además de esa zona debe existir un filtro visible «Con adelanto» para los servicios con urgencia pagada, incluida o vinculada. La zona separada no sustituye al filtro.
+
+**Why:** El usuario indicó que los adelantos incluidos en el servicio deben encontrarse al buscarlos y que esos trabajos requieren una zona aparte. Reiteró que faltaba el filtro que había pedido, aunque ya existiera esa zona.
 
 **How to apply:** No confundirlos con el adelanto vendido como artículo separado (`adelanto: "solo"`); conserva el servicio como un solo trabajo con su marca de urgencia.
 

@@ -328,7 +328,7 @@
           !window.confirm('Actualizar renovará el recorrido y los formularios. Los cambios sin guardar se perderán. ¿Continuar?')) return;
       var destino = new URL(agenda.getAttribute('href'), location.href);
       var campo = document.getElementById('buscador');
-      if (campo && (agenda.hasAttribute('data-filtro') || agenda.closest('[aria-label="Páginas de la agenda"]'))) {
+      if (campo && (agenda.hasAttribute('data-filtro') || agenda.hasAttribute('data-adelanto') || agenda.closest('[aria-label="Páginas de la agenda"]'))) {
         if (campo.value.trim() !== (destino.searchParams.get('buscar') || '')) {
           destino.searchParams.delete('vista');
           destino.searchParams.set('pagina', '1');

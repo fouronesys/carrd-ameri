@@ -17,7 +17,9 @@ const { parseHTML } = require('linkedom');
 
 test('Normaliza filtros y limita tamaño, páginas y búsqueda desde el servidor', () => {
   assert.deepEqual(opcionesAgenda({ pagina: '-5', tamano: 999, estado: 'SQL', buscar: ['a'] }),
-    { pagina: 1, tamano: 15, estado: 'todos', tipo: 'todos', buscar: '' });
+    { pagina: 1, tamano: 15, estado: 'todos', tipo: 'todos', buscar: '', adelanto: 'todos' });
+  assert.equal(opcionesAgenda({ adelanto: ['si'] }).adelanto, 'todos');
+  assert.equal(opcionesAgenda({ adelanto: 'si' }).adelanto, 'si');
   assert.equal(opcionesAgenda({ pagina: 'Infinity' }).pagina, 1);
   assert.equal(opcionesAgenda({ buscar: 'x'.repeat(500) }).buscar.length, 200);
 });
@@ -352,10 +354,22 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       assert.equal(primera.registros.find(r => r.ref === 'CONT-S').adelanto_vinculado_activo, true);
       assert.ok(primera.registros.findIndex(r => r.ref === 'CONT-S') <
         primera.registros.findIndex(r => r.ref === 'CONT-A'), 'El servicio vinculado aparece antes de su recargo');
+      const prioridad = await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado', adelanto: 'si' });
+      assert.deepEqual(prioridad.registros.map(r => r.ref).sort(), ['CONT-I', 'CONT-S']);
+      assert.equal(prioridad.trabajos, 2);
+      assert.equal((await db.listarAgendaPanel({ adelanto: 'si', estado: 'pendiente_verificacion' })).registros.length, 0);
+      assert.deepEqual(await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado', adelanto: 'todos',
+        vista: prioridad.vista, comprobar: true }), { cambios: true, caducada: true });
+      const nuevaPrioridad = await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado', adelanto: 'si',
+        vista: primera.vista, pagina: 2 });
+      assert.equal(nuevaPrioridad.reiniciada, true);
+      assert.equal(nuevaPrioridad.pagina, 1);
       await verificar(2, 3, 9, 0);
       assert.equal(await db.marcarTrabajoRealizado('CONT-A'), null);
       assert.equal((await db.listarRealizados()).length, 0, 'Recargos históricos no reaparecen como entregas');
       await db.marcarTrabajoRealizado('CONT-S');
+      assert.deepEqual((await db.listarAgendaPanel({ tipo: 'trabajo', adelanto: 'si', vista: prioridad.vista })).registros.map(r => r.ref),
+        ['CONT-I'], 'El filtro no conserva una entrega ni su recargo al reutilizar una vista');
       await verificar(2, 2, 8, 1);
       assert.equal((await db.resumenPanel('trabajo')).personas_agendadas, 1, 'C solo conserva una lectura, no otro trabajo');
       await db.marcarTrabajoRealizado('CONT-L');

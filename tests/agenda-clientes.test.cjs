@@ -237,6 +237,36 @@ test('Buscar adelanto incluido encuentra el pedido y separa esos trabajos en la 
   assert.match(d.querySelector('[data-ref="CLIENTE-A-1"]').textContent, /Incluye adelanto/);
 });
 
+test('Con adelanto es un filtro visible que excluye servicios normales, recargos y pagos sin confirmar', async () => {
+  fixture.sembrarAgendaAgrupada();
+  fixture.trabajos.get('CLIENTE-A-1').adelanto = 'incluido';
+  fixture.trabajos.get('CLIENTE-A-3').adelanto = 'incluido';
+  fixture.trabajos.set('RECARGO-FILTRO', {
+    ref: 'RECARGO-FILTRO', cliente_id: 'CLIENTE-A', estado: 'agendado', adelanto: 'solo',
+  });
+  fixture.trabajos.set('LECTURA-URGENTE', {
+    ref: 'LECTURA-URGENTE', cliente_id: 'CLIENTE-A', estado: 'agendado', tipo_servicio: 'lectura',
+    adelanto_origen_ref: 'ORIGEN', adelanto_vinculado_activo: true,
+  });
+  const consultar = async params => parseHTML(await (await fetch(url + '/admin?' + params, { headers: { cookie } })).text()).document;
+  const inicial = await consultar('tipo=todos');
+  assert.equal(inicial.querySelector('[data-adelanto]').textContent, 'Con adelanto');
+  for (const [tipo, refs] of [
+    ['trabajo', ['CLIENTE-A-1']], ['lectura', ['LECTURA-URGENTE']], ['todos', ['CLIENTE-A-1', 'LECTURA-URGENTE']],
+  ]) {
+    const d = await consultar(new URLSearchParams({ tipo, estado: 'agendado', adelanto: 'si' }));
+    assert.deepEqual([...d.querySelectorAll('#cuerpo-tabla tr[data-ref]')].map(r => r.dataset.ref).sort(), refs);
+    assert.equal(d.querySelector('[data-adelanto]').getAttribute('aria-current'), 'true');
+    assert.equal(new URL(d.querySelector('[data-adelanto]').href, url).searchParams.get('adelanto'), 'todos');
+    assert.equal(d.querySelector('input[name=adelanto]').value, 'si');
+    for (const a of d.querySelectorAll('[data-filtro], [data-agenda-renovar], nav[aria-label="Tipo de servicio"] a')) {
+      assert.equal(new URL(a.href, url).searchParams.get('adelanto'), 'si');
+    }
+  }
+  const vacia = await consultar('tipo=todos&adelanto=si&estado=pendiente_verificacion');
+  assert.equal(vacia.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 0);
+});
+
 test('Entregar y devolver un adelanto actualiza zonas sin mover otros servicios a urgentes', async () => {
   fixture.sembrarAgendaAgrupada();
   fixture.trabajos.get('CLIENTE-A-1').adelanto = 'incluido';

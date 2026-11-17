@@ -1,0 +1,45 @@
+/* Mantener legibles las etiquetas completas, sin ensanchar el panel. */
+.wrap .stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(240px, 1.4fr);
+  gap: 10px;
+}
+.wrap .stat { min-width: 0; max-width: 100%; }
+.wrap .stat .n { overflow-wrap: anywhere; line-height: 1.3; }
+.wrap .stat .l { overflow-wrap: anywhere; line-height: 1.5; }
+.wrap .badge,
+.wrap .badge-pedido,
+.wrap .section-count {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+.wrap .badge { max-width: min(100%, 16rem); }
+.wrap .cliente-cabecera { min-width: 0; max-width: 100%; }
+.wrap .cliente-cabecera strong { overflow-wrap: anywhere; }
+.wrap .cliente-totales { flex-wrap: wrap; min-width: 0; gap: 6px 10px; }
+.wrap .acc { max-width: 240px; }
+.wrap .btn-acc,
+.wrap .acc-bloq { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.wrap .acc-bloq { display: inline-block; }
+.wrap .ref { max-width: 260px; overflow-wrap: anywhere; }
+.wrap .prod { overflow-wrap: anywhere; }
+.wrap .tabla-wrap .prod { min-width: 160px; max-width: 260px; }
+.wrap .estado-servicio { min-width: 160px; max-width: 240px; }
+.wrap .tabla-wrap { min-width: 0; max-width: 100%; }
+#agenda-busqueda .buscador { min-width: min(100%, 220px); max-width: 100%; }
+#agenda-busqueda .filtros { flex-basis: 100%; min-width: 0; max-width: 100%; }
+.wrap .filtro { display: inline-flex; align-items: center; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-decoration: none; }
+.wrap .filtro-adelanto { border-color: #a97c54; color: #f0c79a; }
+.wrap .filtro-adelanto.activo { background: #533522; border-color: #f0c79a; color: #ffdfb8; }
+.wrap .filtro:focus-visible { outline: 2px solid #f0a3c3; outline-offset: 3px; }
+@media (max-width: 900px) {
+  .wrap .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wrap .stat-ingresos { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .wrap .stat { padding: 12px; }
+  .wrap .stat .n { font-size: clamp(18px, 4.8vw, 22px); }
+}

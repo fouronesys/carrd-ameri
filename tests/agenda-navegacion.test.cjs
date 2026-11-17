@@ -169,7 +169,8 @@ test('AJAX actualiza personas, trabajos y pestañas con adelantos y estados mixt
     const params = Object.fromEntries(new URL(url, location.href).searchParams);
     const filtros = opcionesAgenda(params);
     const activos = trabajos.filter(estaEnAgenda);
-    const registros = activos.filter(r => filtros.estado === 'todos' || r.estado === filtros.estado);
+    const registros = activos.filter(r => (filtros.estado === 'todos' || r.estado === filtros.estado) &&
+      (filtros.adelanto !== 'si' || require('../lib/agenda-panel').esAdelantoPrioritario(r)));
     const pagados = activos.filter(r => r.estado === 'agendado' && esServicioEntregable(r));
     const realizados = trabajos.filter(r => r.trabajo_hecho && !r.eliminado_en && esServicioEntregable(r));
     return templates.adminDashboard({
@@ -221,6 +222,18 @@ test('AJAX actualiza personas, trabajos y pestañas con adelantos y estados mixt
     await esperar();
   };
   revisar(2, 2, 4, 0);
+  document.querySelector('[data-adelanto]').click();
+  await esperar();
+  assert.equal(new URLSearchParams(location.search).get('adelanto'), 'si');
+  assert.deepEqual([...document.querySelectorAll('#cuerpo-tabla tr[data-ref]')].map(r => r.dataset.ref), ['I']);
+  revisar(2, 2, 4, 0);
+  document.querySelector('[data-filtro=agendado]').click();
+  await esperar();
+  assert.equal(new URLSearchParams(location.search).get('adelanto'), 'si');
+  assert.equal(document.querySelector('input[name=adelanto]').value, 'si');
+  document.querySelector('[data-adelanto]').click();
+  await esperar();
+  assert.equal(new URLSearchParams(location.search).get('adelanto'), 'todos');
   document.querySelector('[data-filtro=agendado]').click();
   await esperar();
   assert.equal(document.querySelector('[data-ref=P]'), null, 'Agendados no mezcla el pendiente del comprador C');
