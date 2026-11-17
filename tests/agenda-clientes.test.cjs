@@ -53,6 +53,9 @@ test('Lecturas y trabajos se separan sin dividir compradores; sus métricas no s
     assert.equal(d.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, filas);
     assert.equal(d.querySelector('input[name=tipo]').value, tipo);
     assert.ok(d.querySelector('[data-filtro=agendado]').href.includes('tipo=' + tipo));
+    assert.equal(d.querySelector('[data-filtro=pendiente_pago]'), null);
+    assert.deepEqual([...d.querySelectorAll('[data-filtro]')].map(el => el.dataset.filtro),
+      ['todos', 'pendiente_verificacion', 'agendado', 'rechazado']);
     if (tipo === 'lectura') {
       assert.match(d.querySelector('#cuerpo-tabla').textContent, /1 lectura/);
       assert.doesNotMatch(d.querySelector('#cuerpo-tabla').textContent, /1 trabajo/);
