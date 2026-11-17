@@ -11,3 +11,4 @@
 - [Formularios de pago antiguos](checkout-version-compatibility.md) — las pestañas abiertas sobreviven a despliegues; un total visible no garantiza una cotización firmada.
 - [Cobros y ajustes administrativos](wompi-ajustes-administrativos.md) — conservar el cobro emitido; nunca reconstruir importes históricos con precios o comisiones actuales.
 - [Autoría de cambios históricos](auditoria-autoria.md) — no inventar autores anteriores; el acceso con contraseña compartida solo identifica la cuenta general.
+- [Plazos de entrega con urgencia](plazos-entrega-urgencia.md) — la urgencia vinculada cuenta desde ambos pagos, nunca desde la reasignación ni ampliando el plazo normal.

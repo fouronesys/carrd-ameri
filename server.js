@@ -10,6 +10,7 @@ const crypto = require('crypto');
 
 const db = require('./lib/db');
 const { crearColaAvisos } = require('./lib/avisos-realizado');
+const { crearProcesadorSeguimientos } = require('./lib/seguimientos');
 const mailer = require('./lib/mailer');
 const notificaciones = require('./lib/notificaciones');
 const templates = require('./lib/templates');
@@ -1742,6 +1743,7 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
       seguimiento_5s_en: '',
       seguimiento_4m_en: '',
       aviso_entrega_en: '',
+      aviso_entrega_claves: [],
     });
   }
 
@@ -2615,82 +2617,8 @@ async function limpiarPendientes() {
   }
 }
 
-/* ---------- Recordatorios de seguimiento (5 semanas y 4 meses) ---------- */
-function sumarSemanas(iso, semanas) {
-  return new Date(iso).getTime() + semanas * 7 * 24 * 60 * 60 * 1000;
-}
-function sumarMeses(iso, meses) {
-  const d = new Date(iso);
-  d.setMonth(d.getMonth() + meses);
-  return d.getTime();
-}
-
-let seguimientoEnCurso = false;
-async function procesarSeguimientos() {
-  if (seguimientoEnCurso) return;
-  seguimientoEnCurso = true;
-  try {
-    const ahora = Date.now();
-    const registros = await db.listarAgendamientos();
-
-    // Avisos de entrega próxima: trabajos agendados (pagados) aún no realizados.
-    // Con adelanto (urgencia) el plazo es de 3 días y se avisa cuando falta 1 día
-    // o menos; sin adelanto el plazo es de 6 semanas y se avisa en la última semana.
-    const DIA = 24 * 60 * 60 * 1000;
-    for (const reg of registros) {
-      if (reg.estado !== 'agendado' || reg.trabajo_hecho || reg.aviso_entrega_en) continue;
-      const desde = reg.pagado_en || reg.creado_en;
-      const base = desde ? new Date(desde).getTime() : 0;
-      if (!base) continue;
-      // Solo 'solo' e 'incluido' son urgencias reales; 'extra' son otros
-      // añadidos (velación, ocultamiento...) sin plazo de 3 días.
-      const conAdelanto = reg.adelanto === 'solo' || reg.adelanto === 'incluido';
-      const limite = base + (conAdelanto ? 3 * DIA : 42 * DIA);
-      const avisarDesde = limite - (conAdelanto ? 1 : 7) * DIA;
-      if (ahora < avisarDesde) continue;
-      const diasRestantes = Math.max(0, Math.ceil((limite - ahora) / DIA));
-      try {
-        const r = await mailer.enviarAvisoEntrega(reg, {
-          conAdelanto: conAdelanto,
-          desde: desde,
-          limite: new Date(limite).toISOString(),
-          diasRestantes: diasRestantes,
-        });
-        if (r.enviado) await db.actualizarPorRef(reg.ref, { aviso_entrega_en: new Date().toISOString() });
-      } catch (e) {
-        console.error('[aviso entrega]', reg.ref, e.message);
-      }
-    }
-
-    for (const reg of registros) {
-      if (!reg.trabajo_hecho || !reg.trabajo_hecho_en) continue;
-      const base = new Date(reg.trabajo_hecho_en).getTime();
-      if (!base) continue;
-
-      if (!reg.seguimiento_5s_en && ahora >= sumarSemanas(reg.trabajo_hecho_en, 5)) {
-        try {
-          const r = await mailer.enviarSeguimiento(reg, '5semanas');
-          if (r.enviado) await db.actualizarPorRef(reg.ref, { seguimiento_5s_en: new Date().toISOString() });
-        } catch (e) {
-          console.error('[seguimiento 5s]', reg.ref, e.message);
-        }
-      }
-
-      if (!reg.seguimiento_4m_en && ahora >= sumarMeses(reg.trabajo_hecho_en, 4)) {
-        try {
-          const r = await mailer.enviarSeguimiento(reg, '4meses');
-          if (r.enviado) await db.actualizarPorRef(reg.ref, { seguimiento_4m_en: new Date().toISOString() });
-        } catch (e) {
-          console.error('[seguimiento 4m]', reg.ref, e.message);
-        }
-      }
-    }
-  } catch (e) {
-    console.error('[seguimiento]', e.message);
-  } finally {
-    seguimientoEnCurso = false;
-  }
-}
+/* ---------- Vencimientos de entrega y seguimientos posteriores ---------- */
+const procesarSeguimientos = crearProcesadorSeguimientos({ db, mailer });
 
 // Referencias que se limpian durante el apagado ordenado (graceful shutdown).
 let servidor = null;
