@@ -10,6 +10,8 @@
   // Solo marcas en el DOM: no copiar notas ni archivos a almacenamiento persistente.
   var revisionBorradores = 0;
   var revisionesFormulario = new WeakMap();
+  // Solo memoria del formulario abierto. Nunca reintentar por conexión, foco o temporizador.
+  var enviosEvidencia = new WeakMap();
   var saliendo = false;
   var urlVisible = location.pathname + location.search;
   function borradores(root) {
@@ -33,6 +35,7 @@
     borradores().forEach(function (form) {
       form.reset();
       form.removeAttribute('data-agenda-editado');
+      enviosEvidencia.delete(form);
     });
   }
   window.addEventListener('beforeunload', function (e) {
@@ -338,6 +341,7 @@
     }
     if (form.method.toLowerCase() !== 'post') return;
     var trabajo = form.matches('.trabajo-form');
+    var evidencia = form.matches('.ev-form');
     var catalogo = !!form.closest('.catalog-panel');
     var usuarios = form.matches('[data-usuarios-form]');
     var panel = form.closest('.admin-sec');
@@ -355,8 +359,16 @@
     form.setAttribute('aria-busy', 'true');
     var revisionEnvio = revisionesFormulario.get(form);
     var guardado = false;
+    var errorEnvio = '';
     try {
-      var datos = new FormData(form);
+      var pendiente = evidencia && enviosEvidencia.get(form);
+      var datos = pendiente ? pendiente.datos : new FormData(form);
+      if (pendiente) revisionEnvio = pendiente.revision;
+      if (evidencia && !pendiente) {
+        // La plantilla aporta una clave también para el POST sin JavaScript.
+        enviosEvidencia.set(form, { datos: datos, revision: revisionEnvio });
+        form.setAttribute('data-agenda-editado', '');
+      }
       if (e.submitter && e.submitter.name) datos.append(e.submitter.name, e.submitter.value);
       if (form.enctype !== 'multipart/form-data') datos = new URLSearchParams(datos);
       var r = await fetch(form.getAttribute('action'), {
@@ -371,8 +383,17 @@
         if (!respuesta.querySelector('.admin-nav')) throw new Error('Tu sesión caducó. Inicia sesión otra vez.');
         d = { ok: true };
       }
-      if (!r.ok || !d.ok) { errorFormulario(form, d.error || 'No se pudo guardar.', d.campos); return; }
+      if (!r.ok || !d.ok) {
+        errorEnvio = d.error || 'No se pudo guardar.';
+        errorFormulario(form, errorEnvio, d.campos); return;
+      }
       guardado = true;
+      if (evidencia) {
+        enviosEvidencia.delete(form);
+        form.querySelector('[name=operacion]').value = window.crypto.randomUUID();
+        var errorAnterior = form.querySelector('.form-error');
+        if (errorAnterior) errorAnterior.remove();
+      }
       // Solo el envío explícito y confirmado limpia este formulario, nunca los demás.
       if (revisionEnvio === revisionesFormulario.get(form)) {
         form.removeAttribute('data-agenda-editado');
@@ -396,10 +417,15 @@
       }
       window.scrollTo(0, y);
     } catch (err) {
-      var mensaje = guardado ? 'El cambio se guardó, pero no se pudo actualizar la vista. Recarga el panel para verlo.' : err.message;
+      errorEnvio = err.message;
+      var mensaje = guardado ? (evidencia && d.mensaje ? d.mensaje + ' ' : '') +
+        'El cambio se guardó, pero no se pudo actualizar la vista. Recarga el panel para verlo.' : err.message;
       if (guardado) mostrarToast(mensaje, 'error'); else errorFormulario(form, mensaje);
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = original; }
+      if (btn) { btn.disabled = false; btn.textContent = evidencia && enviosEvidencia.has(form)
+        ? 'Reintentar envío original' : evidencia ? '✦ Enviar evidencia' : original; }
+      if (evidencia && enviosEvidencia.has(form)) errorFormulario(form,
+        errorEnvio + ' Pulsa «Reintentar envío original» para consultar o completar esa misma operación sin duplicarla. Los cambios posteriores no se enviarán hasta resolverla. No se reintentará automáticamente.');
       form.removeAttribute('aria-busy'); mutando = false;
     }
   });

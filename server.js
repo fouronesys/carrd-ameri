@@ -2302,37 +2302,71 @@ app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
 const subirEvidencia = upload.array('fotos', 10);
 app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
   subirEvidencia(req, res, async function (err) {
-    if (err) {
-      console.error('[evidencia] Error al subir:', err.message);
-      return res.status(400).send('No se pudo subir la evidencia: ' + templates.escaparHtml(err.message));
+    const archivos = req.files || [];
+    function limpiarNuevas() {
+      archivos.forEach(function (f) {
+        try { fs.unlinkSync(path.join(db.UPLOADS_DIR, f.filename)); } catch (_) { /* Ya eliminado por multer. */ }
+      });
     }
+    if (err) {
+      limpiarNuevas();
+      console.error('[evidencia] Error al subir:', err.message);
+      return res.status(400).json({ ok: false, error: 'No se pudo subir la evidencia: ' + err.message });
+    }
+    let guardadoIntentado = false;
     try {
       const ref = req.params.ref;
-      const reg = await db.obtenerPorRef(ref);
-      if (!reg) return res.redirect('/admin');
-      const nuevas = (req.files || []).map(function (f) { return f.filename; });
-      const fotos = (Array.isArray(reg.evidencia_fotos) ? reg.evidencia_fotos : []).concat(nuevas);
+      const clave = req.body && req.body.operacion;
+      if (typeof clave !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clave)) {
+        limpiarNuevas();
+        return res.status(400).json({ ok: false, error: 'Falta una clave de envío válida. Recarga el panel antes de enviar evidencia.' });
+      }
+      const nuevas = archivos.map(function (f) { return f.filename; });
       const notas = ((req.body && req.body.notas) || '').toString().trim().slice(0, 2000);
-      const token = reg.evidencia_token || crypto.randomBytes(16).toString('hex');
-      const actualizado = await db.actualizarPorRef(ref, {
-        evidencia_fotos: fotos,
-        evidencia_notas: notas,
-        evidencia_en: new Date().toISOString(),
-        evidencia_token: token,
-      });
-      const to = await emailDelCliente(actualizado);
-      if (to) {
+      // El nombre temporal cambia en un reintento; la huella usa el contenido.
+      const hashes = await Promise.all(archivos.map(async function (f) {
+        const hash = crypto.createHash('sha256');
+        for await (const chunk of fs.createReadStream(path.join(db.UPLOADS_DIR, f.filename))) hash.update(chunk);
+        return hash.digest('hex');
+      }));
+      const huella = crypto.createHash('sha256').update(JSON.stringify([notas, hashes])).digest('hex');
+      guardadoIntentado = true;
+      const resultado = await db.guardarEvidencia(ref, clave, huella, nuevas, notas);
+      if (!resultado) {
+        limpiarNuevas();
+        return res.status(404).json({ ok: false, error: 'Trabajo no encontrado.' });
+      }
+      if (resultado.repetida) limpiarNuevas();
+      else {
+        let correo = 'no_confirmado';
         try {
-          const rutasNuevas = nuevas.map(function (n) { return path.join(db.UPLOADS_DIR, n); });
-          await mailer.enviarEvidenciaCliente(actualizado, to, rutasNuevas, baseUrlDe(req));
+          const to = await emailDelCliente(resultado.registro);
+          if (to) {
+            const envio = await mailer.enviarEvidenciaCliente(resultado.registro, to,
+              nuevas.map(n => path.join(db.UPLOADS_DIR, n)), baseUrlDe(req));
+            correo = envio && envio.enviado === false ? 'no_confirmado' : 'enviado';
+          } else correo = 'sin_destinatario';
         } catch (e) {
           console.error('[mailer] Falló el envío de la evidencia:', e.message);
         }
+        await db.finalizarCorreoEvidencia(ref, clave, correo);
+        resultado.operacion.correo = correo;
       }
+      const correo = resultado.operacion.correo;
+      const mensaje = correo === 'enviado' ? 'Evidencia guardada y correo enviado.'
+        : correo === 'sin_destinatario' ? 'Evidencia guardada. El cliente no tiene correo; comparte el enlace de evidencia.'
+          : 'Evidencia guardada. El correo está en proceso o no se pudo confirmar. Reintentar esta operación no lo reenviará; verifica su recepción antes de iniciar un envío nuevo.';
+      if (req.get('accept') === 'application/json') return res.json({
+        ok: true, operacion: clave, repetida: resultado.repetida, correo, mensaje,
+      });
       volverPanel(req, res);
     } catch (e) {
+      // Tras un error de conexión el COMMIT puede haber ocurrido: no borrar
+      // archivos que ya podrían pertenecer a la primera operación guardada.
+      if (!guardadoIntentado || e.status === 409) limpiarNuevas();
       console.error('[evidencia]', e);
-      res.status(500).send('No se pudo guardar la evidencia.');
+      res.status(e.status || 500).json({ ok: false, error: e.status ? e.message :
+        'No se pudo confirmar el envío. Reintenta la misma operación, sin iniciar una nueva.' });
     }
   });
 });

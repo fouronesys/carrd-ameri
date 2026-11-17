@@ -53,6 +53,7 @@ function fixture() {
     document, location, URL, URLSearchParams, FormData: Datos, setTimeout, clearTimeout, setInterval() {},
     history: { pushState: cambiarUrl, replaceState: cambiarUrl },
     window: {
+      crypto: require('node:crypto'),
       addEventListener: (tipo, fn) => { eventos[tipo] = fn; }, scrollTo() {},
       confirm: texto => { confirmaciones.push(texto); return estado.aceptar; },
     },
@@ -84,6 +85,7 @@ function fixture() {
   async function submit(selector, cancelado = false) {
     const form = document.querySelector(selector);
     form.method = 'post';
+    form.enctype = form.getAttribute('enctype') || 'application/x-www-form-urlencoded';
     const e = new dom.Event('submit', { bubbles: true, cancelable: true });
     if (cancelado) e.preventDefault();
     form.dispatchEvent(e);
@@ -251,4 +253,38 @@ test('Lo escrito durante un guardado no se da por enviado ni se descarta sin pre
   assert.equal(nota.value, 'Nota escrita después del envío');
   assert.equal(f.salida().prevented, true);
   assert.equal(f.solicitudes.filter(s => s.opciones.method === 'POST').length, 1);
+});
+
+test('Un doble clic envía una sola operación y el reintento explícito conserva su contenido original', async () => {
+  const f = fixture();
+  let terminar;
+  f.estado.pausa = new Promise(r => { terminar = r; });
+  f.estado.fallar = true;
+  f.editar('.ev-form textarea', 'Contenido original');
+  const clave = f.document.querySelector('.ev-form [name=operacion]').value;
+  await f.submit('.ev-form');
+  await f.submit('.ev-form');
+  assert.equal(f.solicitudes.length, 1);
+  terminar();
+  await f.fin();
+  assert.match(f.document.querySelector('.ev-form button').textContent, /Reintentar/);
+  f.editar('.ev-form textarea', 'Cambio posterior');
+  // No hay POST al recuperar conectividad ni al cambiar el formulario.
+  assert.equal(f.solicitudes.length, 1);
+  f.estado.fallar = false;
+  f.estado.pausa = null;
+  await f.submit('.ev-form');
+  const posts = f.solicitudes.filter(s => s.opciones.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0].opciones.body, posts[1].opciones.body);
+  assert.equal(new Map(posts[1].opciones.body).get('operacion'), clave);
+  assert.equal(new Map(posts[1].opciones.body).get('notas'), 'Contenido original');
+  const form = f.document.querySelector('.ev-form');
+  assert.equal(form.querySelector('textarea').value, 'Cambio posterior');
+  assert.notEqual(form.querySelector('[name=operacion]').value, clave);
+  assert.match(form.querySelector('button').textContent, /Enviar evidencia/);
+  await f.submit('.ev-form');
+  const nuevo = f.solicitudes.filter(s => s.opciones.method === 'POST').at(-1);
+  assert.notEqual(new Map(nuevo.opciones.body).get('operacion'), clave);
+  assert.equal(new Map(nuevo.opciones.body).get('notas'), 'Cambio posterior');
 });
