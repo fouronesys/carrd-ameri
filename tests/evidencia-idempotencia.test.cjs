@@ -168,6 +168,71 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.equal(final.evidencia_fotos.length, 2);
     assert.equal(final.precio_cop, 45000);
     assert.equal(final.estado, 'agendado');
+    // La consulta sobrevive a recargas y usa las operaciones, no la última
+    // evidencia del trabajo. Incluye entregados y eliminados temporalmente.
+    await db.actualizarPorRef('ERROR', { eliminado_en: new Date().toISOString() });
+    await db.actualizarPorRef('ESTADO', { trabajo_hecho: true });
+    let pendientes = await db.listarCorreosEvidenciaPendientes();
+    assert.deepEqual(new Set(pendientes.operaciones.map(op => op.ref)), new Set(['ERROR', 'ESTADO']));
+    assert.equal(pendientes.hayMas, false);
+    for (const op of pendientes.operaciones) {
+      assert.deepEqual(Object.keys(op).sort(), ['correo', 'creado_en', 'ref']);
+      assert.ok(op.creado_en instanceof Date);
+    }
+    const { parseHTML } = require('linkedom');
+    const consulta = '/admin?tab=correos_evidencia';
+    const seccion = html => parseHTML(html).document.querySelector('[data-sec="correos_evidencia"]');
+    const archivosConsulta = cantidad();
+    const correosConsulta = correos.length;
+    for (let recarga = 0; recarga < 2; recarga++) {
+      const r = await fetch(base + consulta, { headers: { Cookie: cookie } });
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get('cache-control'), 'no-store');
+      const panel = seccion(await r.text());
+      assert.ok(panel.classList.contains('activo'));
+      assert.match(panel.textContent, /ERROR/);
+      assert.match(panel.textContent, /ESTADO/);
+      assert.match(panel.textContent, /en_proceso/);
+      assert.match(panel.textContent, /no_confirmado/);
+      assert.match(panel.textContent, /verifica la recepción/);
+      assert.equal(panel.querySelectorAll('tbody tr').length, 2);
+      assert.equal(panel.querySelector('form, img, input[type=file]'), null);
+    }
+    for (const headers of [{}, { Cookie: asistente }]) {
+      const r = await fetch(base + consulta, { headers });
+      const html = await r.text();
+      assert.equal(seccion(html), null);
+      assert.equal(html.includes('Correos de evidencia'), false);
+    }
+    assert.equal(correos.length, correosConsulta, 'Consultar y recargar no envía SMTP');
+    assert.equal(cantidad(), archivosConsulta, 'Consultar no vuelve a adjuntar fotos');
+    // Una operación posterior confirmada no oculta una anterior ambigua.
+    const posterior = await db.guardarEvidencia('ERROR', randomUUID(), 'posterior', [], '');
+    await db.finalizarCorreoEvidencia('ERROR', posterior.operacion.clave, 'enviado');
+    assert.equal((await db.listarCorreosEvidenciaPendientes()).operaciones.length, 2);
+    await db.crearAgendamiento({ ref: '<img src=x onerror=alert(1)>', estado: 'agendado' });
+    await db.guardarEvidencia('<img src=x onerror=alert(1)>', randomUUID(), 'xss', [], '');
+    const xss = seccion(await (await fetch(base + consulta, { headers: { Cookie: cookie } })).text());
+    assert.equal(xss.querySelector('img'), null);
+    assert.ok(xss.textContent.includes('<img src=x onerror=alert(1)>'));
+    // Varias operaciones de la misma referencia se conservan por separado.
+    for (let i = 0; i < 26; i++) await db.guardarEvidencia('ESTADO', randomUUID(), 'paginacion-' + i, [], '');
+    const primeraPagina = await db.listarCorreosEvidenciaPendientes();
+    const segundaPagina = await db.listarCorreosEvidenciaPendientes(2);
+    assert.equal(primeraPagina.operaciones.length, 25);
+    assert.equal(primeraPagina.hayMas, true);
+    assert.equal(segundaPagina.operaciones.length, 4);
+    assert.equal(segundaPagina.hayMas, false);
+    for (const invalida of ['basura', '-1', '1.5', 'Infinity']) {
+      assert.equal((await db.listarCorreosEvidenciaPendientes(invalida)).pagina, 1);
+    }
+    const paginaDos = seccion(await (await fetch(base + consulta + '&ev_pagina=2', { headers: { Cookie: cookie } })).text());
+    assert.equal(paginaDos.querySelectorAll('tbody tr').length, 4);
+    assert.match(paginaDos.textContent, /Página 2/);
+    assert.ok(paginaDos.querySelector('a[href$="ev_pagina=1"]'));
+    await db.pool.query('UPDATE evidencia_operaciones SET correo = $1', ['enviado']);
+    const vacia = seccion(await (await fetch(base + consulta, { headers: { Cookie: cookie } })).text());
+    assert.match(vacia.textContent, /No hay operaciones/);
   } finally {
     if (servidor) {
       servidor.closeAllConnections();

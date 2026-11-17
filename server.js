@@ -1585,10 +1585,10 @@ app.get('/admin', async function (req, res) {
   }
   if (req.session && req.session.admin) {
     const esAdmin = req.session.rol === 'admin';
-    const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados'] : ['agenda', 'realizados'];
+    const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados', 'correos_evidencia'] : ['agenda', 'realizados'];
     const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
     const tipo = tipoPanel(req.query.tipo || 'trabajo');
-    const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios, historialCatalogo] = await Promise.all([
+    const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios, historialCatalogo, correosEvidencia] = await Promise.all([
       tab === 'agenda' ? db.listarAgendaPanel({ ...req.query, tipo, sesion: req.sessionID }) : null,
       tab === 'promos' ? db.listarPromos() : [],
       tab === 'promos' ? db.listarCodigosConUsos() : [],
@@ -1600,6 +1600,7 @@ app.get('/admin', async function (req, res) {
       db.resumenPanel(tipo),
       tab === 'usuarios' ? db.listarDestinatariosNotificaciones() : [],
       esAdmin && tab === 'catalogo' ? db.listarHistorialCatalogo(req.query) : null,
+      esAdmin && tab === 'correos_evidencia' ? db.listarCorreosEvidenciaPendientes(req.query.ev_pagina) : null,
     ]);
     res.set('Cache-Control', 'no-store');
     return res.send(templates.adminDashboard({
@@ -1620,6 +1621,7 @@ app.get('/admin', async function (req, res) {
       accesos: accesos,
       catalogo: catalogo.filter(i => i.origen !== 'original'),
       historialCatalogo: historialCatalogo,
+      correosEvidencia,
       resumen: resumen,
       resumenCatalogo: tab === 'catalogo' ? catalogoUtil.resumen(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), catalogo) : {},
       cargaPorPestana: true,
