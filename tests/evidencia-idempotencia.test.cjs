@@ -313,7 +313,8 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     for (let recarga = 0; recarga < 2; recarga++) {
       const historial = seccion(await (await fetch(base + consulta + '&ev_vista=verificadas', { headers: { Cookie: cookie } })).text());
       assert.equal(historial.querySelectorAll('tbody tr').length, 2);
-      assert.equal(historial.querySelector('form'), null);
+      assert.equal(historial.querySelector('form[method="POST"]'), null);
+      assert.equal(historial.querySelector('form[method="GET"]').getAttribute('action'), '/admin');
       assert.match(historial.textContent, /administrador|Administrador/);
       assert.match(historial.textContent, /acceso general compartido/);
       assert.match(historial.textContent, /verificador/);
@@ -335,6 +336,83 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.ok(historialDos.querySelector('a[href$="ev_vista=verificadas&ev_pagina=1"]'));
     assert.equal(historialDos.querySelector('img'), null);
     assert.deepEqual({ correos: correos.length, archivos: cantidad() }, sinEfectos);
+    // Fechas de verificación (no de creación), días completos de Colombia.
+    await db.pool.query(`UPDATE evidencia_operaciones SET recepcion_verificada_en = '2026-11-17T17:00:00Z'
+      WHERE recepcion_verificada_en IS NOT NULL`);
+    await db.pool.query(`UPDATE evidencia_operaciones SET recepcion_verificada_en = '2026-11-17T04:59:59.999Z'
+      WHERE ref=$1 AND clave=$2`, ['ERROR', errorClave]);
+    await db.pool.query(`UPDATE evidencia_operaciones SET recepcion_verificada_en = '2026-11-18T05:00:00Z'
+      WHERE ref=$1 AND clave=$2`, ['ESTADO', estadoClave]);
+    const buscar = filtros => db.listarCorreosEvidenciaPendientes(1, 'verificadas', filtros);
+    assert.deepEqual(new Set((await buscar({ ref: 'eRrOr' })).operaciones.map(op => op.ref)),
+      new Set(['ERROR', '<img src=x onerror=alert(1)>']), 'La referencia se busca por fragmento literal');
+    assert.equal((await buscar({ cuenta: 'admin-verificador' })).operaciones[0].clave, estadoClave,
+      'Busca el ID histórico de una cuenta eliminada');
+    assert.equal((await buscar({ cuenta: 'VERIFICADOR' })).operaciones[0].clave, estadoClave);
+    assert.deepEqual((await buscar({ desde: '2026-11-16', hasta: '2026-11-16' })).operaciones.map(op => op.clave), [errorClave]);
+    assert.deepEqual((await buscar({ desde: '2026-11-18', hasta: '2026-11-18' })).operaciones.map(op => op.clave), [estadoClave]);
+    assert.equal((await buscar({ desde: '2026-11-18' })).operaciones.length, 1);
+    assert.equal((await buscar({ hasta: '2026-11-16' })).operaciones.length, 1);
+    assert.equal((await buscar({ ref: 'ERROR', cuenta: 'verificador' })).operaciones.length, 0);
+    for (const literal of ['%', '_', "' OR 1=1 --"]) {
+      assert.equal((await buscar({ ref: literal })).operaciones.length, 0);
+      assert.equal((await buscar({ cuenta: literal })).operaciones.length, 0);
+    }
+    const historialUrl = consulta + '&ev_vista=verificadas';
+    for (const filtros of [
+      { desde: '2026-02-30' }, { hasta: 'ayer' }, { desde: '2026-13-01' },
+      { hasta: '0000-01-01' }, { desde: '2026-11-18', hasta: '2026-11-17' },
+    ]) {
+      await assert.rejects(buscar(filtros), { status: 400 });
+      const params = new URLSearchParams(Object.entries(filtros).map(([k, v]) => ['ev_' + k, v]));
+      const invalida = await fetch(base + historialUrl + '&' + params, { headers: { Cookie: cookie } });
+      assert.equal(invalida.status, 400);
+      assert.equal(invalida.headers.get('cache-control'), 'no-store');
+    }
+    const filtros = { ref: 'estado', desde: '2026-11-17', hasta: '2026-11-17', cuenta: 'administrador' };
+    assert.equal((await buscar(filtros)).hayMas, true);
+    const filtradaUrl = historialUrl + '&' + new URLSearchParams(
+      Object.entries(filtros).map(([k, v]) => ['ev_' + k, v]));
+    const cargarPanel = async url => seccion(await (await fetch(base + url, { headers: { Cookie: cookie } })).text());
+    const filtrada = await cargarPanel(filtradaUrl + '&ev_pagina=1');
+    assert.equal(filtrada.querySelectorAll('tbody tr').length, 25);
+    const formFiltros = filtrada.querySelector('form[method="GET"]');
+    assert.equal(formFiltros.querySelector('[name=ev_vista]').value, 'verificadas');
+    assert.equal(formFiltros.querySelector('[name=tab]').value, 'correos_evidencia');
+    assert.equal(formFiltros.querySelector('[name=ev_pagina]'), null, 'Aplicar filtros reinicia la página');
+    for (const [campo, valor] of Object.entries(filtros)) {
+      assert.equal(formFiltros.querySelector('[name=ev_' + campo + ']').value, valor);
+    }
+    const enlaces = panel => [...panel.querySelectorAll('a')];
+    const siguiente = enlaces(filtrada).find(a => a.textContent === 'Siguiente').getAttribute('href');
+    const segundaFiltrada = await cargarPanel(siguiente);
+    assert.equal(segundaFiltrada.querySelectorAll('tbody tr').length, 1);
+    const anterior = enlaces(segundaFiltrada).find(a => a.textContent === 'Anterior').getAttribute('href');
+    const actualizar = enlaces(segundaFiltrada).find(a => a.textContent === 'Actualizar consulta').getAttribute('href');
+    for (const [url, pagina] of [[siguiente, '2'], [anterior, '1'], [actualizar, '1']]) {
+      const params = new URL(url, base).searchParams;
+      assert.equal(params.get('ev_pagina'), pagina);
+      for (const [campo, valor] of Object.entries(filtros)) assert.equal(params.get('ev_' + campo), valor);
+    }
+    const limpiar = enlaces(filtrada).find(a => a.textContent === 'Limpiar filtros').getAttribute('href');
+    assert.equal(limpiar, historialUrl);
+    assert.equal((await cargarPanel(limpiar)).querySelectorAll('tbody tr').length, 25);
+    const sinResultados = await cargarPanel(historialUrl + '&ev_ref=NO-EXISTE');
+    assert.match(sinResultados.textContent, /No hay operaciones/);
+    assert.equal(enlaces(sinResultados).some(a => a.textContent === 'Siguiente'), false);
+    const malicioso = '<img src=x onerror=alert(1)>&"';
+    const segura = await cargarPanel(historialUrl + '&' + new URLSearchParams({ ev_ref: malicioso, ev_cuenta: malicioso }));
+    assert.equal(segura.querySelector('img'), null);
+    assert.equal(segura.querySelector('[name=ev_ref]').value, malicioso);
+    const actualizarSeguro = enlaces(segura).find(a => a.textContent === 'Actualizar consulta').getAttribute('href');
+    assert.equal(new URL(actualizarSeguro, base).searchParams.get('ev_cuenta'), malicioso);
+    // Los filtros no dan acceso a asistentes ni visitantes; pendientes no los aplica.
+    for (const headers of [{}, { Cookie: asistente }]) {
+      assert.equal(seccion(await (await fetch(base + filtradaUrl, { headers })).text()), null);
+    }
+    assert.deepEqual((await db.listarCorreosEvidenciaPendientes(1, 'pendientes', filtros)).filtros, {});
+    assert.deepEqual({ correos: correos.length, archivos: cantidad() }, sinEfectos,
+      'Filtrar, paginar, limpiar y rechazar fechas no envía SMTP ni adjunta fotos');
     await db.pool.query('UPDATE evidencia_operaciones SET correo = $1', ['enviado']);
     const vacia = seccion(await (await fetch(base + consulta, { headers: { Cookie: cookie } })).text());
     assert.match(vacia.textContent, /No hay operaciones/);

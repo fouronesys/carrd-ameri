@@ -1615,6 +1615,18 @@ app.get('/admin', async function (req, res) {
     const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados', 'correos_evidencia'] : ['agenda', 'realizados'];
     const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
     const tipo = tipoPanel(req.query.tipo || 'trabajo');
+    let correosFiltrados = null;
+    if (esAdmin && tab === 'correos_evidencia') {
+      res.set('Cache-Control', 'no-store');
+      try {
+        correosFiltrados = await db.listarCorreosEvidenciaPendientes(req.query.ev_pagina, req.query.ev_vista, {
+          ref: req.query.ev_ref, desde: req.query.ev_desde, hasta: req.query.ev_hasta, cuenta: req.query.ev_cuenta,
+        });
+      } catch (e) {
+        if (e.status === 400) return res.status(400).send(e.message);
+        throw e;
+      }
+    }
     const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios, historialCatalogo, correosEvidencia] = await Promise.all([
       tab === 'agenda' ? db.listarAgendaPanel({ ...req.query, tipo, sesion: req.sessionID }) : null,
       tab === 'promos' ? db.listarPromos() : [],
@@ -1627,7 +1639,7 @@ app.get('/admin', async function (req, res) {
       db.resumenPanel(tipo),
       tab === 'usuarios' ? db.listarDestinatariosNotificaciones() : [],
       esAdmin && tab === 'catalogo' ? db.listarHistorialCatalogo(req.query) : null,
-      esAdmin && tab === 'correos_evidencia' ? db.listarCorreosEvidenciaPendientes(req.query.ev_pagina, req.query.ev_vista) : null,
+      correosFiltrados,
     ]);
     res.set('Cache-Control', 'no-store');
     return res.send(templates.adminDashboard({
