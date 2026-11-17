@@ -2341,6 +2341,25 @@ app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
 // registrado) se le envían por correo. Siempre queda un enlace público con token
 // para poder compartirlo también por WhatsApp.
 const subirEvidencia = cargaProtegida(upload.array('fotos', 10));
+app.post('/admin/evidencia/:ref/no-recibida', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  res.set('Cache-Control', 'no-store');
+  const { operacion, gestion, contacto_confirmado } = req.body || {};
+  const uuid = valor => typeof valor === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(valor);
+  if (!uuid(operacion) || !uuid(gestion) || contacto_confirmado !== 'si') {
+    return res.status(400).send('Indica una operación y gestión válidas y confirma que el cliente informó que no recibió esta evidencia.');
+  }
+  try {
+    const resultado = await db.registrarNoRecepcionEvidencia(req.params.ref, operacion, gestion, actorCatalogo(req));
+    if (!resultado) return res.status(404).send('Operación de evidencia no encontrada.');
+    return res.redirect(303, '/admin?tab=correos_evidencia&ok=' + encodeURIComponent(
+      resultado.repetida ? 'Esta gestión ya estaba registrada; se conservó su cuenta y fecha originales.'
+        : 'Gestión registrada: el cliente informó que no recibió la evidencia. Sigue pendiente de revisión. No se reenvió ningún correo ni foto.'));
+  } catch (e) {
+    console.error('[evidencia] No se pudo registrar la gestión:', e.message);
+    return res.status(e.status || 500).send(e.status ? e.message : 'No se pudo guardar la gestión. Consulta la lista antes de volver a intentarlo.');
+  }
+});
+
 app.post('/admin/evidencia/:ref/verificar-recepcion', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   res.set('Cache-Control', 'no-store');
   const clave = req.body?.operacion;

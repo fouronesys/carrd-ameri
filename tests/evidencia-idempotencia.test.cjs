@@ -179,7 +179,8 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.deepEqual(new Set(pendientes.operaciones.map(op => op.ref)), new Set(['ERROR', 'ESTADO']));
     assert.equal(pendientes.hayMas, false);
     for (const op of pendientes.operaciones) {
-      assert.deepEqual(Object.keys(op).sort(), ['clave', 'correo', 'creado_en', 'recepcion_verificada_en', 'recepcion_verificada_por', 'ref']);
+      assert.deepEqual(Object.keys(op).sort(), ['clave', 'correo', 'creado_en', 'gestiones_negativas', 'recepcion_verificada_en', 'recepcion_verificada_por', 'ref']);
+      assert.deepEqual(op.gestiones_negativas, []);
       assert.equal(op.recepcion_verificada_en, null);
       assert.equal(op.recepcion_verificada_por, null);
       assert.ok(op.creado_en instanceof Date);
@@ -202,12 +203,16 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
       assert.match(panel.textContent, /verifica la recepción/);
       assert.equal(panel.querySelectorAll('tbody tr').length, 2);
       assert.equal(panel.querySelector('img, input[type=file]'), null);
-      assert.equal(panel.querySelectorAll('form').length, 2);
+      assert.equal(panel.querySelectorAll('form').length, 4);
       for (const form of panel.querySelectorAll('form')) {
         assert.equal(form.getAttribute('method').toLowerCase(), 'post');
         assert.ok(form.querySelector('input[name=operacion]').value);
         assert.ok(form.querySelector('input[type=checkbox][required]'));
-        assert.match(form.getAttribute('action'), /\/verificar-recepcion$/);
+        assert.match(form.getAttribute('action'), /\/(verificar-recepcion|no-recibida)$/);
+        if (form.getAttribute('action').endsWith('/no-recibida')) {
+          assert.match(form.querySelector('input[name=gestion]').value, /^[0-9a-f-]{36}$/);
+          assert.equal(form.querySelector('input[type=checkbox]').name, 'contacto_confirmado');
+        }
       }
     }
     for (const headers of [{}, { Cookie: asistente }]) {
@@ -243,6 +248,7 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.match(paginaDos.textContent, /Página 2/);
     assert.ok(paginaDos.querySelector('a[href$="ev_pagina=1"]'));
     // Migración de operaciones históricas: no fabricar fecha ni autor.
+    await db.pool.query('DROP TABLE evidencia_gestiones_negativas');
     await db.pool.query(`ALTER TABLE evidencia_operaciones
       DROP COLUMN recepcion_verificada_en, DROP COLUMN recepcion_verificada_por`);
     // init se ejecuta una vez por proceso: cargar otra instancia simula
@@ -258,6 +264,7 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
       require.cache[require.resolve('../lib/db')] = moduloDb;
     }
     assert.equal((await db.listarCorreosEvidenciaPendientes()).operaciones[0].recepcion_verificada_en, null);
+    assert.deepEqual((await db.listarCorreosEvidenciaPendientes()).operaciones[0].gestiones_negativas, []);
     const verificar = (ref, clave, opciones = {}) => fetch(base + '/admin/evidencia/' + encodeURIComponent(ref) + '/verificar-recepcion', {
       method: 'POST', redirect: 'manual',
       headers: { Cookie: cookie, Origin: base, ...opciones.headers },
@@ -266,6 +273,60 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     const snapshot = (await db.pool.query('SELECT * FROM evidencia_operaciones WHERE ref = $1 AND clave = $2', ['ERROR', errorClave])).rows[0];
     const registroAntes = await db.obtenerPorRef('ERROR');
     const sinEfectos = { correos: correos.length, archivos: cantidad() };
+    const noRecibida = (ref, clave, gestion, opciones = {}) => fetch(base + '/admin/evidencia/' + encodeURIComponent(ref) + '/no-recibida', {
+      method: 'POST', redirect: 'manual',
+      headers: { Cookie: cookie, Origin: base, ...opciones.headers },
+      body: new URLSearchParams({ operacion: clave, gestion, contacto_confirmado: 'si', ...opciones.body }),
+    });
+    const gestion = randomUUID();
+    await assert.rejects(db.registrarNoRecepcionEvidencia('ERROR', errorClave, gestion,
+      { rol: 'asistente', usuario: 'asistente' }), { status: 403 });
+    for (const headers of [{ Cookie: '' }, { Cookie: asistente }, { Origin: 'https://otro.example.invalid' }, { Origin: '' }]) {
+      assert.ok([302, 403].includes((await noRecibida('ERROR', errorClave, gestion, { headers })).status));
+    }
+    for (const body of [{ contacto_confirmado: '' }, { operacion: 'invalida' }, { gestion: '' }, { gestion: ['no-uuid'] }]) {
+      assert.equal((await noRecibida('ERROR', errorClave, gestion, { body })).status, 400);
+    }
+    assert.equal((await noRecibida('NO-EXISTE', errorClave, gestion)).status, 404);
+    assert.equal((await noRecibida('ERROR', randomUUID(), gestion)).status, 404);
+    assert.equal((await noRecibida('PERDIDA', clave, gestion)).status, 409);
+    assert.equal((await db.pool.query('SELECT * FROM evidencia_gestiones_negativas')).rowCount, 0);
+    await db.pool.query(`CREATE FUNCTION fallar_gestion() RETURNS trigger LANGUAGE plpgsql AS
+      $$ BEGIN RAISE EXCEPTION 'gestión no guardada'; END $$;
+      CREATE TRIGGER fallar_gestion BEFORE INSERT ON evidencia_gestiones_negativas
+      FOR EACH ROW EXECUTE FUNCTION fallar_gestion()`);
+    assert.equal((await noRecibida('ERROR', errorClave, gestion)).status, 500);
+    assert.equal((await db.pool.query('SELECT * FROM evidencia_gestiones_negativas')).rowCount, 0);
+    await db.pool.query('DROP TRIGGER fallar_gestion ON evidencia_gestiones_negativas');
+    for (const r of await Promise.all([
+      noRecibida('ERROR', errorClave, gestion, { body: { usuario: 'impostor', creado_en: '2000-01-01' } }),
+      noRecibida('ERROR', errorClave, gestion),
+    ])) {
+      assert.equal(r.status, 303);
+      assert.match(r.headers.get('location'), /tab=correos_evidencia&ok=/);
+      assert.equal(r.headers.get('cache-control'), 'no-store');
+    }
+    const gestionGuardada = (await db.pool.query('SELECT * FROM evidencia_gestiones_negativas')).rows[0];
+    assert.equal((await db.pool.query('SELECT * FROM evidencia_gestiones_negativas')).rowCount, 1);
+    assert.ok(gestionGuardada.creado_en >= snapshot.creado_en);
+    assert.deepEqual(gestionGuardada.cuenta, { usuario: 'administrador', usuario_id: null, rol: 'admin' });
+    assert.deepEqual((await db.pool.query('SELECT * FROM evidencia_operaciones WHERE ref=$1 AND clave=$2', ['ERROR', errorClave])).rows[0], snapshot);
+    assert.deepEqual(await db.obtenerPorRef('ERROR'), registroAntes);
+    assert.deepEqual({ correos: correos.length, archivos: cantidad() }, sinEfectos);
+    let opPendiente = (await db.listarCorreosEvidenciaPendientes(2)).operaciones.find(op => op.clave === errorClave);
+    assert.ok(opPendiente);
+    assert.equal(opPendiente.gestiones_negativas.length, 1);
+    // El formulario real genera una nueva clave para un nuevo contacto, no otro envío.
+    let formularioNegativo;
+    for (let recarga = 0; recarga < 2; recarga++) {
+      const panel = seccion(await (await fetch(base + consulta + '&ev_pagina=2', { headers: { Cookie: cookie } })).text());
+      const fila = [...panel.querySelectorAll('tbody tr')].find(tr => tr.textContent.includes(errorClave));
+      assert.match(fila.textContent, /Cliente contactado: no recibió/);
+      assert.match(fila.textContent, /acceso general compartido/);
+      assert.ok(fila.textContent.includes(gestion));
+      assert.ok(fila.querySelector('form[action$="/verificar-recepcion"]'));
+      formularioNegativo = fila.querySelector('form[action$="/no-recibida"]');
+    }
     await assert.rejects(db.verificarRecepcionEvidencia('ERROR', errorClave, { rol: 'asistente', usuario: 'asistente' }), { status: 403 });
     for (const headers of [{ Cookie: '' }, { Cookie: asistente }, { Origin: 'https://otro.example.invalid' }, { Origin: '' }]) {
       assert.ok([302, 403].includes((await verificar('ERROR', errorClave, { headers })).status));
@@ -295,6 +356,22 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     await db.crearUsuarioAdmin({ id: 'admin-verificador', usuario: 'verificador', rol: 'admin',
       salt: 'sal-sintetica', hash: scryptSync('clave-sintetica', 'sal-sintetica', 64).toString('hex') });
     const nominal = await login('clave-sintetica', 'verificador');
+    // Un contacto posterior tiene su propia cuenta/fecha y no borra el primero.
+    const segundaGestion = formularioNegativo.querySelector('input[name=gestion]').value;
+    // ERROR ya fue verificada: la acción de una pestaña antigua debe rechazarse.
+    assert.equal((await noRecibida('ERROR', errorClave, segundaGestion)).status, 409);
+    assert.equal((await noRecibida('ERROR', errorClave, gestion, { headers: { Cookie: nominal } })).status, 303);
+    assert.deepEqual((await db.pool.query('SELECT * FROM evidencia_gestiones_negativas WHERE gestion=$1', [gestion])).rows[0], gestionGuardada);
+    const gestionNominal = randomUUID();
+    assert.equal((await noRecibida('ESTADO', estadoClave, gestionNominal, { headers: { Cookie: nominal },
+      body: { usuario: '<img src=x onerror=alert(1)>', usuario_id: 'impostor', creado_en: '2000-01-01' } })).status, 303);
+    const otraGestion = randomUUID();
+    assert.equal((await noRecibida('ESTADO', estadoClave, otraGestion)).status, 303);
+    opPendiente = (await db.listarCorreosEvidenciaPendientes(2)).operaciones.find(op => op.clave === estadoClave);
+    assert.equal(opPendiente.gestiones_negativas.length, 2);
+    assert.equal(opPendiente.gestiones_negativas[0].gestion, otraGestion);
+    const nominalGuardada = opPendiente.gestiones_negativas.find(g => g.gestion === gestionNominal);
+    assert.deepEqual(nominalGuardada.cuenta, { usuario: 'verificador', usuario_id: 'admin-verificador', rol: 'admin' });
     assert.equal((await verificar('ESTADO', estadoClave, { headers: { Cookie: nominal },
       body: { usuario: 'impostor', usuario_id: 'otro', recepcion_verificada_en: '2000-01-01' } })).status, 303);
     await db.eliminarUsuarioAdmin('admin-verificador');
@@ -309,6 +386,7 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     const lectura = new Pool({ connectionString: `postgresql://test@127.0.0.1:${port}/postgres`, ssl: false });
     try {
       assert.deepEqual((await lectura.query('SELECT * FROM evidencia_operaciones WHERE ref=$1 AND clave=$2', ['ERROR', errorClave])).rows[0], opVerificada);
+      assert.deepEqual((await lectura.query('SELECT * FROM evidencia_gestiones_negativas WHERE gestion=$1', [gestion])).rows[0], gestionGuardada);
     } finally { await lectura.end(); }
     for (let recarga = 0; recarga < 2; recarga++) {
       const historial = seccion(await (await fetch(base + consulta + '&ev_vista=verificadas', { headers: { Cookie: cookie } })).text());
@@ -321,6 +399,11 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
       assert.match(historial.textContent, /admin-verificador/);
       assert.match(historial.textContent, /no_confirmado/);
       assert.ok(historial.textContent.includes(errorClave));
+      assert.ok(historial.textContent.includes(gestion));
+      assert.ok(historial.textContent.includes(gestionNominal));
+      assert.ok(historial.textContent.includes(otraGestion));
+      assert.match(historial.textContent, /Cliente contactado: no recibió/);
+      assert.equal(historial.querySelector('img'), null);
     }
     assert.equal((await db.listarCorreosEvidenciaPendientes(1, 'verificadas')).operaciones.length, 2);
     assert.equal((await db.listarCorreosEvidenciaPendientes()).operaciones.some(op => op.clave === errorClave), false);
@@ -348,6 +431,8 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
       new Set(['ERROR', '<img src=x onerror=alert(1)>']), 'La referencia se busca por fragmento literal');
     assert.equal((await buscar({ cuenta: 'admin-verificador' })).operaciones[0].clave, estadoClave,
       'Busca el ID histórico de una cuenta eliminada');
+    assert.equal((await buscar({ cuenta: 'admin-verificador' })).operaciones[0].gestiones_negativas.length, 2,
+      'Filtrar verificaciones conserva los contactos negativos de esa operación');
     assert.equal((await buscar({ cuenta: 'VERIFICADOR' })).operaciones[0].clave, estadoClave);
     assert.deepEqual((await buscar({ desde: '2026-11-16', hasta: '2026-11-16' })).operaciones.map(op => op.clave), [errorClave]);
     assert.deepEqual((await buscar({ desde: '2026-11-18', hasta: '2026-11-18' })).operaciones.map(op => op.clave), [estadoClave]);
@@ -413,6 +498,31 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.deepEqual((await db.listarCorreosEvidenciaPendientes(1, 'pendientes', filtros)).filtros, {});
     assert.deepEqual({ correos: correos.length, archivos: cantidad() }, sinEfectos,
       'Filtrar, paginar, limpiar y rechazar fechas no envía SMTP ni adjunta fotos');
+    // Dos contactos nuevos de la misma operación se conservan, pero nunca se
+    // añade una negativa después de una confirmación positiva concurrente.
+    const carreraClave = randomUUID();
+    await db.guardarEvidencia('ESTADO', carreraClave, 'carrera', [], '');
+    for (const r of await Promise.all([
+      noRecibida('ESTADO', carreraClave, randomUUID()),
+      noRecibida('ESTADO', carreraClave, randomUUID()),
+    ])) assert.equal(r.status, 303);
+    const negativosAntes = (await db.pool.query(`SELECT * FROM evidencia_gestiones_negativas
+      WHERE ref='ESTADO' AND clave=$1`, [carreraClave])).rows;
+    assert.equal(negativosAntes.length, 2);
+    const [positivaConcurrente, negativaConcurrente] = await Promise.all([
+      verificar('ESTADO', carreraClave), noRecibida('ESTADO', carreraClave, randomUUID()),
+    ]);
+    assert.equal(positivaConcurrente.status, 303);
+    assert.ok([303, 409].includes(negativaConcurrente.status));
+    assert.equal((await noRecibida('ESTADO', carreraClave, randomUUID())).status, 409);
+    const negativosDespues = (await db.pool.query(`SELECT g.*,
+      o.recepcion_verificada_en FROM evidencia_gestiones_negativas g
+      JOIN evidencia_operaciones o USING (ref, clave) WHERE g.ref='ESTADO' AND g.clave=$1`, [carreraClave])).rows;
+    for (const g of negativosDespues) assert.ok(g.creado_en <= g.recepcion_verificada_en);
+    assert.equal(negativosDespues.length, negativaConcurrente.status === 303 ? 3 : 2);
+    // La gestión pertenece a esa operación, no a todas las evidencias del trabajo.
+    assert.equal((await db.listarCorreosEvidenciaPendientes(1, 'verificadas')).operaciones
+      .find(op => op.clave === carreraClave).gestiones_negativas.length, negativosDespues.length);
     await db.pool.query('UPDATE evidencia_operaciones SET correo = $1', ['enviado']);
     const vacia = seccion(await (await fetch(base + consulta, { headers: { Cookie: cookie } })).text());
     assert.match(vacia.textContent, /No hay operaciones/);

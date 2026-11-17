@@ -22,6 +22,16 @@ queda ambiguo, conservar la evidencia y comunicar la incertidumbre; nunca
 interpretar el reintento de esa operación como autorización para reenviarlo.
 Un envío intencional posterior es una operación distinta.
 
+Que el cliente informe que no recibió la evidencia es una gestión de contacto,
+no un resultado de SMTP ni una recepción verificada. Debe conservarse aparte y
+mantener el pendiente visible, sin autorizar un reenvío.
+
+**Why:** El seguimiento manual debe distinguir lo que informó el cliente de lo
+que confirmó el servidor de correo, sin perder la trazabilidad del contacto.
+
+**How to apply:** Conservar estas gestiones incluso si después se verifica la
+recepción; no convertirlas en fallos SMTP ni en instrucciones de envío.
+
 **Why:** El usuario exige reintentos explícitos sin duplicar evidencia ni correos
 y prohíbe reenvíos automáticos en este flujo.
 
