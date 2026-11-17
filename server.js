@@ -23,6 +23,7 @@ const { crearClienteWompi } = require('./lib/wompi');
 const { crearDivisas } = require('./lib/divisas');
 const { crearCotizaciones, datosBooking, huellaCotizacion } = require('./lib/cotizaciones');
 const { tipoServicio, tipoPanel } = require('./lib/tipo-servicio');
+const ingresos = require('./lib/ingresos');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -665,7 +666,7 @@ async function confirmarPagoRef(ref, txId) {
   if (!txId) return { encontrado: true };
 
   const tx = await verificarTransaccionWompi(txId);
-  if (!validarPagoWompi(tx, ref, registro.precio_cop)) return { encontrado: true, discrepancia: true };
+  if (!validarPagoWompi(tx, ref, registro.cobro_original_cop ?? registro.precio_cop)) return { encontrado: true, discrepancia: true };
   if (tx.status === 'APPROVED') {
     const ganadores = await db.actualizarEstadoWompi(ref, {
       estado: 'agendado',
@@ -1031,6 +1032,8 @@ app.post('/api/booking', function (req, res) {
         const refA = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
         const registroA = {
           ...huellaCotizacion(cotizacion),
+          finanzas_compra: ingresos.desdeCotizacion(cotizacion),
+          cobro_original_cop: totalExtra,
           tipo_servicio: 'trabajo',
           catalogo_id: b.catalogo_id || '',
           ref: refA,
@@ -1169,6 +1172,8 @@ app.post('/api/booking', function (req, res) {
       const ref = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
       const registro = {
         ...huellaCotizacion(cotizacion),
+        finanzas_compra: ingresos.desdeCotizacion(cotizacion),
+        cobro_original_cop: totalCop,
         tipo_servicio: cotizacion.items[0].tipo,
         ref: ref,
         producto: itemAutorizado.nombre,
@@ -1400,6 +1405,7 @@ app.post('/api/checkout', function (req, res) {
         const p = preparados[i];
         const registro = {
           ...huellaCotizacion(cotizacion),
+          finanzas_compra: ingresos.desdeCotizacion(cotizacion, i),
           tipo_servicio: p.tipoServicio,
           ref: pedidoRef + '-' + (i + 1),
           pedido_ref: pedidoRef,
@@ -1950,6 +1956,10 @@ app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async func
   if (!reg) return res.status(404).send('Agendamiento no encontrado.');
   const b = req.body || {};
   const cambios = {};
+  // Conservar también el cobro de individuales antiguos antes de editarlos.
+  if (!reg.pedido_ref && reg.metodo === 'wompi' && reg.cobro_original_cop == null) {
+    cambios.cobro_original_cop = reg.precio_cop;
+  }
   if (['trabajo', 'lectura'].includes(b.tipo_servicio)) cambios.tipo_servicio = b.tipo_servicio;
 
   const producto = (b.producto || '').toString().trim();
@@ -1992,7 +2002,7 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
     // No cambiar la referencia de un checkout Wompi ya emitido.
     pedidoRef = reg.metodo === 'wompi' ? reg.ref :
       'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
-    totalCobro = reg.precio_cop;
+    totalCobro = reg.cobro_original_cop ?? reg.precio_cop;
     await db.actualizarPorRef(reg.ref, { pedido_ref: pedidoRef, pedido_total_cop: totalCobro });
   } else {
     // Todos los servicios del pedido deben llevar el mismo cobro, incluido el
@@ -2004,6 +2014,8 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
   const nuevoRef = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
   await db.crearAgendamiento({
     ref: nuevoRef,
+    // Un ajuste administrativo no constituye un nuevo pago.
+    finanzas_compra: ingresos.sinCobro(),
     tipo_servicio: ['trabajo', 'lectura'].includes(b.tipo_servicio) ? b.tipo_servicio : tipoServicio(reg),
     producto: producto.slice(0, 200),
     precio_cop: precio,

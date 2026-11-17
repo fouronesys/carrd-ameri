@@ -177,7 +177,8 @@ test('Adelantos independientes conservan registro y valor sin inflar personas ni
     { ref: 'CONT-A', cliente_id: 'CONT-C', producto: 'Adelanto', adelanto: 'solo' },
     { ref: 'CONT-O', cliente_id: 'CONT-OTRO', producto: 'Solo recargo', adelanto: 'solo' },
     { ref: 'CONT-H', cliente_id: 'CONT-HIST', producto: 'Recargo histórico', adelanto: 'solo', trabajo_hecho: true },
-  ]) fixture.trabajos.set(r.ref, { estado: 'agendado', precio_cop: 10000, ...r });
+  ]) fixture.trabajos.set(r.ref, { estado: 'agendado', precio_cop: 10000,
+    finanzas_compra: { version: 1, servicios_cop: 10000, comision_cop: 0, cobrado_cop: 10000 }, ...r });
   const leer = async () => (await pagina()).window.document;
   const numeros = async (personas, trabajos, total, entregados) => {
     const d = await leer();

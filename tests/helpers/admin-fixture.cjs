@@ -139,8 +139,8 @@ const db = {
       personas_agendadas: require('../../lib/agenda-clientes').agruparClientes(pagados).length,
       verificar: activos.filter(r => r.estado === 'pendiente_verificacion').length,
       realizados: [...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en && esServicioEntregable(r) && (tipo === 'todos' || tipoServicio(r) === tipo)).length,
-      ingresos: [...trabajos.values()].filter(r => r.estado === 'agendado' && (tipo === 'todos' || tipoServicio(r) === tipo))
-        .reduce((s, r) => s + (Number(r.precio_cop) || 0), 0), catalogo: servicios.size,
+      ...require('../../lib/ingresos').resumir([...trabajos.values()].filter(r => tipo === 'todos' || tipoServicio(r) === tipo)),
+      catalogo: servicios.size,
     };
   },
   listarPromos: async () => copia([...promos.values()]),

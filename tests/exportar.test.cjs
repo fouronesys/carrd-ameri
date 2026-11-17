@@ -165,7 +165,7 @@ after(async () => {
   await new Promise(resolve => server.close(resolve));
 });
 
-test('Panel conserva ingresos históricos COP, explica tarifas en agenda, realizados y papelera y escapa metadatos', async () => {
+test('Panel identifica históricos sin desglose, explica tarifas en todas las vistas y escapa metadatos', async () => {
   fixture.trabajos.clear();
   const registros = tarifasSinteticas().concat([
     { ref: 'ENTREGADO', producto: 'Entregado', estado: 'agendado', precio_cop: 12000, trabajo_hecho: true, base_divisa: 'USD', divisa_vista: 'EUR', tasa_usd_cop: 3900 },
@@ -176,8 +176,8 @@ test('Panel conserva ingresos históricos COP, explica tarifas en agenda, realiz
   const antes = structuredClone([...fixture.trabajos.values()]);
   const panel = await (await fetch(url + '/admin?tipo=todos', { headers: { Cookie: cookie } })).text();
   const d = parseHTML(panel).document;
-  const ingresos = registros.filter(r => r.estado === 'agendado').reduce((s, r) => s + r.precio_cop, 0);
-  assert.ok(d.querySelector('.stats').textContent.includes('$' + ingresos.toLocaleString('es-CO')));
+  assert.equal(d.querySelector('#stat-ingresos').textContent, '$0');
+  assert.equal(Number(d.querySelector('#stat-sin-desglose').textContent), registros.filter(r => r.estado === 'agendado').length);
   assert.ok(d.body.textContent.includes('Tarifas COP y USD independientes'));
   for (const r of registros.filter(r => !r.trabajo_hecho && !r.eliminado_en)) {
     assert.ok(d.body.textContent.includes(describirTarifa(r).detalle), r.ref);

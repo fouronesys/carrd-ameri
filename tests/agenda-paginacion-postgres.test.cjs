@@ -327,7 +327,8 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
         { ref: 'CONT-R', cliente_id: 'CONT-C', estado: 'rechazado' },
         { ref: 'CONT-O', cliente_id: 'CONT-OTRO', adelanto: 'solo' },
         { ref: 'CONT-H', cliente_id: 'CONT-HIST', adelanto: 'solo', trabajo_hecho: true },
-      ].map(r => ({ tipo_servicio: 'trabajo', estado: 'agendado', precio_cop: 10000, producto: r.ref, ...r }));
+      ].map(r => ({ tipo_servicio: 'trabajo', estado: 'agendado', precio_cop: 10000, producto: r.ref,
+        finanzas_compra: { version: 1, servicios_cop: 10000, comision_cop: 0, cobrado_cop: 10000 }, ...r }));
       await db.pool.query(`INSERT INTO agendamientos(ref,data)
         SELECT value->>'ref',value FROM jsonb_array_elements($1::jsonb)`, [JSON.stringify(datos)]);
       const verificar = async (personas, trabajos, registros, entregados) => {
