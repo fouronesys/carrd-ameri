@@ -32,3 +32,9 @@ Durante un recorrido paginado se conserva la selección y el orden de compradore
 **Why:** Reordenar en cada consulta puede repetir u omitir compradores; congelar los servicios completos, en cambio, puede mostrar pagos o entregas obsoletos. Los compradores que ya no tienen servicios activos pueden dejar huecos en su página original.
 
 **How to apply:** Mantener los límites del recorrido incluso tras acciones propias, mostrar datos operativos actuales y distinguir los totales iniciales de la vista de los contadores globales actuales. Una vista caducada debe reiniciarse con aviso, no continuar silenciosamente desde otra página.
+
+Las novedades de pagos y prioridad deben avisarse sin renovar automáticamente el recorrido ni cerrar formularios. La renovación es voluntaria.
+
+**Why:** Un urgente confirmado por otro administrador puede quedar fuera del recorrido conservado durante 30 minutos; reordenarlo automáticamente interrumpe la revisión y puede descartar una edición.
+
+**How to apply:** Separar la comprobación de novedades de la navegación. No prolongar la caducidad al comprobar y advertir de cambios sin guardar antes de una renovación voluntaria.

@@ -14,6 +14,7 @@ test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas
     producto: 'Servicio', estado: 'agendado',
   }));
   const solicitudes = [], eventos = {}, mensajes = [];
+  let comprobarAgenda, cambios = false, caducada = false, falloComprobacion = false, confirmar = false;
   const vistas = new Map();
   const location = { pathname: '/admin', search: '?tab=agenda&pagina=2', href: 'http://fixture/admin' };
   function render(url) {
@@ -45,12 +46,17 @@ test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas
   }
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/admin.js'), 'utf8'), {
     document, location, URL, URLSearchParams, FormData: FormDataFixture, setTimeout, clearTimeout,
+    setInterval: (fn, ms) => { assert.equal(ms, 30000); comprobarAgenda = fn; },
     history: { pushState: cambiarUrl, replaceState: cambiarUrl },
-    window: { addEventListener: (tipo, fn) => { eventos[tipo] = fn; }, scrollTo() {} },
+    window: { addEventListener: (tipo, fn) => { eventos[tipo] = fn; }, scrollTo() {}, confirm: () => confirmar },
     DOMParser: class { parseFromString(html) { return parseHTML(html).document; } },
     mostrarToast: mensaje => mensajes.push(mensaje),
     fetch: async (url, opciones) => {
       solicitudes.push(url);
+      if (url.includes('comprobar_agenda=1')) {
+        if (falloComprobacion) throw new Error('sin conexión');
+        return { ok: true, json: async () => ({ cambios, caducada }) };
+      }
       if (opciones.method === 'POST') {
         trabajos = trabajos.filter(r => r.ref !== url.split('/').pop());
         return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ ok: true, realizado: true }) };
@@ -116,4 +122,35 @@ test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas
   const ultimaSolicitud = new URL(solicitudes.at(-1), 'http://fixture');
   assert.equal(ultimaSolicitud.searchParams.get('vista'), null);
   assert.equal(ultimaSolicitud.searchParams.get('pagina'), '1');
+  // Otro administrador confirma un urgente fuera del recorrido actual.
+  const formularioAbierto = document.querySelector('[data-sec=agenda] .edit-row');
+  formularioAbierto.style.display = 'table-row';
+  const campoEdicion = formularioAbierto.querySelector('input[name]');
+  campoEdicion.value = 'Edición todavía sin guardar';
+  const tablaAntes = document.querySelector('#cuerpo-tabla');
+  const urlAntes = location.search;
+  trabajos.unshift({ ref: 'URGENTE-NUEVO', cliente_id: 'C-URGENTE', cliente_nombre: 'Comprador 2 urgente',
+    producto: 'Servicio urgente', estado: 'agendado', adelanto: 'incluido' });
+  cambios = true;
+  await comprobarAgenda();
+  assert.equal(document.getElementById('agenda-cambios').hidden, false);
+  assert.equal(document.querySelector('#cuerpo-tabla'), tablaAntes, 'Comprobar no sustituye la tabla');
+  assert.equal(campoEdicion.value, 'Edición todavía sin guardar');
+  assert.equal(formularioAbierto.style.display, 'table-row');
+  assert.equal(location.search, urlAntes, 'Comprobar no cambia historial ni página');
+  assert.equal(document.querySelector('[data-ref=URGENTE-NUEVO]'), null);
+  await click('#agenda-cambios a');
+  assert.equal(location.search, urlAntes, 'Cancelar renovación protege el formulario');
+  falloComprobacion = true;
+  await comprobarAgenda();
+  assert.equal(document.querySelector('#cuerpo-tabla'), tablaAntes, 'Un fallo de red no toca la edición');
+  falloComprobacion = false;
+  caducada = true;
+  await comprobarAgenda();
+  assert.match(document.getElementById('agenda-cambios').textContent, /recorrido caducó/);
+  confirmar = true;
+  await click('#agenda-cambios a');
+  assert.notEqual(new URLSearchParams(location.search).get('vista'), new URLSearchParams(urlAntes).get('vista'));
+  assert.ok(document.querySelector('[data-ref=URGENTE-NUEVO]'), 'Solo la actualización voluntaria incluye el nuevo urgente');
+  assert.equal(document.getElementById('agenda-cambios').hidden, true);
 });

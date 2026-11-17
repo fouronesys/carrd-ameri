@@ -126,6 +126,25 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
         SELECT value->>'ref',value FROM jsonb_array_elements($1::jsonb)`, [JSON.stringify(datos)]);
       const opciones = { tipo: 'trabajo', sesion: 'sesion-sintetica-a' };
       const primera = await db.listarAgendaPanel(opciones);
+      const comprobar = extra => db.listarAgendaPanel({ ...opciones, vista: primera.vista, comprobar: true, ...extra });
+      assert.deepEqual(await comprobar(), { cambios: false, caducada: false });
+      await db.actualizarPorRef('ESTABLE-0', { evidencia_notas: 'Edición sin efecto en el recorrido' });
+      assert.equal((await comprobar()).cambios, false, 'Editar notas no genera avisos de prioridad');
+      await db.actualizarPorRef('LECTURA-ESTABLE', { estado: 'rechazado' });
+      assert.equal((await comprobar()).cambios, false, 'Una lectura no cambia el aviso de trabajos');
+      await db.actualizarPorRef('LECTURA-ESTABLE', { estado: 'agendado' });
+      const antigua = await db.listarAgendaPanel(opciones);
+      await db.pool.query('UPDATE agenda_vistas SET filtros = $2 WHERE id = $1',
+        [antigua.vista, JSON.stringify(['', 'todos', 'trabajo'])]);
+      const compatible = await db.listarAgendaPanel({ ...opciones, vista: antigua.vista });
+      assert.equal(compatible.vista, antigua.vista, 'Una vista anterior sin firma conserva su recorrido');
+      assert.equal(compatible.cambios, true, 'La vista antigua ofrece actualizar voluntariamente');
+      const vistasAntes = (await db.pool.query('SELECT count(*)::int AS n FROM agenda_vistas')).rows[0].n;
+      for (const extra of [{ sesion: 'otro-admin' }, { buscar: 'otro filtro' }, { vista: 'invalida' }]) {
+        assert.deepEqual(await comprobar(extra), { cambios: true, caducada: true });
+      }
+      assert.equal((await db.pool.query('SELECT count(*)::int AS n FROM agenda_vistas')).rows[0].n, vistasAntes,
+        'Comprobar es de solo lectura: nunca crea ni renueva vistas');
       const base = [];
       for (let pagina = 1; pagina <= primera.paginas; pagina++) {
         const resultado = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina });
@@ -134,6 +153,8 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       assert.equal(new Set(base).size, 39, 'Cuentas, invitados y servicios sin pedido conservan identidad');
       assert.equal(base[0], 'cliente:CUENTA-0');
       await db.actualizarPorRef('ESTABLE-34', { estado: 'agendado', pagado_en: '2026-02-01' });
+      assert.deepEqual(await comprobar(), { cambios: true, caducada: false },
+        'Detecta un urgente confirmado por otro administrador aunque esté fuera de página');
       await db.marcarTrabajoRealizado('ESTABLE-0'); // Pierde urgencia, pero conserva otro servicio activo.
       const desaparece = base[1];
       await db.pool.query(`UPDATE agendamientos SET data = data || '{"trabajo_hecho":true}'
@@ -160,6 +181,7 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       const ultima = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina: 3 });
       assert.equal(ultima.registros.find(r => r.ref === 'ESTABLE-34').estado, 'agendado', 'El estado de pago es actual');
       const fresca = await db.listarAgendaPanel(opciones);
+      assert.equal(fresca.cambios, false, 'Actualizar establece una nueva base sin aviso');
       assert.notEqual(fresca.vista, primera.vista);
       assert.equal(fresca.registros[0].ref, 'NUEVO', 'Actualizar recoge altas y recalcula prioridad');
       for (const cambio of [{ buscar: 'OTRO-PEDIDO' }, { estado: 'pendiente_pago' }, { tipo: 'lectura' }, { sesion: 'otra-sesion' }]) {
@@ -175,6 +197,9 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
         assert.equal((await db.listarAgendaPanel({ ...opciones, vista, pagina: 3 })).pagina, 1);
       }
       await db.pool.query(`UPDATE agenda_vistas SET vence_en = now() - interval '1 second' WHERE id = $1`, [primera.vista]);
+      assert.deepEqual(await comprobar(), { cambios: true, caducada: true });
+      assert.equal((await db.pool.query('SELECT 1 FROM agenda_vistas WHERE id = $1', [primera.vista])).rowCount, 1,
+        'Comprobar no borra ni prolonga la vista caducada');
       const vencida = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina: 3 });
       assert.equal(vencida.pagina, 1);
       assert.equal(vencida.reiniciada, true);

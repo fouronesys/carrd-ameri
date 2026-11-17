@@ -18,7 +18,7 @@ for (const escenario of ['redirect', 'multipart', 'error', 'cancelado']) {
       append(k, v) { this.pares.push([k, v]); }
     }
     vm.runInNewContext(fs.readFileSync(require.resolve('../assets/admin.js'), 'utf8'), {
-      document, URL, URLSearchParams, FormData: Datos, setTimeout, clearTimeout,
+      document, URL, URLSearchParams, FormData: Datos, setTimeout, clearTimeout, setInterval() {},
       location: { href: 'http://fixture/admin?tab=promos', search: '?tab=promos' },
       history: { replaceState() {} },
       window: { scrollY: 470, scrollTo: (x, y) => posiciones.push(y), addEventListener() {} },

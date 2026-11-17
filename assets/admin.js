@@ -7,6 +7,33 @@
   var agendaUrl = agendaInicial ? agendaInicial.dataset.url : '/admin?tab=agenda';
   function seccion(id, root) { return (root || document).querySelector('[data-sec="' + id + '"]'); }
   function activa() { var el = document.querySelector('.admin-sec.activo'); return el ? el.dataset.sec : 'agenda'; }
+  var comprobandoAgenda = false;
+  async function comprobarAgenda() {
+    if (comprobandoAgenda || mutando || document.hidden || activa() !== 'agenda') return;
+    var formulario = document.querySelector('#agenda-busqueda');
+    if (!formulario) return;
+    var urlOriginal = formulario.dataset.url;
+    var destino = new URL(urlOriginal, location.href);
+    if (!destino.searchParams.get('vista')) return;
+    destino.searchParams.set('comprobar_agenda', '1');
+    comprobandoAgenda = true;
+    try {
+      var r = await fetch(destino.pathname + destino.search, { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) return; // No interrumpir una edición por una desconexión o sesión caducada.
+      var datos = await r.json();
+      if (!formulario.isConnected || formulario.dataset.url !== urlOriginal) return;
+      var aviso = document.getElementById('agenda-cambios');
+      if (aviso && datos.cambios) {
+        aviso.hidden = false;
+        if (datos.caducada) aviso.querySelector('[data-agenda-aviso]').textContent =
+          'Este recorrido caducó. Puedes seguir revisando lo abierto y actualizar la agenda cuando termines.';
+      }
+    } catch (_) { /* La siguiente comprobación reintenta sin tocar formularios ni navegación. */ }
+    finally { comprobandoAgenda = false; }
+  }
+  setInterval(comprobarAgenda, 30000);
+  document.addEventListener('visibilitychange', comprobarAgenda);
+  window.addEventListener('focus', comprobarAgenda);
   function urlTab(tab) {
     if (tab === 'agenda') return agendaUrl;
     var params = new URLSearchParams(location.search);
@@ -165,6 +192,10 @@
     var agenda = e.target.closest('[data-agenda-nav]');
     if (agenda) {
       e.preventDefault();
+      if (agenda.hasAttribute('data-agenda-renovar') &&
+          (document.querySelector('[data-sec="agenda"] form[data-agenda-editado]') ||
+            Array.from(document.querySelectorAll('[data-sec="agenda"] .edit-row')).some(function (fila) { return fila.style.display !== 'none'; })) &&
+          !window.confirm('Actualizar renovará el recorrido y los formularios. Los cambios sin guardar se perderán. ¿Continuar?')) return;
       var destino = new URL(agenda.getAttribute('href'), location.href);
       var campo = document.getElementById('buscador');
       if (campo && (agenda.hasAttribute('data-filtro') || agenda.closest('[aria-label="Páginas de la agenda"]'))) {
@@ -181,6 +212,8 @@
     if (tab) { e.preventDefault(); if (!mutando) navegar(tab.dataset.tab, true); return; }
   });
   document.addEventListener('input', function (e) {
+    var edicion = e.target.closest('[data-sec="agenda"] form[method="POST"]');
+    if (edicion) edicion.setAttribute('data-agenda-editado', '');
     if (e.target.matches('#agenda-busqueda [name=buscar]')) {
       clearTimeout(busquedaTimer);
       ++navegacion; // Una respuesta anterior nunca debe sustituir lo recién escrito.
@@ -195,6 +228,8 @@
     if (e.target.matches('.catalog-panel input, .catalog-panel textarea, .catalog-panel select, [data-usuarios-form] input')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
   });
   document.addEventListener('change', function (e) {
+    var edicion = e.target.closest('[data-sec="agenda"] form[method="POST"]');
+    if (edicion) edicion.setAttribute('data-agenda-editado', '');
     if (e.target.matches('.catalog-panel select, [data-usuarios-form] select')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
     if (e.target.matches('#catalogo-filtro')) filtrar();
     if (e.target.matches('.catalog-create [name=tipo]')) sugerir(e.target.form);

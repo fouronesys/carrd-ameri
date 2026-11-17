@@ -1575,6 +1575,13 @@ async function registrarYalertarAcceso(req, info) {
 }
 
 app.get('/admin', async function (req, res) {
+  if (req.query.comprobar_agenda === '1') {
+    res.set('Cache-Control', 'no-store');
+    if (!req.session?.admin) return res.status(401).json({ error: 'Sesión caducada' });
+    return res.json(await db.listarAgendaPanel({
+      ...req.query, tipo: tipoPanel(req.query.tipo || 'trabajo'), sesion: req.sessionID, comprobar: true,
+    }));
+  }
   if (req.session && req.session.admin) {
     const esAdmin = req.session.rol === 'admin';
     const permitidas = esAdmin ? ['agenda', 'realizados', 'catalogo', 'promos', 'usuarios', 'eliminados'] : ['agenda', 'realizados'];

@@ -121,8 +121,13 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
       assert.equal(d.querySelector('input[name=anterior]').value, '');
       assert.match(d.querySelector('select').textContent, /Lectura <segura>/);
       assert.equal(d.querySelectorAll('segura').length, 0);
+      const vistaLector = await db.listarAgendaPanel({ tipo: 'trabajo', sesion: 'otro-administrador' });
+      assert.equal(vistaLector.cambios, false);
       res = await guardar('S1');
       assert.equal(res.status, 302);
+      assert.deepEqual(await db.listarAgendaPanel({
+        tipo: 'trabajo', sesion: 'otro-administrador', vista: vistaLector.vista, comprobar: true,
+      }), { cambios: true, caducada: false }, 'Vincular un adelanto desde otro administrador también activa el aviso');
       assert.equal(await db.obtenerVinculoAdelanto('A'), 'S1');
       let agenda = await db.listarAgendaPanel({ buscar: 'A' });
       assert.equal(agenda.registros.find(r => r.ref === 'S1').adelanto_vinculado_activo, true);
