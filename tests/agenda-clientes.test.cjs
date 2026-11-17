@@ -133,12 +133,13 @@ test('Panel agrupado: conserva cada referencia, estados, edición, evidencia y p
   }
 });
 
-test('Búsqueda y filtros se resuelven en servidor y devuelven el comprador completo', async () => {
+test('Buscar recupera al comprador completo; un filtro de estado solo muestra sus coincidencias', async () => {
   fixture.sembrarAgendaAgrupada();
   for (const [query, refs] of [
     ['buscar=3000000002', ['INVITADO-1', 'INVITADO-2']],
     ['buscar=servicio+segundo', ['CLIENTE-A-1', 'CLIENTE-A-2', 'CLIENTE-A-3']],
-    ['estado=pendiente_verificacion', ['CLIENTE-A-1', 'CLIENTE-A-2', 'CLIENTE-A-3']],
+    ['estado=pendiente_verificacion', ['CLIENTE-A-3']],
+    ['estado=agendado', ['CLIENTE-A-1', 'CLIENTE-A-2', 'INVITADO-1', 'INVITADO-2']],
     ['buscar=no+existe', []],
   ]) {
     const d = parseHTML(await (await fetch(url + '/admin?' + query, { headers: { cookie } })).text()).document;
@@ -147,6 +148,79 @@ test('Búsqueda y filtros se resuelven en servidor y devuelven el comprador comp
     assert.equal(d.querySelector('#stat-agendados').textContent, '4');
     assert.ok(d.querySelector('#agenda-busqueda'));
   }
+});
+
+test('Los filtros no mezclan estados ni tipos de servicios de un comprador', async () => {
+  fixture.sembrarAgendaAgrupada();
+  for (const [ref, estado, tipo_servicio] of [
+    ['MIX-PEND', 'pendiente_pago', 'trabajo'], ['MIX-RECH', 'rechazado', 'trabajo'],
+    ['MIX-LECTURA', 'agendado', 'lectura'], ['MIX-LECTURA-PEND', 'pendiente_pago', 'lectura'],
+  ]) fixture.trabajos.set(ref, { ref, estado, tipo_servicio, cliente_id: 'CLIENTE-A', cliente_nombre: 'Cliente de prueba' });
+  for (const tipo of ['trabajo', 'lectura', 'todos']) {
+    for (const estado of ['agendado', 'pendiente_pago', 'pendiente_verificacion', 'rechazado']) {
+      const params = new URLSearchParams({ tipo, estado, buscar: 'Cliente de prueba' });
+      const d = parseHTML(await (await fetch(url + '/admin?' + params, { headers: { cookie } })).text()).document;
+      for (const fila of d.querySelectorAll('#cuerpo-tabla tr[data-ref]')) {
+        const registro = fixture.trabajos.get(fila.dataset.ref);
+        assert.equal(registro.estado, estado);
+        if (tipo !== 'todos') assert.equal(require('../lib/tipo-servicio').tipoServicio(registro), tipo);
+      }
+      assert.equal(d.querySelector('[data-filtro=pendiente_pago]'), null);
+    }
+  }
+});
+
+test('Adelantos independientes conservan registro y valor sin inflar personas ni trabajos entregables', async () => {
+  fixture.trabajos.clear();
+  for (const r of [
+    { ref: 'CONT-S', cliente_id: 'CONT-C', producto: 'Servicio' },
+    { ref: 'CONT-A', cliente_id: 'CONT-C', producto: 'Adelanto', adelanto: 'solo' },
+    { ref: 'CONT-O', cliente_id: 'CONT-OTRO', producto: 'Solo recargo', adelanto: 'solo' },
+    { ref: 'CONT-H', cliente_id: 'CONT-HIST', producto: 'Recargo histórico', adelanto: 'solo', trabajo_hecho: true },
+  ]) fixture.trabajos.set(r.ref, { estado: 'agendado', precio_cop: 10000, ...r });
+  const leer = async () => (await pagina()).window.document;
+  const numeros = async (personas, trabajos, total, entregados) => {
+    const d = await leer();
+    for (const [id, valor] of [['stat-personas', personas], ['stat-agendados', trabajos], ['stat-total', total]]) {
+      assert.equal(d.getElementById(id).textContent, String(valor));
+    }
+    assert.equal(d.querySelector('[data-tab=agenda] .tab-count').textContent, String(personas));
+    assert.equal(d.querySelector('[data-tab=realizados] .tab-count').textContent, String(entregados));
+    assert.equal(d.querySelector('#stat-ingresos').textContent, '$40.000');
+    for (const ref of ['CONT-A', 'CONT-O', 'CONT-H']) {
+      const fila = d.querySelector('[data-ref="' + ref + '"]');
+      assert.ok(fila, 'El recargo sigue visible, incluso si antes fue marcado realizado');
+      assert.equal(fila.querySelector('.trabajo-form'), null);
+      assert.ok(fila.querySelector('a[href="/admin/adelanto/' + ref + '"]'));
+    }
+    return d;
+  };
+  await numeros(1, 1, 4, 0);
+  const mutar = async (ruta, datos = {}) => fetch(url + ruta, {
+    method: 'POST', redirect: 'manual', headers: { cookie, origin: url, accept: 'application/json' },
+    body: new URLSearchParams(datos),
+  });
+  const imposible = await mutar('/admin/trabajo/CONT-A', { accion: 'marcar' });
+  assert.equal(imposible.status, 400);
+  assert.equal(fixture.trabajos.get('CONT-A').trabajo_hecho, undefined);
+  assert.equal((await mutar('/admin/trabajo/CONT-S', { accion: 'marcar' })).status, 200);
+  await numeros(0, 0, 3, 1);
+  assert.equal((await mutar('/admin/trabajo/CONT-S', { accion: 'desmarcar' })).status, 200);
+  await numeros(1, 1, 4, 0);
+  await mutar('/admin/eliminar/CONT-S');
+  await numeros(0, 0, 3, 0);
+  await mutar('/admin/restaurar/CONT-S');
+  await numeros(1, 1, 4, 0);
+  const historico = (await leer()).querySelector('[data-ref=CONT-H]');
+  assert.ok(historico.querySelector('input[name=accion][value=desmarcar]'));
+  assert.equal(!!historico.querySelector('.badge.trab'), false);
+  assert.equal((await mutar('/admin/trabajo/CONT-H', { accion: 'desmarcar' })).status, 200);
+  await numeros(1, 1, 4, 0);
+  const html = templates.adminDashboard({ registros: [...fixture.trabajos.values()], tipoPanel: 'trabajo' });
+  const respaldo = parseHTML(html).document;
+  assert.equal(respaldo.querySelector('#stat-personas').textContent, '1');
+  assert.equal(respaldo.querySelector('#stat-agendados').textContent, '1');
+  assert.match(respaldo.querySelector('[data-trabajos-grupo="0"]').textContent, /adelanto independiente/);
 });
 
 test('Buscar adelanto incluido encuentra el pedido y separa esos trabajos en la agenda', async () => {

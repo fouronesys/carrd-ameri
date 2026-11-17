@@ -1764,6 +1764,11 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
   const marcarComoHecho = accion === 'marcar';
 
   if (marcarComoHecho) {
+    if (reg.adelanto === 'solo') {
+      const error = 'El adelanto independiente es un recargo, no un trabajo por entregar. Vincúlalo al servicio correspondiente.';
+      return req.get('accept') === 'application/json'
+        ? res.status(400).json({ ok: false, error }) : res.status(400).send(error);
+    }
     // Validar que el trabajo tenga pago confirmado (estado 'agendado')
     if (reg.estado !== 'agendado') {
       if (req.get('accept') === 'application/json') {

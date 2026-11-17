@@ -7,6 +7,8 @@ const vm = require('node:vm');
 const { parseHTML } = require('linkedom');
 const templates = require('../lib/templates');
 const { opcionesAgenda } = require('../lib/agenda-panel');
+const { estaEnAgenda, esServicioEntregable } = require('../lib/agenda-panel');
+const { agruparClientes } = require('../lib/agenda-clientes');
 
 test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas y actualizar renueva la vista', async () => {
   let trabajos = Array.from({ length: 31 }, (_, i) => ({
@@ -153,4 +155,96 @@ test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas
   assert.notEqual(new URLSearchParams(location.search).get('vista'), new URLSearchParams(urlAntes).get('vista'));
   assert.ok(document.querySelector('[data-ref=URGENTE-NUEVO]'), 'Solo la actualización voluntaria incluye el nuevo urgente');
   assert.equal(document.getElementById('agenda-cambios').hidden, true);
+});
+
+test('AJAX actualiza personas, trabajos y pestañas con adelantos y estados mixtos sin recargar', async () => {
+  const trabajos = [
+    { ref: 'S', cliente_id: 'C', estado: 'agendado' },
+    { ref: 'A', cliente_id: 'C', estado: 'agendado', adelanto: 'solo' },
+    { ref: 'P', cliente_id: 'C', estado: 'pendiente_pago' },
+    { ref: 'I', cliente_id: 'I', estado: 'agendado', adelanto: 'incluido' },
+  ].map(r => ({ producto: 'Servicio ' + r.ref, cliente_nombre: 'Cliente ' + r.cliente_id, ...r }));
+  const location = { pathname: '/admin', search: '?tab=agenda&tipo=todos', href: 'http://fixture/admin' };
+  const render = url => {
+    const params = Object.fromEntries(new URL(url, location.href).searchParams);
+    const filtros = opcionesAgenda(params);
+    const activos = trabajos.filter(estaEnAgenda);
+    const registros = activos.filter(r => filtros.estado === 'todos' || r.estado === filtros.estado);
+    const pagados = activos.filter(r => r.estado === 'agendado' && esServicioEntregable(r));
+    const realizados = trabajos.filter(r => r.trabajo_hecho && !r.eliminado_en && esServicioEntregable(r));
+    return templates.adminDashboard({
+      tipoPanel: 'todos', tabActiva: params.tab || 'agenda', cargaPorPestana: true,
+      registros, realizados, eliminados: trabajos.filter(r => r.eliminado_en),
+      agenda: { ...filtros, pagina: 1, paginas: 1, personas: agruparClientes(registros).length, trabajos: registros.length },
+      resumen: { total: activos.length, agendados: pagados.length, personas_agendadas: agruparClientes(pagados).length,
+        realizados: realizados.length, verificar: 0 },
+    });
+  };
+  const { document, window: domWindow } = parseHTML(render('/admin' + location.search));
+  class FormDataFixture {
+    constructor(form) { this.pares = [...form.querySelectorAll('input[name]')].map(el => [el.name, el.value]); }
+    [Symbol.iterator]() { return this.pares[Symbol.iterator](); }
+  }
+  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/admin.js'), 'utf8'), {
+    document, location, URL, URLSearchParams, AbortController, FormData: FormDataFixture, setTimeout, clearTimeout,
+    setInterval() {},
+    history: { replaceState: (_, __, u) => { location.search = new URL(u, location.href).search; },
+      pushState: (_, __, u) => { location.search = new URL(u, location.href).search; } },
+    window: { addEventListener() {}, scrollTo() {}, confirm: () => true },
+    mostrarToast() {},
+    DOMParser: class { parseFromString(html) { return parseHTML(html).document; } },
+    fetch: async (url, opts) => {
+      if (opts.method === 'POST') {
+        const ref = url.split('/').pop(), r = trabajos.find(r => r.ref === ref);
+        const accion = new URLSearchParams(opts.body).get('accion');
+        const entregado = accion === 'marcar';
+        if (url.includes('/trabajo/')) r.trabajo_hecho = entregado;
+        else if (url.includes('/eliminar/')) r.eliminado_en = '2026-11-17';
+        else if (url.includes('/restaurar/')) r.eliminado_en = null;
+        return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ ok: true, realizado: entregado }) };
+      }
+      return { ok: true, text: async () => render(url) };
+    },
+  });
+  const esperar = async () => { for (let i = 0; i < 12; i++) await new Promise(r => setImmediate(r)); };
+  const revisar = (personas, cantidad, total, entregados) => {
+    for (const [selector, valor] of [
+      ['#stat-personas', personas], ['#stat-agendados', cantidad], ['#stat-total', total],
+      ['[data-tab=agenda] .tab-count', personas], ['[data-tab=realizados] .tab-count', entregados],
+    ]) assert.equal(document.querySelector(selector).textContent, String(valor), selector);
+  };
+  const enviar = async (accion, ref) => {
+    const form = document.querySelector('form[action="/admin/' + accion + '/' + ref + '"]');
+    assert.ok(form, accion + '/' + ref);
+    form.method = 'post';
+    form.dispatchEvent(new domWindow.Event('submit', { bubbles: true, cancelable: true }));
+    await esperar();
+  };
+  revisar(2, 2, 4, 0);
+  document.querySelector('[data-filtro=agendado]').click();
+  await esperar();
+  assert.equal(document.querySelector('[data-ref=P]'), null, 'Agendados no mezcla el pendiente del comprador C');
+  assert.ok(document.querySelector('[data-ref=A]'), 'El recargo confirmado mantiene su zona');
+  assert.equal(document.querySelector('[data-ref=A] .trabajo-form'), null);
+  await enviar('trabajo', 'S');
+  revisar(1, 1, 3, 1);
+  assert.ok(document.querySelector('[data-ref=A]'));
+  await enviar('trabajo', 'I');
+  revisar(0, 0, 2, 2);
+  document.querySelector('[data-tab=realizados]').click();
+  await esperar();
+  await enviar('trabajo', 'I'); // Su formulario ahora solicita desmarcar.
+  revisar(1, 1, 3, 1);
+  document.querySelector('[data-tab=agenda]').click();
+  await esperar();
+  await enviar('eliminar', 'I');
+  revisar(0, 0, 2, 1);
+  document.querySelector('[data-tab=eliminados]').click();
+  await esperar();
+  await enviar('restaurar', 'I');
+  revisar(1, 1, 3, 1);
+  document.querySelector('[data-tab=agenda]').click();
+  await esperar();
+  assert.ok(document.querySelector('[data-ref=I]'));
+  assert.equal(document.querySelector('[data-ref=P]'), null);
 });

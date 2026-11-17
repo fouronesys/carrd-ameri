@@ -28,6 +28,7 @@ const trabajos = new Map([
 const llamadas = {};
 const copia = x => JSON.parse(JSON.stringify(x));
 const tipoServicio = r => require('../../lib/tipo-servicio').tipoServicio(r, [...servicios.values()]);
+const { esServicioEntregable, estaEnAgenda } = require('../../lib/agenda-panel');
 function sembrarAgendaAgrupada() {
   trabajos.clear();
   const datos = [
@@ -98,10 +99,10 @@ const db = {
   listarAgendaPanel: async query => {
     const filtros = require('../../lib/agenda-panel').opcionesAgenda(query);
     const grupos = require('../../lib/agenda-clientes').agruparClientes(
-      [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en && (filtros.tipo === 'todos' || tipoServicio(r) === filtros.tipo))
+       [...trabajos.values()].filter(r => estaEnAgenda(r) && (filtros.tipo === 'todos' || tipoServicio(r) === filtros.tipo) &&
+         (filtros.estado === 'todos' || r.estado === filtros.estado))
         .map(r => ({ ...r, tipo_servicio: tipoServicio(r) }))
-    ).filter(g => (filtros.estado === 'todos' || g.registros.some(r => r.estado === filtros.estado)) &&
-      (!filtros.buscar || g.registros.some(r => [r.ref, r.pedido_ref, r.cliente_nombre, r.contacto, r.producto, r.objetivo_nombre, r.cliente_email]
+     ).filter(g => (!filtros.buscar || g.registros.some(r => [r.ref, r.pedido_ref, r.cliente_nombre, r.contacto, r.producto, r.objetivo_nombre, r.cliente_email]
         .join(' ').toLowerCase().includes(filtros.buscar.toLowerCase())) ||
         (['adelanto', 'adelantos', 'urgencia', 'urgente'].includes(filtros.buscar.toLowerCase()) &&
           g.registros.some(r => ['incluido', 'solo'].includes(r.adelanto)))))
@@ -113,7 +114,7 @@ const db = {
       trabajos: grupos.reduce((n, g) => n + g.registros.length, 0),
       registros: copia(grupos.slice((pagina - 1) * filtros.tamano, pagina * filtros.tamano).flatMap(g => g.registros)) };
   },
-  listarRealizados: async (tipo = 'todos') => copia([...trabajos.values()].filter(r => r.trabajo_hecho && (tipo === 'todos' || tipoServicio(r) === tipo))),
+  listarRealizados: async (tipo = 'todos') => copia([...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en && esServicioEntregable(r) && (tipo === 'todos' || tipoServicio(r) === tipo))),
   crearAgendamiento: async r => { trabajos.set(r.ref, copia(r)); return copia(r); },
   obtenerPorPedido: async ref => copia([...trabajos.values()].filter(r => r.pedido_ref === ref)),
   crearAgendamiento: async registro => { trabajos.set(registro.ref, copia(registro)); },
@@ -123,19 +124,20 @@ const db = {
   restaurarPorRef: async ref => { Object.assign(trabajos.get(ref), { eliminado_en: '' }); },
   eliminarDefinitivamentePorRef: async ref => trabajos.delete(ref),
   marcarTrabajoRealizado: async ref => {
+    if (!esServicioEntregable(trabajos.get(ref))) return null;
     Object.assign(trabajos.get(ref), { trabajo_hecho: true, trabajo_hecho_en: new Date().toISOString() });
     return copia(trabajos.get(ref));
   },
   procesarSiguienteAvisoRealizado: async () => false,
   obtenerClientePorId: async () => ({ email: 'cliente@example.invalid' }),
   resumenPanel: async (tipo = 'todos') => {
-    const activos = [...trabajos.values()].filter(r => !r.trabajo_hecho && !r.eliminado_en && (tipo === 'todos' || tipoServicio(r) === tipo));
-    const pagados = activos.filter(r => r.estado === 'agendado');
+    const activos = [...trabajos.values()].filter(r => estaEnAgenda(r) && (tipo === 'todos' || tipoServicio(r) === tipo));
+    const pagados = activos.filter(r => r.estado === 'agendado' && esServicioEntregable(r));
     return {
       total: activos.length, agendados: pagados.length,
       personas_agendadas: require('../../lib/agenda-clientes').agruparClientes(pagados).length,
       verificar: activos.filter(r => r.estado === 'pendiente_verificacion').length,
-      realizados: [...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en && (tipo === 'todos' || tipoServicio(r) === tipo)).length,
+      realizados: [...trabajos.values()].filter(r => r.trabajo_hecho && !r.eliminado_en && esServicioEntregable(r) && (tipo === 'todos' || tipoServicio(r) === tipo)).length,
       ingresos: [...trabajos.values()].filter(r => r.estado === 'agendado' && (tipo === 'todos' || tipoServicio(r) === tipo))
         .reduce((s, r) => s + (Number(r.precio_cop) || 0), 0), catalogo: servicios.size,
     };

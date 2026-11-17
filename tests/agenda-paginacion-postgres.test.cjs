@@ -137,8 +137,9 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       await db.pool.query('UPDATE agenda_vistas SET filtros = $2 WHERE id = $1',
         [antigua.vista, JSON.stringify(['', 'todos', 'trabajo'])]);
       const compatible = await db.listarAgendaPanel({ ...opciones, vista: antigua.vista });
-      assert.equal(compatible.vista, antigua.vista, 'Una vista anterior sin firma conserva su recorrido');
-      assert.equal(compatible.cambios, true, 'La vista antigua ofrece actualizar voluntariamente');
+      assert.notEqual(compatible.vista, antigua.vista, 'Una vista del contrato anterior se reinicia');
+      assert.equal(compatible.reiniciada, true, 'El reinicio se comunica en pantalla');
+      assert.equal(compatible.pagina, 1);
       const vistasAntes = (await db.pool.query('SELECT count(*)::int AS n FROM agenda_vistas')).rows[0].n;
       for (const extra of [{ sesion: 'otro-admin' }, { buscar: 'otro filtro' }, { vista: 'invalida' }]) {
         assert.deepEqual(await comprobar(extra), { cambios: true, caducada: true });
@@ -217,7 +218,10 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
     assert.match(htmlUrgentes, /Incluye adelanto · sin pago confirmado/);
     assert.equal((await db.listarAgendaPanel({ estado: 'agendado' })).personas, 30);
     const mixto = await db.listarAgendaPanel({ buscar: 'R-0-2', estado: 'agendado' });
-    assert.equal(mixto.registros.length, 3, 'Filtro selecciona comprador sin recortar sus servicios');
+    assert.equal(mixto.registros.length, 0, 'Buscar una referencia pendiente no la incorpora a Agendados');
+    const confirmado = await db.listarAgendaPanel({ buscar: 'R-0-1', estado: 'agendado' });
+    assert.equal(confirmado.registros.length, 2);
+    assert.ok(confirmado.registros.every(r => r.estado === 'agendado'));
     for (const buscar of ['no existe', '%', "_'; DROP TABLE clientes; --"]) {
       const vacio = await db.listarAgendaPanel({ buscar, pagina: 999 });
       assert.equal(vacio.pagina, 1); assert.equal(vacio.personas, 0); assert.deepEqual(vacio.registros, []);
@@ -294,7 +298,8 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       for (const estado of ['rechazado', 'pendiente_pago', 'pendiente_verificacion']) {
         const filtrada = await db.listarAgendaPanel({ buscar: 'urgencia', estado });
         assert.equal(filtrada.personas, 1);
-        assert.equal(filtrada.registros.length, estado === 'pendiente_verificacion' ? 4 : 2);
+        assert.equal(filtrada.registros.length, 1);
+        assert.ok(filtrada.registros.every(r => r.estado === estado));
       }
       await db.marcarTrabajoRealizado('URGENTE');
       const entregada = await db.listarAgendaPanel();
@@ -307,6 +312,72 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       assert.ok(!(await db.listarAgendaPanel()).registros.some(r => r.ref === 'URGENTE'));
       await db.restaurarPorRef('URGENTE');
       assert.ok((await db.listarAgendaPanel()).registros.some(r => r.ref === 'URGENTE'));
+    });
+    await t.test('Recargos no son entregables; estados, tipos y transiciones mantienen los contadores', async () => {
+      await db.pool.query('DELETE FROM agendamientos');
+      const datos = [
+        { ref: 'CONT-S', cliente_id: 'CONT-C' },
+        { ref: 'CONT-A', cliente_id: 'CONT-C', adelanto: 'solo' },
+        { ref: 'CONT-I', cliente_id: 'CONT-I', adelanto: 'incluido' },
+        { ref: 'CONT-L', cliente_id: 'CONT-C', tipo_servicio: 'lectura' },
+        { ref: 'CONT-P', cliente_id: 'CONT-C', estado: 'pendiente_pago' },
+        { ref: 'CONT-V', cliente_id: 'CONT-C', estado: 'pendiente_verificacion' },
+        { ref: 'CONT-R', cliente_id: 'CONT-C', estado: 'rechazado' },
+        { ref: 'CONT-O', cliente_id: 'CONT-OTRO', adelanto: 'solo' },
+        { ref: 'CONT-H', cliente_id: 'CONT-HIST', adelanto: 'solo', trabajo_hecho: true },
+      ].map(r => ({ tipo_servicio: 'trabajo', estado: 'agendado', precio_cop: 10000, producto: r.ref, ...r }));
+      await db.pool.query(`INSERT INTO agendamientos(ref,data)
+        SELECT value->>'ref',value FROM jsonb_array_elements($1::jsonb)`, [JSON.stringify(datos)]);
+      const verificar = async (personas, trabajos, registros, entregados) => {
+        const resumen = await db.resumenPanel();
+        assert.equal(resumen.personas_agendadas, personas);
+        assert.equal(resumen.agendados, trabajos);
+        assert.equal(resumen.total, registros);
+        assert.equal(resumen.realizados, entregados);
+        assert.equal(resumen.verificar, 1);
+        assert.equal(Number(resumen.ingresos), 60000, 'Se preservan ingresos de todos los registros pagados');
+      };
+      await verificar(2, 3, 9, 0);
+      for (const [tipo, personas, trabajos] of [['trabajo', 2, 2], ['lectura', 1, 1], ['todos', 2, 3]]) {
+        const resumen = await db.resumenPanel(tipo);
+        assert.equal(resumen.personas_agendadas, personas);
+        assert.equal(resumen.agendados, trabajos);
+        for (const estado of ['agendado', 'pendiente_pago', 'pendiente_verificacion', 'rechazado']) {
+          const vista = await db.listarAgendaPanel({ tipo, estado });
+          assert.ok(vista.registros.every(r => r.estado === estado && (tipo === 'todos' || r.tipo_servicio === tipo)));
+        }
+      }
+      await db.vincularAdelanto('CONT-A', 'CONT-S', '', { usuario: 'admin-prueba', usuario_id: 'admin-prueba', rol: 'admin' });
+      const primera = await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado' });
+      assert.equal(primera.registros.find(r => r.ref === 'CONT-S').adelanto_vinculado_activo, true);
+      assert.ok(primera.registros.findIndex(r => r.ref === 'CONT-S') <
+        primera.registros.findIndex(r => r.ref === 'CONT-A'), 'El servicio vinculado aparece antes de su recargo');
+      await verificar(2, 3, 9, 0);
+      assert.equal(await db.marcarTrabajoRealizado('CONT-A'), null);
+      assert.equal((await db.listarRealizados()).length, 0, 'Recargos históricos no reaparecen como entregas');
+      await db.marcarTrabajoRealizado('CONT-S');
+      await verificar(2, 2, 8, 1);
+      assert.equal((await db.resumenPanel('trabajo')).personas_agendadas, 1, 'C solo conserva una lectura, no otro trabajo');
+      await db.marcarTrabajoRealizado('CONT-L');
+      await verificar(1, 1, 7, 2);
+      const estable = await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado', vista: primera.vista });
+      assert.equal(estable.vista, primera.vista);
+      assert.ok(estable.registros.some(r => r.ref === 'CONT-A'), 'El recargo vinculado sigue gestionable tras entregar');
+      assert.ok(estable.registros.some(r => r.ref === 'CONT-H'), 'No se oculta un recargo histórico');
+      assert.ok(estable.registros.every(r => r.estado === 'agendado'));
+      await db.actualizarPorRef('CONT-S', { trabajo_hecho: false, trabajo_hecho_en: '' });
+      await verificar(2, 2, 8, 1);
+      await db.eliminarPorRef('CONT-S');
+      await verificar(1, 1, 7, 1);
+      await db.restaurarPorRef('CONT-S');
+      await verificar(2, 2, 8, 1);
+      await db.actualizarPorRef('CONT-P', { estado: 'agendado' });
+      assert.equal((await db.resumenPanel()).agendados, 3, 'Confirmar suma un trabajo, no otra persona');
+      assert.equal((await db.resumenPanel()).personas_agendadas, 2);
+      await db.actualizarPorRef('CONT-P', { estado: 'rechazado' });
+      const filtrada = await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado', vista: primera.vista });
+      assert.ok(!filtrada.registros.some(r => ['CONT-P', 'CONT-V', 'CONT-R'].includes(r.ref)));
+      assert.equal(filtrada.vista, primera.vista, 'Cambiar pagos no reordena el recorrido');
     });
     // 12.000 trabajos en 4.000 compradores, con campos pesados de evidencia.
     await db.pool.query('DELETE FROM agendamientos');

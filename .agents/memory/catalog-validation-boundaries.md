@@ -14,3 +14,9 @@ Use isolated in-memory fixtures or disposable local PostgreSQL for tests that cr
 **Why:** Development can point at the same external PostgreSQL used by CapRover, and the configured SMTP credentials can send real customer messages. A preview is not proof of data isolation.
 
 **How to apply:** Do not mark real customer work as delivered or send test messages through configured SMTP. Validate mutating browser flows against a deliberately isolated test entrypoint.
+
+Limit concurrent test files when validating several disposable PostgreSQL clusters in the shared workspace.
+
+**Why:** Unbounded parallel cluster startup and database benchmarks can exceed individual timeouts even when the same complete suite passes with bounded concurrency.
+
+**How to apply:** Use `node --test --test-concurrency=2 tests/*.test.cjs` when the default parallel run shows resource-related timeouts. Investigate assertion failures separately; a timeout is not proof that the application logic is correct.
