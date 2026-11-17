@@ -50,6 +50,7 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
           contacto: j === 0 ? `contacto-${n}` : 'otro',
           producto: `Servicio ${j}`, creado_en: '2026-01-01T00:00:00Z',
           pagado_en: `2026-01-${String(n % 28 + 1).padStart(2, '0')}T00:00:00Z`,
+          ...(n === 46 && j === 1 ? { adelanto: 'incluido' } : {}),
           estado: n < 30 ? (j === 2 ? 'pendiente_pago' : 'agendado') : n < 40 ? 'pendiente_verificacion' : 'rechazado',
         });
       }
@@ -94,6 +95,14 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       assert.deepEqual(resultado.registros.map(r => r.ref).sort(), ['R-46-0', 'R-46-1', 'R-46-2']);
       assert.equal(resultado.personas, 1);
     }
+    const urgentes = await db.listarAgendaPanel({ buscar: 'adelanto' });
+    assert.deepEqual(urgentes.registros.map(r => r.ref).sort(), ['R-46-0', 'R-46-1', 'R-46-2'],
+      'Buscar adelanto incluido devuelve todos los servicios del comprador');
+    const htmlUrgentes = templates.adminDashboard({
+      registros: urgentes.registros, agenda: urgentes, resumen,
+      tipoPanel: 'trabajo', cargaPorPestana: true,
+    });
+    assert.match(htmlUrgentes, /Trabajos con adelanto incluido/);
     assert.equal((await db.listarAgendaPanel({ estado: 'agendado' })).personas, 30);
     const mixto = await db.listarAgendaPanel({ buscar: 'R-0-2', estado: 'agendado' });
     assert.equal(mixto.registros.length, 3, 'Filtro selecciona comprador sin recortar sus servicios');

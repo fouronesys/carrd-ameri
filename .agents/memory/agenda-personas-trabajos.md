@@ -14,3 +14,9 @@ La búsqueda y los filtros de agenda seleccionan compradores completos, no subco
 **Why:** No dividir un comprador entre páginas tiene prioridad sobre imponer un máximo estricto de filas. Buscar un pedido o contacto debe recuperar todos sus servicios, incluso de otros pedidos de la misma cuenta.
 
 **How to apply:** Mantener juntos los trabajos activos del comprador encontrado y explicar en pantalla que los filtros seleccionan grupos completos; los totales globales no se reducen al paginar o buscar.
+
+Los servicios comprados con adelanto incluido (`adelanto: "incluido"`) se buscan también con “adelanto” o “urgencia” y se muestran en una zona prioritaria separada en la agenda.
+
+**Why:** El usuario indicó que los adelantos incluidos en el servicio deben encontrarse al buscarlos y que esos trabajos requieren una zona aparte.
+
+**How to apply:** No confundirlos con el adelanto vendido como artículo separado (`adelanto: "solo"`); conserva el servicio como un solo trabajo con su marca de urgencia.

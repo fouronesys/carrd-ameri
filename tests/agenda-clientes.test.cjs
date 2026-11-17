@@ -146,6 +146,20 @@ test('Búsqueda y filtros se resuelven en servidor y devuelven el comprador comp
   }
 });
 
+test('Buscar adelanto incluido encuentra el pedido y separa esos trabajos en la agenda', async () => {
+  fixture.sembrarAgendaAgrupada();
+  fixture.trabajos.get('CLIENTE-A-1').adelanto = 'incluido';
+  const html = await (await fetch(url + '/admin?buscar=adelanto', { headers: { cookie } })).text();
+  const d = parseHTML(html).document;
+  const filas = [...d.querySelectorAll('#cuerpo-tabla tr[data-ref]')];
+  assert.deepEqual(filas.map(r => r.dataset.ref), ['CLIENTE-A-1', 'CLIENTE-A-2', 'CLIENTE-A-3'],
+    'El filtro conserva los otros servicios del mismo comprador');
+  assert.match(d.querySelector('.agenda-zone-adelanto').textContent, /Trabajos con adelanto incluido/);
+  assert.equal(d.querySelector('.agenda-zone-adelanto').nextElementSibling.nextElementSibling.dataset.ref, 'CLIENTE-A-1');
+  assert.match(d.querySelector('#cuerpo-tabla').textContent, /Otros servicios agendados/);
+  assert.match(d.querySelector('[data-ref="CLIENTE-A-1"]').textContent, /Incluye adelanto/);
+});
+
 test('Entregar servicios reduce trabajos, y solo el último confirmado reduce personas; persiste tras recargar', async () => {
   fixture.sembrarAgendaAgrupada();
   for (const [ref, personas, trabajos] of [
