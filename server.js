@@ -592,6 +592,33 @@ const upload = multer({
   },
 });
 
+// Proteger desde antes de crear el primer archivo hasta que termina el callback
+// (no hasta cerrar HTTP: el cliente puede desconectarse antes del COMMIT).
+function cargaProtegida(subir) {
+  return async function (req, res, callback) {
+    let proteccion;
+    try {
+      proteccion = await db.protegerCarga();
+    } catch (_) {
+      return res.status(503).json({ ok: false, error: 'No se pudo iniciar la carga. Intenta de nuevo.' });
+    }
+    await new Promise(resolve => {
+      subir(req, res, async function (err) {
+        try {
+          proteccion.comprobar();
+          await callback(err);
+        } catch (e) {
+          console.error('[uploads] No se pudo completar la carga.');
+          if (!res.headersSent) res.status(503).json({ ok: false, error: 'No se pudo confirmar la carga. Intenta de nuevo.' });
+        } finally {
+          await proteccion.liberar();
+          resolve();
+        }
+      });
+    });
+  };
+}
+
 /* ---------- Verificación de la transacción en Wompi ---------- */
 async function verificarTransaccionWompi(txId) {
   return wompi.transaccion(txId);
@@ -902,10 +929,10 @@ app.get('/api/cuenta/consultas', async function (req, res) {
 });
 
 /* ---------- Registrar agendamiento (antes de pagar) ---------- */
-const subirArchivos = upload.fields([
+const subirArchivos = cargaProtegida(upload.fields([
   { name: 'objetivo_foto', maxCount: 1 },
   { name: 'comprobante', maxCount: 1 },
-]);
+]));
 
 app.post('/api/booking', function (req, res) {
   subirArchivos(req, res, async function (err) {
@@ -1211,7 +1238,7 @@ app.get('/gracias/:ref', async function (req, res) {
 
 /* ---------- Checkout combinado del carrito (varios servicios, un solo pago) ---------- */
 // Acepta nombres de archivo dinámicos (foto_0, foto_1, ... y comprobante).
-const subirArchivosCheckout = upload.any();
+const subirArchivosCheckout = cargaProtegida(upload.any());
 
 app.post('/api/checkout', function (req, res) {
   subirArchivosCheckout(req, res, async function (err) {
@@ -2301,7 +2328,7 @@ app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
 // El administrador sube imágenes + notas de la evidencia y (si el cliente está
 // registrado) se le envían por correo. Siempre queda un enlace público con token
 // para poder compartirlo también por WhatsApp.
-const subirEvidencia = upload.array('fotos', 10);
+const subirEvidencia = cargaProtegida(upload.array('fotos', 10));
 app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
   subirEvidencia(req, res, async function (err) {
     const archivos = req.files || [];
@@ -2636,6 +2663,14 @@ async function ejecutarReconciliacion() {
 
 /* ---------- Limpieza automática de agendamientos sin pago (>48h) ---------- */
 async function limpiarPendientes() {
+  // Independiente de Wompi: si pagos no responde, aún se pueden liberar cargas
+  // sin referencia. Una falla SQL nunca se interpreta como cero referencias.
+  try {
+    const informe = await db.limpiarUploadsHuerfanos({ simular: false });
+    console.log('[uploads] Limpieza:', JSON.stringify(informe));
+  } catch (e) {
+    console.error('[uploads] Limpieza omitida:', e.message);
+  }
   try {
     // Reconcilia primero: nunca se debe borrar un pedido que Wompi ya aprobó.
     const rec = await reconciliarPagosPendientes();

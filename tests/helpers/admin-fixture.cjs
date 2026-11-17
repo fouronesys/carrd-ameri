@@ -44,6 +44,8 @@ function sembrarAgendaAgrupada() {
 }
 const db = {
   DATA_DIR: '/tmp', UPLOADS_DIR: '/tmp', pool: {},
+  protegerCarga: async () => ({ comprobar() {}, async liberar() {} }),
+  limpiarUploadsHuerfanos: async () => ({ simular: false, eliminados: 0 }),
   listarCatalogo: async () => copia([...servicios.values()]),
   listarCatalogoActivo: async () => copia([...servicios.values()].filter(i => i.activo)),
   obtenerCatalogoPorId: async id => servicios.has(id) ? copia(servicios.get(id)) : null,

@@ -13,3 +13,4 @@
 - [Autoría de cambios históricos](auditoria-autoria.md) — no inventar autores anteriores; el acceso con contraseña compartida solo identifica la cuenta general.
 - [Plazos de entrega con urgencia](plazos-entrega-urgencia.md) — la urgencia vinculada cuenta desde ambos pagos, nunca desde la reasignación ni ampliando el plazo normal.
 - [Privacidad de borradores](agenda-draft-privacy.md) — advertir antes de descartar notas y archivos; no persistir datos sensibles ni reenviar evidencia automáticamente.
+- [Coordinación de archivos](limpieza-archivos.md) — usar bloqueos transaccionales, no de sesión, al coordinar subidas y limpieza mediante un agrupador PostgreSQL.

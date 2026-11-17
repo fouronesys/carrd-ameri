@@ -24,6 +24,7 @@ const pedido = ref => [...rows.values()].filter(r => r.pedido_ref === ref);
 let borrados = 0, apiError = 0, lookups = 0, shapeError = false;
 const db = {
   DATA_DIR: '/tmp', UPLOADS_DIR: '/tmp', pool: {},
+  limpiarUploadsHuerfanos: async () => ({ simular: false, eliminados: 0 }),
   obtenerPorRef: async ref => copia(rows.get(ref)),
   obtenerPorPedido: async ref => copia(pedido(ref)),
   crearAgendamiento: async reg => { rows.set(reg.ref, copia(reg)); return copia(reg); },

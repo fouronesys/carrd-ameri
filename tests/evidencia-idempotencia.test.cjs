@@ -117,6 +117,9 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     const dobleClave = randomUUID();
     const primera = enviar('DOBLE', dobleClave);
     while (correos.length < 3) await new Promise(r => setTimeout(r, 10));
+    const limpiezaActiva = await db.limpiarUploadsHuerfanos({ simular: false, ahora: Date.now() + 25 * 3600000 });
+    assert.equal(limpiezaActiva.omitida, 'subidas_o_limpieza_activas',
+      'La protección dura hasta completar el callback, incluso durante SMTP');
     const doble = await (await enviar('DOBLE', dobleClave)).json();
     assert.equal(doble.repetida, true);
     assert.equal(doble.correo, 'en_proceso');
@@ -233,6 +236,138 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     await db.pool.query('UPDATE evidencia_operaciones SET correo = $1', ['enviado']);
     const vacia = seccion(await (await fetch(base + consulta, { headers: { Cookie: cookie } })).text());
     assert.match(vacia.textContent, /No hay operaciones/);
+    // Errores de conexión antes/después del COMMIT: el controlador conserva
+    // ambos archivos inicialmente, pero solo el no guardado es un huérfano.
+    const conectar = db.pool.connect.bind(db.pool);
+    async function conFalloCommit(despues, accion) {
+      let inyectado = false;
+      db.pool.connect = async function () {
+        const client = await conectar();
+        const query = client.query.bind(client);
+        client.query = async function (sql, ...args) {
+          if (!inyectado && sql === 'COMMIT') {
+            inyectado = true;
+            if (despues) await query(sql, ...args);
+            // Cerrar realmente el transporte: antes del COMMIT PostgreSQL
+            // revierte, después del COMMIT el registro debe seguir guardado.
+            await new Promise(resolve => {
+              client.once('error', resolve);
+              client.connection.stream.destroy();
+            });
+            throw Object.assign(new Error('Conexión perdida en COMMIT (sintético)'), { code: 'ECONNRESET' });
+          }
+          return query(sql, ...args);
+        };
+        const release = client.release;
+        client.release = function (...args) {
+          client.query = query;
+          return release.apply(client, args);
+        };
+        return client;
+      };
+      try { await accion(); assert.equal(inyectado, true); }
+      finally { db.pool.connect = conectar; }
+    }
+    await db.crearAgendamiento({ ref: 'ANTES-COMMIT', evidencia_fotos: [] });
+    await db.crearAgendamiento({ ref: 'DESPUES-COMMIT', evidencia_fotos: [] });
+    const antesDeFallar = new Set(fs.readdirSync(db.UPLOADS_DIR));
+    await conFalloCommit(false, async () => {
+      assert.equal((await enviar('ANTES-COMMIT', randomUUID())).status, 500);
+    });
+    const huerfano = fs.readdirSync(db.UPLOADS_DIR).find(n => !antesDeFallar.has(n));
+    assert.ok(huerfano);
+    assert.equal((await db.obtenerPorRef('ANTES-COMMIT')).evidencia_fotos.length, 0);
+    assert.equal((await db.pool.query("SELECT * FROM evidencia_operaciones WHERE ref='ANTES-COMMIT'")).rowCount, 0);
+    await conFalloCommit(true, async () => {
+      assert.equal((await enviar('DESPUES-COMMIT', randomUUID())).status, 500);
+    });
+    const confirmada = (await db.obtenerPorRef('DESPUES-COMMIT')).evidencia_fotos[0];
+    assert.ok(fs.existsSync(path.join(db.UPLOADS_DIR, confirmada)));
+    assert.equal((await db.pool.query("SELECT * FROM evidencia_operaciones WHERE ref='DESPUES-COMMIT'")).rowCount, 1);
+    const futuro = Date.now() + 25 * 3600000;
+    const crearArchivo = (i, nombre) => {
+      nombre ||= `${Date.now()}-${i.toString(16).padStart(12, '0')}.png`;
+      fs.writeFileSync(path.join(db.UPLOADS_DIR, nombre), 'sintético');
+      return nombre;
+    };
+    const objetivo = crearArchivo(1), comprobante = crearArchivo(2), operacionSola = crearArchivo(3);
+    await db.actualizarPorRef('ANTES-COMMIT', { objetivo_foto: objetivo, comprobante });
+    await db.eliminarPorRef('ANTES-COMMIT'); // También referencias en papelera.
+    await db.pool.query(`UPDATE evidencia_operaciones SET fotos = fotos || $1::jsonb
+      WHERE ref='DESPUES-COMMIT'`, [JSON.stringify([operacionSola])]);
+    const reciente = crearArchivo(4, `${futuro}-000000000004.webp`);
+    const ajeno = crearArchivo(5, 'respaldo.txt');
+    const enlace = `${Date.now()}-000000000006.png`;
+    fs.symlinkSync(path.join(db.UPLOADS_DIR, huerfano), path.join(db.UPLOADS_DIR, enlace));
+    const carpeta = `${Date.now()}-000000000007.png`;
+    fs.mkdirSync(path.join(db.UPLOADS_DIR, carpeta));
+    assert.equal((await db.limpiarUploadsHuerfanos({ simular: false })).eliminados, 0,
+      'La gracia real impide borrar los archivos recién subidos');
+    const simulacion = await db.limpiarUploadsHuerfanos({ ahora: futuro });
+    assert.equal(simulacion.candidatos, 1);
+    assert.equal(simulacion.eliminados, 0);
+    assert.ok(fs.existsSync(path.join(db.UPLOADS_DIR, huerfano)));
+    // Otra instancia mantiene un lock compartido; no depende de memoria local.
+    const instancia = await conectar();
+    try {
+      await instancia.query('SELECT pg_advisory_lock_shared($1)', [427100123]);
+      assert.ok((await db.limpiarUploadsHuerfanos({ simular: false, ahora: futuro })).omitida);
+    } finally {
+      await instancia.query('SELECT pg_advisory_unlock_shared($1)', [427100123]);
+      instancia.release();
+    }
+    const escritura = await conectar();
+    try {
+      await escritura.query('BEGIN');
+      await escritura.query("UPDATE agendamientos SET data=data || '{\"pendiente\":true}' WHERE ref='ANTES-COMMIT'");
+      await assert.rejects(db.limpiarUploadsHuerfanos({ simular: false, ahora: futuro }), /lock timeout/);
+      assert.ok(fs.existsSync(path.join(db.UPLOADS_DIR, huerfano)),
+        'No borrar mientras el resultado de una escritura SQL siga pendiente');
+    } finally {
+      await escritura.query('ROLLBACK');
+      escritura.release();
+    }
+    // Si falla la consulta de referencias/operaciones, no tocar el directorio.
+    await db.pool.query('ALTER TABLE evidencia_operaciones RENAME TO operaciones_no_disponibles');
+    try {
+      await assert.rejects(db.limpiarUploadsHuerfanos({ simular: false, ahora: futuro }), /evidencia_operaciones/);
+      assert.ok(fs.existsSync(path.join(db.UPLOADS_DIR, huerfano)));
+    } finally {
+      await db.pool.query('ALTER TABLE operaciones_no_disponibles RENAME TO evidencia_operaciones');
+    }
+    const limpieza = await db.limpiarUploadsHuerfanos({ simular: false, ahora: futuro });
+    assert.equal(limpieza.eliminados, 1);
+    assert.equal(limpieza.errores, 0);
+    assert.equal(fs.existsSync(path.join(db.UPLOADS_DIR, huerfano)), false);
+    for (const n of [confirmada, objetivo, comprobante, operacionSola, reciente, ajeno, carpeta]) {
+      assert.ok(fs.existsSync(path.join(db.UPLOADS_DIR, n)), 'Conserva ' + n);
+    }
+    assert.ok(fs.lstatSync(path.join(db.UPLOADS_DIR, enlace)).isSymbolicLink());
+    assert.equal((await db.limpiarUploadsHuerfanos({ simular: false, ahora: futuro })).eliminados, 0,
+      'Repetir la limpieza es idempotente');
+    await assert.rejects(db.limpiarUploadsHuerfanos({ graciaMs: 0 }), /24 horas/);
+    // Mantener abierto un multipart real: el bloqueo debe empezar antes de que
+    // multer termine, no solo durante guardarEvidencia.
+    const http = require('node:http');
+    const boundary = 'limpieza-aislada';
+    const peticion = http.request(base + '/admin/evidencia/ROLLBACK', {
+      method: 'POST', headers: { Origin: base, Cookie: cookie, Accept: 'application/json',
+        'Content-Type': 'multipart/form-data; boundary=' + boundary },
+    });
+    const respuesta = new Promise((resolve, reject) => {
+      peticion.on('error', reject);
+      peticion.on('response', res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    });
+    const cantidadAntes = cantidad();
+    peticion.write(`--${boundary}\r\nContent-Disposition: form-data; name="operacion"\r\n\r\n${randomUUID()}\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="fotos"; filename="activa.png"\r\nContent-Type: image/png\r\n\r\nimagen parcial`);
+    try {
+      const limite = Date.now() + 3000;
+      while (cantidad() === cantidadAntes && Date.now() < limite) await new Promise(r => setTimeout(r, 10));
+      assert.equal(cantidad(), cantidadAntes + 1);
+      assert.ok((await db.limpiarUploadsHuerfanos({ simular: false, ahora: futuro })).omitida);
+    } finally { peticion.end(`\r\n--${boundary}--\r\n`); }
+    assert.equal(await respuesta, 200);
   } finally {
     if (servidor) {
       servidor.closeAllConnections();
