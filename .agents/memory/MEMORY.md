@@ -9,3 +9,4 @@
 - [Divisas del catálogo](catalogo-divisas.md) — tarifas COP y USD independientes; COP original fijo, divisas extranjeras desde USD y cobro siempre COP.
 - [Puertos temporales de prueba](puertos-prueba.md) — los servidores aislados pueden añadir puertos a .replit; detenerlos no elimina esa configuración.
 - [Formularios de pago antiguos](checkout-version-compatibility.md) — las pestañas abiertas sobreviven a despliegues; un total visible no garantiza una cotización firmada.
+- [Cobros y ajustes administrativos](wompi-ajustes-administrativos.md) — conservar el cobro emitido; nunca reconstruir importes históricos con precios o comisiones actuales.

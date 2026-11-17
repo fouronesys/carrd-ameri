@@ -629,6 +629,9 @@ function validarPagoWompi(tx, referencia, montoCop) {
 async function confirmarPagoRef(ref, txId) {
   const registro = await db.obtenerPorRef(ref);
   if (!registro) return { encontrado: false };
+  // Un servicio individual ampliado por administración conserva la referencia
+  // que se firmó, aunque ahora tenga varios servicios asociados.
+  if (registro.pedido_ref === ref) return confirmarPagoPedido(ref, txId);
   if (registro.estado === 'agendado') return { encontrado: true, yaAgendado: true };
   if (registro.metodo !== 'wompi' || registro.estado === 'pendiente_verificacion') return { encontrado: true, manual: true };
   if (!txId) return { encontrado: true };
@@ -1373,6 +1376,7 @@ app.post('/api/checkout', function (req, res) {
           ref: pedidoRef + '-' + (i + 1),
           pedido_ref: pedidoRef,
           pedido_total_cop: totalCobro,
+          pedido_total_servicios_cop: cotizacion.items.reduce((s, item) => s + item.cop, 0),
           cliente_id: clienteId,
           producto: p.nombre,
           catalogo_id: p.catalogoId,
@@ -1840,12 +1844,16 @@ app.post('/admin/eliminar-definitivo/:ref', mismoOrigen, requiereAdmin, soloAdmi
 /* ---------- Edición de pedidos (solo administrador) ---------- */
 const ESTADOS_VALIDOS = ['pendiente_pago', 'pendiente_verificacion', 'agendado', 'rechazado'];
 
-// Recalcula el total de un pedido como la suma de los precios de sus servicios.
+// El subtotal administrativo puede cambiar; el cobro Wompi firmado no.
+// En históricos se conserva exactamente el importe almacenado, sin inferir
+// comisiones ni reconstruir cotizaciones con el catálogo actual.
 async function recalcularTotalPedido(pedidoRef) {
   if (!pedidoRef) return 0;
   const registros = await db.obtenerPorPedido(pedidoRef);
   const total = registros.reduce(function (s, r) { return s + (parseInt(r.precio_cop, 10) || 0); }, 0);
-  await db.actualizarPorPedido(pedidoRef, { pedido_total_cop: total });
+  const cambios = { pedido_total_servicios_cop: total };
+  if (registros.every(r => r.metodo !== 'wompi')) cambios.pedido_total_cop = total;
+  await db.actualizarPorPedido(pedidoRef, cambios);
   return total;
 }
 
@@ -1873,7 +1881,7 @@ app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async func
 
   await db.actualizarPorRef(req.params.ref, cambios);
 
-  // Si el servicio pertenece a un pedido, se recalcula el total del pedido.
+  // Actualiza solo la valoración administrativa, nunca el importe Wompi.
   if (reg.pedido_ref) await recalcularTotalPedido(reg.pedido_ref);
 
   volverPanel(req, res);
@@ -1892,9 +1900,18 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
   }
 
   let pedidoRef = reg.pedido_ref;
+  let totalCobro = reg.pedido_total_cop;
   if (!pedidoRef) {
-    pedidoRef = 'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
-    await db.actualizarPorRef(reg.ref, { pedido_ref: pedidoRef });
+    // No cambiar la referencia de un checkout Wompi ya emitido.
+    pedidoRef = reg.metodo === 'wompi' ? reg.ref :
+      'FRESA-PED-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
+    totalCobro = reg.precio_cop;
+    await db.actualizarPorRef(reg.ref, { pedido_ref: pedidoRef, pedido_total_cop: totalCobro });
+  } else {
+    // Todos los servicios del pedido deben llevar el mismo cobro, incluido el
+    // añadido, ya que obtenerPorPedido puede devolverlo en primer lugar.
+    const registros = await db.obtenerPorPedido(pedidoRef);
+    totalCobro = registros[0].pedido_total_cop;
   }
 
   const nuevoRef = 'FRESA-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
@@ -1923,6 +1940,7 @@ app.post('/admin/servicio/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
     // Servicio agregado manualmente por el admin: sin correo de pago automático.
     correo_enviado: true,
     pedido_ref: pedidoRef,
+    pedido_total_cop: totalCobro,
     creado_en: new Date().toISOString(),
     pagado_en: reg.pagado_en || '',
   });

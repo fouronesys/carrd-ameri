@@ -10,6 +10,7 @@ const session = require('express-session');
 // SMTP o Wompi real y ninguna lectura de credenciales del entorno.
 Object.assign(process.env, {
   NODE_ENV: 'test', SESSION_SECRET: 'sesion-wompi-aislada',
+  ADMIN_PASSWORD: 'admin-fixture-wompi',
   WOMPI_PUBLIC_KEY: 'pub_test_sintetica', WOMPI_PRIVATE_KEY: 'prv_test_sintetica',
   WOMPI_EVENTS_SECRET: 'eventos-sinteticos',
 });
@@ -25,6 +26,9 @@ const db = {
   DATA_DIR: '/tmp', UPLOADS_DIR: '/tmp', pool: {},
   obtenerPorRef: async ref => copia(rows.get(ref)),
   obtenerPorPedido: async ref => copia(pedido(ref)),
+  crearAgendamiento: async reg => { rows.set(reg.ref, copia(reg)); return copia(reg); },
+  obtenerUsuarioAdmin: async () => null,
+  registrarAcceso: async () => {},
   actualizarPorRef: async (ref, cambios) => { Object.assign(rows.get(ref), cambios); return copia(rows.get(ref)); },
   actualizarPorPedido: async (ref, cambios) => { pedido(ref).forEach(r => Object.assign(r, cambios)); },
   actualizarEstadoWompi: async (ref, cambios, esPedido) => {
@@ -41,7 +45,7 @@ const db = {
 };
 sustituir('../lib/db', db);
 sustituir('connect-pg-simple', () => session.MemoryStore);
-sustituir('../lib/mailer', Object.fromEntries(['enviarNotificacion', 'enviarNotificacionPedido', 'enviarEstadoCliente']
+sustituir('../lib/mailer', Object.fromEntries(['enviarNotificacion', 'enviarNotificacionPedido', 'enviarEstadoCliente', 'enviarAlertaLogin']
   .map(nombre => [nombre, async () => { enviados.push(nombre); return { enviado: true }; }])));
 const { app, confirmarPagoRef, confirmarPagoPedido, reconciliarPagosPendientes, limpiarPendientes } = require('../server');
 
@@ -190,6 +194,83 @@ test('Confirmación Wompi por HTTP, retorno y reconciliación sin servicios real
         assert.equal((await primera).agendados, 1, 'Recuperar al restablecerse Wompi sin reiniciar el servidor');
       });
     }
+    await t.test('Las ediciones administrativas conservan el cobro firmado antes y después del pago', async t => {
+      const login = await global.fetch(base + '/admin/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: base },
+        body: new URLSearchParams({ password: 'admin-fixture-wompi' }), redirect: 'manual',
+      });
+      assert.equal(login.status, 302);
+      const cookie = login.headers.get('set-cookie').split(';')[0];
+      const post = async (ruta, datos) => {
+        const r = await global.fetch(base + ruta, { method: 'POST', redirect: 'manual',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: base, Cookie: cookie },
+          body: new URLSearchParams(datos) });
+        assert.equal(r.status, 302, await r.text());
+      };
+      for (const pagado of [false, true]) {
+        for (const accion of ['nombre', 'precio', 'servicio']) {
+          await t.test(`${accion}, ${pagado ? 'después' : 'antes'} del pago`, async () => {
+            const { referencia, confirmar } = preparar(true);
+            rows.forEach(r => { r.precio_cop = 25000; r.pedido_total_cop = 55000; });
+            txs.get('TX-AISLADA').amount_in_cents = 5500000;
+            if (pagado) assert.equal((await confirmar('TX-AISLADA')).agendado, true);
+            const ref = [...rows.keys()][0];
+            if (accion === 'servicio') await post('/admin/servicio/' + ref, { producto: 'Servicio añadido', precio_cop: 12000 });
+            else await post('/admin/editar/' + ref, accion === 'nombre'
+              ? { producto: 'Nombre corregido' } : { precio_cop: 30000 });
+            const subtotal = accion === 'nombre' ? 50000 : accion === 'precio' ? 55000 : 62000;
+            assert.ok([...rows.values()].every(r => r.pedido_total_cop === 55000));
+            assert.ok([...rows.values()].every(r => r.pedido_total_servicios_cop === subtotal));
+            assert.equal(rows.size, accion === 'servicio' ? 3 : 2);
+            if (accion === 'nombre') assert.equal(rows.get(ref).producto, 'Nombre corregido');
+            if (accion === 'precio') assert.equal(rows.get(ref).precio_cop, 30000);
+            // Simula el orden DESC de PostgreSQL: el servicio nuevo se lee primero.
+            const inversas = [...rows.entries()].reverse(); rows.clear();
+            inversas.forEach(([k, v]) => rows.set(k, v));
+            if (!pagado) {
+              for (const cambios of [
+                { amount_in_cents: subtotal * 100 },
+                { amount_in_cents: 5500000, reference: 'OTRO-PEDIDO' },
+                { amount_in_cents: 5500000, reference: referencia, currency: 'USD' },
+              ]) {
+                if (Object.keys(cambios).length === 1 && subtotal === 55000) continue;
+                Object.assign(txs.get('TX-AISLADA'), cambios);
+                assert.equal((await confirmar('TX-AISLADA')).discrepancia, true);
+                assert.ok([...rows.values()].every(r => r.estado === 'pendiente_pago'));
+              }
+              Object.assign(txs.get('TX-AISLADA'), { amount_in_cents: 5500000, reference: referencia, currency: 'COP' });
+              if (accion === 'nombre') {
+                assert.equal((await global.fetch(base + '/pedido/' + referencia + '?id=TX-AISLADA')).status, 200);
+              } else if (accion === 'precio') {
+                assert.equal((await webhook(txs.get('TX-AISLADA'))).status, 200);
+              } else {
+                assert.equal((await reconciliarPagosPendientes()).agendados, 1);
+              }
+            }
+            assert.ok([...rows.values()].every(r => r.estado === 'agendado'));
+            assert.ok([...rows.values()].every(r => r.pedido_total_cop === 55000));
+            const render = require('../lib/templates').adminDashboard({
+              registros: [...rows.values()], rol: 'admin',
+            });
+            assert.match(render, /Importe original Wompi: \$55\.000 COP/);
+            assert.match(render, new RegExp('Subtotal administrativo: \\$' + subtotal.toLocaleString('es-CO').replace('.', '\\.') + ' COP'));
+          });
+        }
+      }
+      await t.test('Un individual ampliado mantiene la referencia Wompi y confirma todos los servicios', async () => {
+        const { referencia, confirmar } = preparar(false);
+        await post('/admin/servicio/' + referencia, { producto: 'Servicio añadido', precio_cop: 10000 });
+        assert.ok([...rows.values()].every(r => r.pedido_ref === referencia && r.pedido_total_cop === 20000));
+        assert.equal((await confirmar('TX-AISLADA')).agendado, true);
+        assert.ok([...rows.values()].every(r => r.estado === 'agendado'));
+      });
+      await t.test('Una transferencia mantiene su total administrativo sin aplicar comisión', async () => {
+        preparar(true, 'pendiente_verificacion');
+        rows.forEach(r => { r.metodo = 'transferencia'; });
+        await post('/admin/editar/' + [...rows.keys()][0], { precio_cop: 15000 });
+        assert.ok([...rows.values()].every(r => r.pedido_total_cop === 25000 && r.pedido_total_servicios_cop === 25000));
+      });
+    });
     await t.test('La limpieza solo continúa cuando Wompi confirma que no hay intentos', async () => {
       preparar(); txs.clear();
       await limpiarPendientes();
