@@ -13,6 +13,7 @@ const { performance } = require('node:perf_hooks');
 const { claveCliente, agruparClientes } = require('../lib/agenda-clientes');
 const { opcionesAgenda } = require('../lib/agenda-panel');
 const templates = require('../lib/templates');
+const { parseHTML } = require('linkedom');
 
 test('Normaliza filtros y limita tamaño, páginas y búsqueda desde el servidor', () => {
   assert.deepEqual(opcionesAgenda({ pagina: '-5', tamano: 999, estado: 'SQL', buscar: ['a'] }),
@@ -102,7 +103,9 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       registros: urgentes.registros, agenda: urgentes, resumen,
       tipoPanel: 'trabajo', cargaPorPestana: true,
     });
-    assert.match(htmlUrgentes, /Trabajos con adelanto incluido/);
+    assert.doesNotMatch(htmlUrgentes, /⚡ Trabajos con adelanto incluido/,
+      'Un adelanto rechazado no aparece como entrega prioritaria');
+    assert.match(htmlUrgentes, /Incluye adelanto · sin pago confirmado/);
     assert.equal((await db.listarAgendaPanel({ estado: 'agendado' })).personas, 30);
     const mixto = await db.listarAgendaPanel({ buscar: 'R-0-2', estado: 'agendado' });
     assert.equal(mixto.registros.length, 3, 'Filtro selecciona comprador sin recortar sus servicios');
@@ -117,6 +120,85 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
     const ajustada = await db.listarAgendaPanel({ pagina: 4 });
     assert.equal(ajustada.pagina, 3);
     assert.equal(ajustada.personas, 45);
+    await t.test('Adelanto pagado posterior a página 1 conserva comprador, tipos y prioridad al restaurar', async () => {
+      await db.pool.query('DELETE FROM agendamientos');
+      const datos = Array.from({ length: 17 }, (_, i) => ({
+        ref: `NORMAL-${i}`, cliente_id: `NORMAL-C-${i}`, producto: 'Servicio normal',
+        tipo_servicio: 'trabajo', estado: 'agendado', pagado_en: '2026-01-01',
+      }));
+      datos.push(
+        { ref: 'URGENTE', cliente_id: 'MIXTO', pedido_ref: 'MIX-1', adelanto: 'incluido', estado: 'agendado', pagado_en: '2026-06-01' },
+        { ref: 'OTRO-PEDIDO', cliente_id: 'MIXTO', pedido_ref: 'MIX-2', estado: 'agendado', pagado_en: '2026-06-02' },
+        { ref: 'LECTURA', cliente_id: 'MIXTO', tipo_servicio: 'lectura', estado: 'agendado', pagado_en: '2026-06-02' },
+        { ref: 'VERIFICAR', cliente_id: 'MIXTO', adelanto: 'incluido', estado: 'pendiente_verificacion' },
+        { ref: 'RECHAZADO', cliente_id: 'NO-PAGO', adelanto: 'incluido', estado: 'rechazado' },
+        { ref: 'PENDIENTE', cliente_id: 'NO-PAGO', adelanto: 'incluido', estado: 'pendiente_pago' },
+        // Un adelanto suelto no identifica cuál servicio se debe adelantar.
+        { ref: 'SUELTO', cliente_id: 'INDEPENDIENTE', pedido_ref: 'SUELTO-PED', adelanto: 'solo', estado: 'agendado', pagado_en: '2026-07-01' },
+        { ref: 'SIN-ASOCIAR', cliente_id: 'INDEPENDIENTE', pedido_ref: 'SUELTO-PED', estado: 'agendado', pagado_en: '2026-07-01' },
+        { ref: 'URGENTE-ANTERIOR', pedido_ref: 'INVITADO-URGENTE', adelanto: 'incluido', estado: 'agendado', pagado_en: '2026-05-01' },
+        { ref: 'INVITADO-NORMAL', pedido_ref: 'INVITADO-URGENTE', estado: 'agendado', pagado_en: '2026-05-02' },
+        { ref: 'URGENTE-HECHO', adelanto: 'incluido', estado: 'agendado', trabajo_hecho: true, pagado_en: '2025-01-01' },
+        { ref: 'URGENTE-ELIMINADO', adelanto: 'incluido', estado: 'agendado', eliminado_en: '2026-01-01', pagado_en: '2025-01-01' },
+      );
+      await db.pool.query(`INSERT INTO agendamientos(ref,data)
+        SELECT value->>'ref',value FROM jsonb_array_elements($1::jsonb)`, [JSON.stringify(datos)]);
+      const primera = await db.listarAgendaPanel();
+      assert.equal(primera.personas, 21);
+      assert.equal(primera.trabajos, 27);
+      assert.equal(primera.paginas, 2);
+      const grupos = agruparClientes(primera.registros);
+      assert.equal(claveCliente(grupos[0].registros[0]), 'pedido:INVITADO-URGENTE');
+      assert.equal(claveCliente(grupos[1].registros[0]), 'cliente:MIXTO');
+      assert.equal(grupos.length, 15);
+      assert.deepEqual(grupos[1].registros.map(r => r.ref).sort(), ['LECTURA', 'OTRO-PEDIDO', 'URGENTE', 'VERIFICAR']);
+      const segunda = await db.listarAgendaPanel({ pagina: 2 });
+      const claves = [...primera.registros, ...segunda.registros].map(claveCliente);
+      assert.equal(new Set(claves).size, 21);
+      assert.equal(new Set([...primera.registros, ...segunda.registros].map(r => r.ref)).size, 27);
+      assert.ok(!segunda.registros.some(r => ['MIXTO'].includes(r.cliente_id)));
+      assert.ok(segunda.registros.some(r => r.ref === 'SUELTO'), 'Adelanto independiente no adelanta otros servicios');
+      for (const buscar of ['adelanto', 'adelantos', 'urgencia', 'urgente']) {
+        const resultado = await db.listarAgendaPanel({ buscar });
+        assert.equal(resultado.personas, 4);
+        assert.equal(resultado.trabajos, 10);
+        const d = parseHTML(templates.adminDashboard({ registros: resultado.registros, agenda: resultado })).document;
+        const prioritarios = [];
+        let zona = '';
+        for (const fila of d.querySelectorAll('#cuerpo-tabla tr')) {
+          if (fila.classList.contains('agenda-zone')) zona = fila.textContent;
+          if (fila.dataset.ref && zona.includes('entrega prioritaria')) prioritarios.push(fila.dataset.ref);
+        }
+        assert.deepEqual(prioritarios, ['URGENTE-ANTERIOR', 'URGENTE']);
+        assert.match(d.querySelector('#cuerpo-tabla').textContent, /Adelantos independientes · sin servicio asociado/);
+        assert.match(d.querySelector('[data-ref=VERIFICAR]').textContent, /sin pago confirmado/);
+        assert.match(d.querySelector('[data-ref=RECHAZADO]').textContent, /sin pago confirmado/);
+        assert.match(d.querySelector('[data-ref=PENDIENTE]').textContent, /sin pago confirmado/);
+        assert.equal(d.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 10);
+      }
+      const trabajos = await db.listarAgendaPanel({ buscar: 'urgencia', tipo: 'trabajo' });
+      assert.ok(!trabajos.registros.some(r => r.ref === 'LECTURA'));
+      assert.equal(trabajos.registros.length, 9);
+      const lecturas = await db.listarAgendaPanel({ tipo: 'lectura' });
+      assert.deepEqual(lecturas.registros.map(r => r.ref), ['LECTURA']);
+      assert.equal((await db.listarAgendaPanel({ buscar: 'urgencia', tipo: 'lectura' })).personas, 0);
+      for (const estado of ['rechazado', 'pendiente_pago', 'pendiente_verificacion']) {
+        const filtrada = await db.listarAgendaPanel({ buscar: 'urgencia', estado });
+        assert.equal(filtrada.personas, 1);
+        assert.equal(filtrada.registros.length, estado === 'pendiente_verificacion' ? 4 : 2);
+      }
+      await db.marcarTrabajoRealizado('URGENTE');
+      const entregada = await db.listarAgendaPanel();
+      assert.ok(!entregada.registros.some(r => r.cliente_id === 'MIXTO'),
+        'Sin urgencia pagada activa, el comprador vuelve a su prioridad normal');
+      assert.equal((await db.listarAgendaPanel({ buscar: 'MIX-2' })).registros.length, 3);
+      await db.actualizarPorRef('URGENTE', { trabajo_hecho: false, trabajo_hecho_en: '' });
+      assert.equal(agruparClientes((await db.listarAgendaPanel()).registros)[1].registros[0].ref, 'URGENTE');
+      await db.eliminarPorRef('URGENTE');
+      assert.ok(!(await db.listarAgendaPanel()).registros.some(r => r.ref === 'URGENTE'));
+      await db.restaurarPorRef('URGENTE');
+      assert.ok((await db.listarAgendaPanel()).registros.some(r => r.ref === 'URGENTE'));
+    });
     // 12.000 trabajos en 4.000 compradores, con campos pesados de evidencia.
     await db.pool.query('DELETE FROM agendamientos');
     await db.pool.query(`INSERT INTO agendamientos(ref,data)

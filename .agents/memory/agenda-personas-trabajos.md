@@ -20,3 +20,9 @@ Los servicios comprados con adelanto incluido (`adelanto: "incluido"`) se buscan
 **Why:** El usuario indicó que los adelantos incluidos en el servicio deben encontrarse al buscarlos y que esos trabajos requieren una zona aparte.
 
 **How to apply:** No confundirlos con el adelanto vendido como artículo separado (`adelanto: "solo"`); conserva el servicio como un solo trabajo con su marca de urgencia.
+
+La prioridad de entrega requiere pago confirmado y se aplica antes de seleccionar la página de compradores. Un adelanto independiente no identifica qué servicio adelantar, ni siquiera si comparte comprador o pedido.
+
+**Why:** La separación visual posterior a paginar ocultaba compradores urgentes; además mostraba rechazos como prioritarios. No existe una asociación explícita que permita atribuir un adelanto suelto a otro servicio.
+
+**How to apply:** Mantener íntegros los grupos de compradores; no promover pendientes o rechazos por su marca de adelanto. Al entregar o devolver el servicio, recalcular la prioridad usando solo los servicios activos.

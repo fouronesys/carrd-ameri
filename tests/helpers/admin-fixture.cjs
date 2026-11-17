@@ -102,7 +102,9 @@ const db = {
       (!filtros.buscar || g.registros.some(r => [r.ref, r.pedido_ref, r.cliente_nombre, r.contacto, r.producto, r.objetivo_nombre, r.cliente_email]
         .join(' ').toLowerCase().includes(filtros.buscar.toLowerCase())) ||
         (['adelanto', 'adelantos', 'urgencia', 'urgente'].includes(filtros.buscar.toLowerCase()) &&
-          g.registros.some(r => ['incluido', 'solo'].includes(r.adelanto)))));
+          g.registros.some(r => ['incluido', 'solo'].includes(r.adelanto)))))
+      .sort((a, b) => Number(b.registros.some(require('../../lib/agenda-panel').esAdelantoPrioritario)) -
+        Number(a.registros.some(require('../../lib/agenda-panel').esAdelantoPrioritario)));
     const paginas = Math.max(1, Math.ceil(grupos.length / filtros.tamano));
     const pagina = Math.min(filtros.pagina, paginas);
     return { ...filtros, pagina, paginas, personas: grupos.length,

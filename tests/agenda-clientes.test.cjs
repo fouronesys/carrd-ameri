@@ -156,8 +156,46 @@ test('Buscar adelanto incluido encuentra el pedido y separa esos trabajos en la 
     'El filtro conserva los otros servicios del mismo comprador');
   assert.match(d.querySelector('.agenda-zone-adelanto').textContent, /Trabajos con adelanto incluido/);
   assert.equal(d.querySelector('.agenda-zone-adelanto').nextElementSibling.nextElementSibling.dataset.ref, 'CLIENTE-A-1');
-  assert.match(d.querySelector('#cuerpo-tabla').textContent, /Otros servicios agendados/);
+  assert.match(d.querySelector('#cuerpo-tabla').textContent, /Otros servicios · revisar estado de pago/);
   assert.match(d.querySelector('[data-ref="CLIENTE-A-1"]').textContent, /Incluye adelanto/);
+});
+
+test('Entregar y devolver un adelanto actualiza zonas sin mover otros servicios a urgentes', async () => {
+  fixture.sembrarAgendaAgrupada();
+  fixture.trabajos.get('CLIENTE-A-1').adelanto = 'incluido';
+  fixture.trabajos.get('CLIENTE-A-3').adelanto = 'incluido';
+  fixture.trabajos.set('INDEPENDIENTE', {
+    ref: 'INDEPENDIENTE', cliente_id: 'CLIENTE-A', adelanto: 'solo', estado: 'agendado',
+  });
+  const consultar = async () => parseHTML(await (await fetch(url + '/admin?buscar=urgencia', { headers: { cookie } })).text()).document;
+  let d = await consultar();
+  assert.equal(d.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 4);
+  assert.equal(d.querySelector('#stat-personas').textContent, '2');
+  assert.match(d.querySelector('[data-ref=INDEPENDIENTE]').textContent, /sin servicio asociado/);
+  assert.match(d.querySelector('[data-ref=CLIENTE-A-3]').textContent, /sin pago confirmado/);
+  for (const [accion, urgente] of [['marcar', false], ['desmarcar', true]]) {
+    const respuesta = await fetch(url + '/admin/trabajo/CLIENTE-A-1', {
+      method: 'POST', headers: { cookie, origin: url, accept: 'application/json' },
+      body: new URLSearchParams({ accion }),
+    });
+    assert.equal(respuesta.status, 200);
+    assert.equal((await respuesta.json()).realizado, !urgente);
+    d = await consultar();
+    assert.equal(!!d.querySelector('.agenda-zone-adelanto'), urgente);
+    assert.equal(d.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, urgente ? 4 : 3);
+    assert.equal(d.querySelector('#stat-personas').textContent, '2',
+      'El comprador conserva otros servicios confirmados');
+    if (urgente) {
+      assert.equal(d.querySelector('.agenda-zone-adelanto').nextElementSibling.nextElementSibling.dataset.ref, 'CLIENTE-A-1');
+    }
+  }
+  for (const ref of ['CLIENTE-A-3', 'SIN-PAGO']) {
+    const respuesta = await fetch(url + '/admin/trabajo/' + ref, {
+      method: 'POST', headers: { cookie, origin: url, accept: 'application/json' },
+      body: new URLSearchParams({ accion: 'marcar' }),
+    });
+    assert.equal(respuesta.status, 400, 'Sin pago confirmado no se permite entregar');
+  }
 });
 
 test('Entregar servicios reduce trabajos, y solo el último confirmado reduce personas; persiste tras recargar', async () => {
