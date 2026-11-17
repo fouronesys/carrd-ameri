@@ -45,7 +45,7 @@ test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas
     forEach(fn) { this.pares.forEach(([k, v]) => fn(v, k)); }
   }
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/admin.js'), 'utf8'), {
-    document, location, URL, URLSearchParams, FormData: FormDataFixture, setTimeout, clearTimeout,
+    document, location, URL, URLSearchParams, AbortController, FormData: FormDataFixture, setTimeout, clearTimeout,
     setInterval: (fn, ms) => { assert.equal(ms, 30000); comprobarAgenda = fn; },
     history: { pushState: cambiarUrl, replaceState: cambiarUrl },
     window: { addEventListener: (tipo, fn) => { eventos[tipo] = fn; }, scrollTo() {}, confirm: () => confirmar },
@@ -55,7 +55,7 @@ test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas
       solicitudes.push(url);
       if (url.includes('comprobar_agenda=1')) {
         if (falloComprobacion) throw new Error('sin conexión');
-        return { ok: true, json: async () => ({ cambios, caducada }) };
+        return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ cambios, caducada }) };
       }
       if (opciones.method === 'POST') {
         trabajos = trabajos.filter(r => r.ref !== url.split('/').pop());

@@ -8,6 +8,29 @@
   function seccion(id, root) { return (root || document).querySelector('[data-sec="' + id + '"]'); }
   function activa() { var el = document.querySelector('.admin-sec.activo'); return el ? el.dataset.sec : 'agenda'; }
   var comprobandoAgenda = false;
+  var fallosAgenda = 0;
+  var estadoComprobacion = '';
+  function mostrarEstadoAgenda() {
+    var indicador = document.getElementById('agenda-comprobacion');
+    if (!indicador) return;
+    var mensaje = estadoComprobacion === 'sesion'
+      ? 'Tu sesión caducó. No se pueden comprobar novedades. Conserva esta página y abre el panel en otra pestaña para iniciar sesión; tus ediciones abiertas no se han modificado.'
+      : estadoComprobacion === 'conexion'
+        ? 'No se pudo conectar para comprobar novedades de la agenda. Se reintentará automáticamente. Tus ediciones abiertas no se han modificado.'
+        : estadoComprobacion === 'servidor'
+          ? 'No se pueden comprobar novedades de la agenda en este momento. Se reintentará automáticamente. Tus ediciones abiertas no se han modificado.'
+          : '';
+    indicador.textContent = mensaje;
+    indicador.hidden = !mensaje;
+  }
+  function falloAgenda(estado) {
+    fallosAgenda++;
+    // Una sesión caducada no se disfraza de fallo de conexión en el siguiente intento.
+    if (estado === 'sesion' || (fallosAgenda >= 3 && estadoComprobacion !== 'sesion')) {
+      estadoComprobacion = estado;
+    }
+    mostrarEstadoAgenda();
+  }
   async function comprobarAgenda() {
     if (comprobandoAgenda || mutando || document.hidden || activa() !== 'agenda') return;
     var formulario = document.querySelector('#agenda-busqueda');
@@ -17,23 +40,42 @@
     if (!destino.searchParams.get('vista')) return;
     destino.searchParams.set('comprobar_agenda', '1');
     comprobandoAgenda = true;
+    var controlador = new AbortController();
+    var espera = setTimeout(function () { controlador.abort(); }, 10000);
+    function vigente() { return formulario.isConnected && formulario.dataset.url === urlOriginal; }
     try {
-      var r = await fetch(destino.pathname + destino.search, { credentials: 'same-origin', cache: 'no-store' });
-      if (!r.ok) return; // No interrumpir una edición por una desconexión o sesión caducada.
+      var r = await fetch(destino.pathname + destino.search, {
+        credentials: 'same-origin', cache: 'no-store', signal: controlador.signal,
+      });
+      if (!vigente()) return;
+      if (r.status === 401 || r.status === 403) { falloAgenda('sesion'); return; }
+      if (!r.ok || !(r.headers.get('content-type') || '').includes('application/json')) {
+        falloAgenda('servidor'); return;
+      }
       var datos = await r.json();
-      if (!formulario.isConnected || formulario.dataset.url !== urlOriginal) return;
+      if (!vigente()) return;
+      if (!datos || typeof datos.cambios !== 'boolean' || typeof datos.caducada !== 'boolean') {
+        falloAgenda('servidor'); return;
+      }
+      fallosAgenda = 0;
+      estadoComprobacion = '';
+      mostrarEstadoAgenda();
       var aviso = document.getElementById('agenda-cambios');
       if (aviso && datos.cambios) {
         aviso.hidden = false;
         if (datos.caducada) aviso.querySelector('[data-agenda-aviso]').textContent =
           'Este recorrido caducó. Puedes seguir revisando lo abierto y actualizar la agenda cuando termines.';
       }
-    } catch (_) { /* La siguiente comprobación reintenta sin tocar formularios ni navegación. */ }
-    finally { comprobandoAgenda = false; }
+    } catch (_) {
+      if (vigente()) falloAgenda(!r || controlador.signal.aborted ? 'conexion' : 'servidor');
+      // Los errores de fetch y de JSON no deben tocar formularios ni navegación.
+    }
+    finally { clearTimeout(espera); comprobandoAgenda = false; }
   }
   setInterval(comprobarAgenda, 30000);
   document.addEventListener('visibilitychange', comprobarAgenda);
   window.addEventListener('focus', comprobarAgenda);
+  window.addEventListener('online', comprobarAgenda);
   function urlTab(tab) {
     if (tab === 'agenda') return agendaUrl;
     var params = new URLSearchParams(location.search);
@@ -102,6 +144,7 @@
     if (tab === 'agenda') {
       var formulario = seccion(tab).querySelector('#agenda-busqueda');
       if (formulario) agendaUrl = formulario.dataset.url;
+      mostrarEstadoAgenda();
     }
     contadores(doc);
     filtrar();
