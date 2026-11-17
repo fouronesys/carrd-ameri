@@ -1,0 +1,53 @@
+/* La punta clara y su contorno oscuro se distinguen sobre fotos y fondos lisos. */
+@media (hover: hover) and (pointer: fine) {
+  body[data-catalogo-cursor],
+  body[data-catalogo-cursor] a,
+  body[data-catalogo-cursor] button,
+  body[data-catalogo-cursor] [role="button"],
+  body[data-catalogo-cursor] summary,
+  body[data-catalogo-cursor] input[type="submit"],
+  body[data-catalogo-cursor] input[type="button"] {
+    cursor: url("/assets/varita-cursor.svg") 5 1, auto;
+  }
+  body[data-catalogo-cursor] input:disabled,
+  body[data-catalogo-cursor] button:disabled,
+  body[data-catalogo-cursor] [aria-disabled="true"] { cursor: not-allowed; }
+}
+
+/* Capa independiente: no mueve botones ni bloquea sus eventos o formularios. */
+.fs-toque {
+  position: fixed;
+  left: var(--toque-x);
+  top: var(--toque-y);
+  width: 42px;
+  height: 42px;
+  margin: -21px 0 0 -21px;
+  border: 2px solid #ffd9ed;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #682d4d, 0 0 12px #ec97c280;
+  pointer-events: none;
+  z-index: 2147483647;
+  animation: fs-toque-florecer 420ms ease-out both;
+}
+.fs-toque::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  right: -5px;
+  top: -4px;
+  background: #ffe8f4;
+  clip-path: polygon(50% 0, 65% 35%, 100% 50%, 65% 65%, 50% 100%, 35% 65%, 0 50%, 35% 35%);
+}
+@keyframes fs-toque-florecer {
+  from { transform: scale(.4); opacity: .95; }
+  to { transform: scale(1.25); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fs-toque { animation: none; width: 28px; height: 28px; margin: -14px 0 0 -14px; }
+}
+@media (forced-colors: active) {
+  body[data-catalogo-cursor], body[data-catalogo-cursor] a,
+  body[data-catalogo-cursor] button { cursor: auto; }
+  .fs-toque { border-color: Highlight; box-shadow: none; }
+}
