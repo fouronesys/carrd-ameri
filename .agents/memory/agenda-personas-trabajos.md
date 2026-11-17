@@ -9,11 +9,11 @@ description: Qué representa una persona agendada y cómo evitar contar servicio
 
 **How to apply:** Conservar estados y acciones individuales de los trabajos. No inferir identidad por nombres iguales. Una cuenta identifica al cliente entre pedidos; para invitados sin cuenta, agrupar por pedido y explicar esa limitación. Contar personas con trabajos confirmados todavía por entregar, sin reducirlas hasta entregar su último trabajo confirmado.
 
-La búsqueda y los filtros de agenda seleccionan compradores completos, no subconjuntos de sus servicios. El límite por página se aplica a compradores; un comprador excepcionalmente grande conserva todos sus trabajos activos.
+La búsqueda de agenda selecciona compradores completos. Los filtros explícitos por estado deben limitar los servicios visibles al estado seleccionado: «Agendados» no debe mostrar pendientes de pago del mismo comprador. El límite por página sigue aplicándose a compradores.
 
-**Why:** No dividir un comprador entre páginas tiene prioridad sobre imponer un máximo estricto de filas. Buscar un pedido o contacto debe recuperar todos sus servicios, incluso de otros pedidos de la misma cuenta.
+**Why:** El usuario aclaró que el problema de los pendientes de pago era que aparecían dentro de «Agendados». Buscar un pedido o contacto debe recuperar al comprador sin confundir servicios con estados diferentes.
 
-**How to apply:** Mantener juntos los trabajos activos del comprador encontrado y explicar en pantalla que los filtros seleccionan grupos completos; los totales globales no se reducen al paginar o buscar.
+**How to apply:** Mantener juntos los servicios del comprador que correspondan al estado y tipo seleccionados. Sin filtro de estado, conservar la búsqueda por comprador completo. Los totales globales no se reducen al paginar o buscar.
 
 Los servicios comprados con adelanto incluido (`adelanto: "incluido"`) se buscan también con “adelanto” o “urgencia” y se muestran en una zona prioritaria separada en la agenda.
 
