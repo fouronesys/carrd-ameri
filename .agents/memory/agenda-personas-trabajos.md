@@ -26,3 +26,9 @@ La prioridad de entrega requiere pago confirmado y se aplica antes de selecciona
 **Why:** La separación visual posterior a paginar ocultaba compradores urgentes; además mostraba rechazos como prioritarios. No existe una asociación explícita que permita atribuir un adelanto suelto a otro servicio.
 
 **How to apply:** Mantener íntegros los grupos de compradores; no promover pendientes o rechazos por su marca de adelanto. Al entregar o devolver el servicio, recalcular la prioridad usando solo los servicios activos.
+
+Durante un recorrido paginado se conserva la selección y el orden de compradores, no una copia de sus estados de pago ni de entrega. Actualizar o cambiar criterios inicia un recorrido nuevo.
+
+**Why:** Reordenar en cada consulta puede repetir u omitir compradores; congelar los servicios completos, en cambio, puede mostrar pagos o entregas obsoletos. Los compradores que ya no tienen servicios activos pueden dejar huecos en su página original.
+
+**How to apply:** Mantener los límites del recorrido incluso tras acciones propias, mostrar datos operativos actuales y distinguir los totales iniciales de la vista de los contadores globales actuales. Una vista caducada debe reiniciarse con aviso, no continuar silenciosamente desde otra página.

@@ -1581,7 +1581,7 @@ app.get('/admin', async function (req, res) {
     const tab = permitidas.includes(req.query.tab) ? req.query.tab : 'agenda';
     const tipo = tipoPanel(req.query.tipo || 'trabajo');
     const [registros, promos, codigos, usuarios, accesos, eliminados, realizados, catalogo, resumen, destinatarios, historialCatalogo] = await Promise.all([
-      tab === 'agenda' ? db.listarAgendaPanel({ ...req.query, tipo }) : null,
+      tab === 'agenda' ? db.listarAgendaPanel({ ...req.query, tipo, sesion: req.sessionID }) : null,
       tab === 'promos' ? db.listarPromos() : [],
       tab === 'promos' ? db.listarCodigosConUsos() : [],
       tab === 'usuarios' ? db.listarUsuariosAdmin() : [],

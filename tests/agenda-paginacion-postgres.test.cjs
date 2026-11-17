@@ -77,8 +77,10 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       seq DESC`);
     const esperados = agruparClientes(original.rows.map(r => r.data)).map(g => claveCliente(g.registros[0]));
     const orden = [];
+    let vistaRecorrido;
     for (let pagina = 1; pagina <= 4; pagina++) {
-      const resultado = await db.listarAgendaPanel({ pagina });
+      const resultado = await db.listarAgendaPanel({ pagina, vista: vistaRecorrido });
+      vistaRecorrido = resultado.vista;
       assert.equal(resultado.personas, 50);
       assert.equal(resultado.trabajos, 145);
       assert.equal(resultado.paginas, 4);
@@ -103,6 +105,88 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       registros: urgentes.registros, agenda: urgentes, resumen,
       tipoPanel: 'trabajo', cargaPorPestana: true,
     });
+    await t.test('Vista estable entre consultas con pagos, entregas, altas y cambios de prioridad', async () => {
+      await db.pool.query('DELETE FROM agendamientos');
+      const datos = Array.from({ length: 35 }, (_, i) => ({
+        ref: `ESTABLE-${i}`, cliente_id: `CUENTA-${i}`, cliente_nombre: 'Mismo nombre',
+        pedido_ref: `PEDIDO-${i}`, producto: 'Servicio estable', tipo_servicio: 'trabajo',
+        estado: i === 34 ? 'pendiente_pago' : 'agendado',
+        adelanto: i === 0 || i === 34 ? 'incluido' : undefined,
+        pagado_en: `2026-01-${String(Math.min(i + 1, 28)).padStart(2, '0')}`,
+      }));
+      datos.push(
+        { ...datos[0], ref: 'OTRO-SERVICIO', pedido_ref: 'OTRO-PEDIDO', adelanto: '' },
+        { ...datos[0], ref: 'LECTURA-ESTABLE', tipo_servicio: 'lectura' },
+        { ref: 'INV-A', pedido_ref: 'INV-A', cliente_nombre: 'Mismo nombre', estado: 'agendado' },
+        { ref: 'INV-B', pedido_ref: 'INV-B', cliente_nombre: 'Mismo nombre', estado: 'agendado' },
+        { ref: 'SIN-PEDIDO-A', cliente_nombre: 'Mismo nombre', estado: 'agendado' },
+        { ref: 'SIN-PEDIDO-B', cliente_nombre: 'Mismo nombre', estado: 'agendado' },
+      );
+      await db.pool.query(`INSERT INTO agendamientos(ref,data)
+        SELECT value->>'ref',value FROM jsonb_array_elements($1::jsonb)`, [JSON.stringify(datos)]);
+      const opciones = { tipo: 'trabajo', sesion: 'sesion-sintetica-a' };
+      const primera = await db.listarAgendaPanel(opciones);
+      const base = [];
+      for (let pagina = 1; pagina <= primera.paginas; pagina++) {
+        const resultado = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina });
+        base.push(...agruparClientes(resultado.registros).map(g => claveCliente(g.registros[0])));
+      }
+      assert.equal(new Set(base).size, 39, 'Cuentas, invitados y servicios sin pedido conservan identidad');
+      assert.equal(base[0], 'cliente:CUENTA-0');
+      await db.actualizarPorRef('ESTABLE-34', { estado: 'agendado', pagado_en: '2026-02-01' });
+      await db.marcarTrabajoRealizado('ESTABLE-0'); // Pierde urgencia, pero conserva otro servicio activo.
+      const desaparece = base[1];
+      await db.pool.query(`UPDATE agendamientos SET data = data || '{"trabajo_hecho":true}'
+        WHERE data->>'cliente_id' = $1 OR ('pedido:' || (data->>'pedido_ref')) = $2 OR ('servicio:' || ref) = $2`,
+      [desaparece.replace('cliente:', ''), desaparece]);
+      await db.pool.query(`INSERT INTO agendamientos(ref,data) VALUES
+        ('NUEVO', '{"ref":"NUEVO","cliente_id":"NUEVO","adelanto":"incluido","estado":"agendado","tipo_servicio":"trabajo","pagado_en":"2025-01-01"}')`);
+      const segunda = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina: 2 });
+      assert.deepEqual(agruparClientes(segunda.registros).map(g => claveCliente(g.registros[0])), base.slice(15, 30),
+        'Ni confirmar urgencia ni entregar otro comprador desplaza la segunda página');
+      const recorrido = [];
+      for (let pagina = 1; pagina <= primera.paginas; pagina++) {
+        const resultado = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina });
+        assert.equal(resultado.vista, primera.vista);
+        assert.equal(resultado.personas, 39);
+        assert.ok(!resultado.registros.some(r => r.ref === 'LECTURA-ESTABLE' || r.ref === 'NUEVO'));
+        recorrido.push(...agruparClientes(resultado.registros).map(g => claveCliente(g.registros[0])));
+      }
+      assert.deepEqual(recorrido, base.filter(clave => clave !== desaparece),
+        'Cada comprador que sigue activo aparece exactamente una vez en el recorrido');
+      const repetida = await db.listarAgendaPanel({ ...opciones, vista: primera.vista });
+      assert.ok(!repetida.registros.some(r => r.ref === 'ESTABLE-0'), 'Nunca resucita servicios entregados');
+      assert.ok(repetida.registros.some(r => r.ref === 'OTRO-SERVICIO'), 'Conserva otros pedidos del comprador');
+      const ultima = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina: 3 });
+      assert.equal(ultima.registros.find(r => r.ref === 'ESTABLE-34').estado, 'agendado', 'El estado de pago es actual');
+      const fresca = await db.listarAgendaPanel(opciones);
+      assert.notEqual(fresca.vista, primera.vista);
+      assert.equal(fresca.registros[0].ref, 'NUEVO', 'Actualizar recoge altas y recalcula prioridad');
+      for (const cambio of [{ buscar: 'OTRO-PEDIDO' }, { estado: 'pendiente_pago' }, { tipo: 'lectura' }, { sesion: 'otra-sesion' }]) {
+        const nueva = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina: 3, ...cambio });
+        assert.notEqual(nueva.vista, primera.vista);
+        assert.equal(nueva.pagina, 1);
+        assert.equal(nueva.reiniciada, true);
+        if (cambio.buscar) assert.deepEqual(nueva.registros.map(r => r.ref), ['OTRO-SERVICIO']);
+        if (cambio.estado) assert.equal(nueva.personas, 0);
+        if (cambio.tipo) assert.deepEqual(nueva.registros.map(r => r.ref), ['LECTURA-ESTABLE']);
+      }
+      for (const vista of ['------------------------------------', 'no-es-uuid']) {
+        assert.equal((await db.listarAgendaPanel({ ...opciones, vista, pagina: 3 })).pagina, 1);
+      }
+      await db.pool.query(`UPDATE agenda_vistas SET vence_en = now() - interval '1 second' WHERE id = $1`, [primera.vista]);
+      const vencida = await db.listarAgendaPanel({ ...opciones, vista: primera.vista, pagina: 3 });
+      assert.equal(vencida.pagina, 1);
+      assert.equal(vencida.reiniciada, true);
+      assert.equal((await db.pool.query('SELECT 1 FROM agenda_vistas WHERE id = $1', [primera.vista])).rowCount, 0);
+      const d = parseHTML(templates.adminDashboard({ registros: vencida.registros, agenda: vencida })).document;
+      assert.match(d.querySelector('[data-sec=agenda]').textContent, /vista anterior caducó/);
+      assert.ok(new URL(d.querySelector('[aria-label="Páginas de la agenda"] a').href, 'http://fixture').searchParams.get('vista'));
+    });
+    // Recuperar la colección original para las comprobaciones siguientes.
+    await db.pool.query('DELETE FROM agendamientos');
+    await db.pool.query(`INSERT INTO agendamientos(ref,data)
+      SELECT value->>'ref',value FROM jsonb_array_elements($1::jsonb)`, [JSON.stringify(registros)]);
     assert.doesNotMatch(htmlUrgentes, /⚡ Trabajos con adelanto incluido/,
       'Un adelanto rechazado no aparece como entrega prioritaria');
     assert.match(htmlUrgentes, /Incluye adelanto · sin pago confirmado/);

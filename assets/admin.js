@@ -107,7 +107,7 @@
       });
       var destino = tab === 'agenda' ? agendaUrl : (url || urlTab(tab));
       if (guardarHistoria) history.pushState(null, '', destino);
-      else if (conservarPosicion) history.replaceState(null, '', destino);
+      else history.replaceState(null, '', destino);
       if (focoBusqueda && conservarPosicion) {
         campo = document.getElementById('buscador');
         if (campo) { campo.focus({ preventScroll: true }); campo.setSelectionRange(cursor, cursor); }
@@ -168,6 +168,10 @@
       var destino = new URL(agenda.getAttribute('href'), location.href);
       var campo = document.getElementById('buscador');
       if (campo && (agenda.hasAttribute('data-filtro') || agenda.closest('[aria-label="Páginas de la agenda"]'))) {
+        if (campo.value.trim() !== (destino.searchParams.get('buscar') || '')) {
+          destino.searchParams.delete('vista');
+          destino.searchParams.set('pagina', '1');
+        }
         destino.searchParams.set('buscar', campo.value);
       }
       if (!mutando) navegar('agenda', true, destino.pathname + destino.search, true);
@@ -266,6 +270,8 @@
   window.addEventListener('popstate', function () {
     if (!mutando) navegar(new URLSearchParams(location.search).get('tab') || 'agenda', false, location.pathname + location.search);
   });
+  // Guardar la primera vista también: Atrás y una recarga conservan el recorrido.
+  if (agendaInicial && activa() === 'agenda') history.replaceState(null, '', agendaUrl);
   filtrar();
   var crear = document.querySelector('.catalog-create form');
   if (crear) sugerir(crear, true);

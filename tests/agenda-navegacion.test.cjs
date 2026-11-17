@@ -8,23 +8,30 @@ const { parseHTML } = require('linkedom');
 const templates = require('../lib/templates');
 const { opcionesAgenda } = require('../lib/agenda-panel');
 
-test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta última página y totales', async () => {
+test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas y actualizar renueva la vista', async () => {
   let trabajos = Array.from({ length: 31 }, (_, i) => ({
     ref: 'R-' + i, cliente_id: 'C-' + i, cliente_nombre: 'Comprador ' + i,
     producto: 'Servicio', estado: 'agendado',
   }));
   const solicitudes = [], eventos = {}, mensajes = [];
+  const vistas = new Map();
   const location = { pathname: '/admin', search: '?tab=agenda&pagina=2', href: 'http://fixture/admin' };
   function render(url) {
     const params = Object.fromEntries(new URL(url, 'http://fixture').searchParams);
     const filtros = opcionesAgenda(params);
     const lista = trabajos.filter(r => !filtros.buscar || r.cliente_nombre.includes(filtros.buscar));
-    const paginas = Math.max(1, Math.ceil(lista.length / 15));
+    let vista = params.vista;
+    if (!vistas.has(vista)) {
+      vista = 'vista-' + vistas.size;
+      vistas.set(vista, lista.map(r => r.ref));
+    }
+    const refs = vistas.get(vista);
+    const paginas = Math.max(1, Math.ceil(refs.length / 15));
     const pagina = Math.min(filtros.pagina, paginas);
     return templates.adminDashboard({
       tabActiva: params.tab || 'agenda', cargaPorPestana: true,
-      registros: lista.slice((pagina - 1) * 15, pagina * 15),
-      agenda: { ...filtros, pagina, paginas, personas: lista.length, trabajos: lista.length },
+      registros: refs.slice((pagina - 1) * 15, pagina * 15).flatMap(ref => trabajos.filter(r => r.ref === ref)),
+      agenda: { ...filtros, vista, pagina, paginas, personas: refs.length, trabajos: refs.length },
       resumen: { total: trabajos.length, agendados: trabajos.filter(r => r.estado === 'agendado' && !r.trabajo_hecho).length,
         personas_agendadas: trabajos.filter(r => r.estado === 'agendado' && !r.trabajo_hecho).length },
     });
@@ -56,7 +63,10 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
     document.querySelector(selector).click();
     await terminar();
   };
+  const vistaInicial = new URLSearchParams(location.search).get('vista');
+  assert.ok(vistaInicial, 'La primera carga registra la vista en el historial');
   await click('[aria-label="Páginas de la agenda"] a:last-child');
+  assert.equal(new URLSearchParams(location.search).get('vista'), vistaInicial);
   assert.equal(new URLSearchParams(location.search).get('pagina'), '3');
   assert.equal(document.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 1);
   const form = document.querySelector('.trabajo-form');
@@ -64,10 +74,14 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
   form.dispatchEvent(new (parseHTML('').window.Event)('submit', { bubbles: true, cancelable: true }));
   await terminar();
   assert.ok(mensajes.includes('Trabajo marcado como entregado'));
-  assert.equal(new URLSearchParams(location.search).get('pagina'), '2', 'Se ajusta la página al entregar el último comprador');
+  assert.equal(new URLSearchParams(location.search).get('pagina'), '3', 'Entregar no mueve los límites del recorrido');
+  assert.equal(new URLSearchParams(location.search).get('vista'), vistaInicial);
   assert.equal(document.querySelector('#stat-personas').textContent, '30');
   assert.equal(document.querySelector('#stat-agendados').textContent, '30', 'El contador baja al entregar un trabajo');
   assert.equal(document.querySelector('#stat-total').textContent, '30', 'El total activo se sincroniza también');
+  assert.equal(document.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 0);
+  assert.match(document.querySelector('#sin-resultados').textContent, /ya no tienen servicios activos/);
+  await click('[aria-label="Páginas de la agenda"] a');
   assert.equal(document.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 15);
   assert.ok(solicitudes.some(u => u.includes('tab=realizados')));
   await click('[data-tab="realizados"]');
@@ -84,9 +98,22 @@ test('Navegación AJAX conserva búsqueda, historial y página; entregar ajusta 
   await click('[data-filtro=agendado]');
   assert.equal(new URLSearchParams(location.search).get('buscar'), 'Comprador 2');
   assert.equal(document.querySelector('#buscador').value, 'Comprador 2');
+  assert.notEqual(new URLSearchParams(location.search).get('vista'), vistaInicial);
+  const antesDeActualizar = new URLSearchParams(location.search).get('vista');
+  await click('#agenda-busqueda a[href*="pagina=1"]');
+  assert.notEqual(new URLSearchParams(location.search).get('vista'), antesDeActualizar);
+  assert.equal(new URLSearchParams(location.search).get('buscar'), 'Comprador 2');
   location.search = '?tab=agenda&pagina=2';
   eventos.popstate();
   await terminar();
   assert.equal(document.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 15);
   assert.equal(document.querySelector('#buscador').value, '');
+  assert.ok(new URLSearchParams(location.search).get('vista'), 'Atrás normaliza la URL con su vista');
+  const urlPagina = document.querySelector('[aria-label="Páginas de la agenda"] a');
+  document.querySelector('#buscador').value = 'Comprador 2';
+  urlPagina.click(); // Navegar antes de que termine la espera de búsqueda.
+  await terminar();
+  const ultimaSolicitud = new URL(solicitudes.at(-1), 'http://fixture');
+  assert.equal(ultimaSolicitud.searchParams.get('vista'), null);
+  assert.equal(ultimaSolicitud.searchParams.get('pagina'), '1');
 });
