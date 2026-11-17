@@ -7,6 +7,42 @@
   var agendaUrl = agendaInicial ? agendaInicial.dataset.url : '/admin?tab=agenda';
   function seccion(id, root) { return (root || document).querySelector('[data-sec="' + id + '"]'); }
   function activa() { var el = document.querySelector('.admin-sec.activo'); return el ? el.dataset.sec : 'agenda'; }
+  // Solo marcas en el DOM: no copiar notas ni archivos a almacenamiento persistente.
+  var revisionBorradores = 0;
+  var revisionesFormulario = new WeakMap();
+  var saliendo = false;
+  var urlVisible = location.pathname + location.search;
+  function borradores(root) {
+    return (root || document).querySelectorAll('form[data-agenda-borrador][data-agenda-editado]');
+  }
+  function confirmarBorradores(root) {
+    return !borradores(root).length || window.confirm(
+      'Hay notas, archivos seleccionados o cambios sin guardar. Al continuar pueden perderse. ¿Continuar?');
+  }
+  function marcarBorrador(campo) {
+    var form = campo.closest('form[data-agenda-borrador]');
+    if (!form) return;
+    form.setAttribute('data-agenda-editado', '');
+    revisionBorradores++;
+    revisionesFormulario.set(form, revisionBorradores);
+    // Una búsqueda pendiente no debe borrar lo que acaba de escribirse.
+    clearTimeout(busquedaTimer);
+    ++navegacion;
+  }
+  function limpiarBorradores() {
+    borradores().forEach(function (form) {
+      form.reset();
+      form.removeAttribute('data-agenda-editado');
+    });
+  }
+  window.addEventListener('beforeunload', function (e) {
+    if (saliendo || !borradores().length) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+  // No recuperar notas ni archivos mediante la caché Atrás/Adelante tras salir.
+  window.addEventListener('pagehide', limpiarBorradores);
+  window.addEventListener('pageshow', function () { saliendo = false; });
   var comprobandoAgenda = false;
   var fallosAgenda = 0;
   var estadoComprobacion = '';
@@ -118,9 +154,13 @@
       filtrar();
     } catch (e) { mostrarToast('Precios guardados. Recarga el catálogo para actualizar su historial.', 'error'); }
   });
-  function reemplazar(tab, doc) {
+  function reemplazar(tab, doc, confirmado) {
     var anterior = seccion(tab), nuevo = seccion(tab, doc);
     if (anterior && nuevo) {
+      // Guardar una fila también refresca las demás: proteger sus borradores.
+      if (!confirmado && !confirmarBorradores(anterior)) {
+        throw new Error('Se conservaron los formularios sin guardar.');
+      }
       var visible = anterior.classList.contains('activo');
       var buscar = anterior.querySelector('#catalogo-buscador');
       var valor = buscar ? buscar.value : '';
@@ -155,17 +195,21 @@
   }
   async function navegar(tab, guardarHistoria, url, conservarPosicion) {
     clearTimeout(busquedaTimer);
+    var origen = seccion(activa()), destinoSeccion = seccion(tab);
+    if (!confirmarBorradores(origen) ||
+        (destinoSeccion !== origen && !confirmarBorradores(destinoSeccion))) return false;
+    var revision = revisionBorradores;
     var turno = ++navegacion;
     var indicador = document.createElement('div'); indicador.className = 'admin-loading';
     document.body.appendChild(indicador);
     try {
       var doc = await cargar(tab, url);
-      if (turno !== navegacion) return;
+      if (turno !== navegacion || revision !== revisionBorradores) return false;
       var y = window.scrollY;
       var campo = document.activeElement;
       var focoBusqueda = campo && campo.id === 'buscador';
       var cursor = focoBusqueda ? campo.selectionStart : null;
-      reemplazar(tab, doc);
+      reemplazar(tab, doc, true);
       document.querySelectorAll('.admin-sec').forEach(function (s) { s.classList.toggle('activo', s.dataset.sec === tab); });
       document.querySelectorAll('.admin-tab').forEach(function (b) { b.classList.toggle('activo', b.dataset.tab === tab); });
       // Los enlaces de tipo están fuera del contenido que reemplaza AJAX.
@@ -178,11 +222,13 @@
       var destino = tab === 'agenda' ? agendaUrl : (url || urlTab(tab));
       if (guardarHistoria) history.pushState(null, '', destino);
       else history.replaceState(null, '', destino);
+      urlVisible = destino;
       if (focoBusqueda && conservarPosicion) {
         campo = document.getElementById('buscador');
         if (campo) { campo.focus({ preventScroll: true }); campo.setSelectionRange(cursor, cursor); }
       }
       window.scrollTo(0, conservarPosicion ? y : 0);
+      return true;
     } catch (err) { if (turno === navegacion) mostrarToast(err.message, 'error'); }
     finally { indicador.remove(); }
   }
@@ -236,8 +282,8 @@
     if (agenda) {
       e.preventDefault();
       if (agenda.hasAttribute('data-agenda-renovar') &&
-          (document.querySelector('[data-sec="agenda"] form[data-agenda-editado]') ||
-            Array.from(document.querySelectorAll('[data-sec="agenda"] .edit-row')).some(function (fila) { return fila.style.display !== 'none'; })) &&
+          !borradores(seccion('agenda')).length &&
+          Array.from(document.querySelectorAll('[data-sec="agenda"] .edit-row')).some(function (fila) { return fila.style.display !== 'none'; }) &&
           !window.confirm('Actualizar renovará el recorrido y los formularios. Los cambios sin guardar se perderán. ¿Continuar?')) return;
       var destino = new URL(agenda.getAttribute('href'), location.href);
       var campo = document.getElementById('buscador');
@@ -255,8 +301,7 @@
     if (tab) { e.preventDefault(); if (!mutando) navegar(tab.dataset.tab, true); return; }
   });
   document.addEventListener('input', function (e) {
-    var edicion = e.target.closest('[data-sec="agenda"] form[method="POST"]');
-    if (edicion) edicion.setAttribute('data-agenda-editado', '');
+    marcarBorrador(e.target);
     if (e.target.matches('#agenda-busqueda [name=buscar]')) {
       clearTimeout(busquedaTimer);
       ++navegacion; // Una respuesta anterior nunca debe sustituir lo recién escrito.
@@ -271,14 +316,21 @@
     if (e.target.matches('.catalog-panel input, .catalog-panel textarea, .catalog-panel select, [data-usuarios-form] input')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
   });
   document.addEventListener('change', function (e) {
-    var edicion = e.target.closest('[data-sec="agenda"] form[method="POST"]');
-    if (edicion) edicion.setAttribute('data-agenda-editado', '');
+    marcarBorrador(e.target);
     if (e.target.matches('.catalog-panel select, [data-usuarios-form] select')) { e.target.removeAttribute('aria-invalid'); e.target.setCustomValidity(''); }
     if (e.target.matches('#catalogo-filtro')) filtrar();
     if (e.target.matches('.catalog-create [name=tipo]')) sugerir(e.target.form);
   });
   document.addEventListener('submit', async function (e) {
     var form = e.target;
+    if (new URL(form.getAttribute('action') || location.href, location.href).pathname === '/admin/logout') {
+      if (e.defaultPrevented) return;
+      if (!confirmarBorradores()) { e.preventDefault(); return; }
+      // La salida sigue siendo un POST normal; no interceptarla con AJAX.
+      saliendo = true;
+      limpiarBorradores();
+      return;
+    }
     if (form.id === 'agenda-busqueda') {
       e.preventDefault();
       if (!mutando) navegar('agenda', false, '/admin?' + new URLSearchParams(new FormData(form)).toString(), true);
@@ -301,6 +353,7 @@
     var original = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
     form.setAttribute('aria-busy', 'true');
+    var revisionEnvio = revisionesFormulario.get(form);
     var guardado = false;
     try {
       var datos = new FormData(form);
@@ -320,6 +373,11 @@
       }
       if (!r.ok || !d.ok) { errorFormulario(form, d.error || 'No se pudo guardar.', d.campos); return; }
       guardado = true;
+      // Solo el envío explícito y confirmado limpia este formulario, nunca los demás.
+      if (revisionEnvio === revisionesFormulario.get(form)) {
+        form.removeAttribute('data-agenda-editado');
+        form.querySelectorAll('input[type=file]').forEach(function (campo) { campo.value = ''; });
+      }
       if (trabajo) {
         var docs = await Promise.all([cargar('agenda'), cargar('realizados')]);
         reemplazar('agenda', docs[0]); reemplazar('realizados', docs[1]);
@@ -345,11 +403,19 @@
       form.removeAttribute('aria-busy'); mutando = false;
     }
   });
-  window.addEventListener('popstate', function () {
-    if (!mutando) navegar(new URLSearchParams(location.search).get('tab') || 'agenda', false, location.pathname + location.search);
+  window.addEventListener('popstate', async function () {
+    var anterior = urlVisible;
+    var destino = location.pathname + location.search;
+    if ((mutando || !await navegar(new URLSearchParams(location.search).get('tab') || 'agenda', false, destino)) &&
+        location.pathname + location.search === destino) {
+      history.pushState(null, '', anterior);
+    }
   });
   // Guardar la primera vista también: Atrás y una recarga conservan el recorrido.
-  if (agendaInicial && activa() === 'agenda') history.replaceState(null, '', agendaUrl);
+  if (agendaInicial && activa() === 'agenda') {
+    history.replaceState(null, '', agendaUrl);
+    urlVisible = agendaUrl;
+  }
   filtrar();
   var crear = document.querySelector('.catalog-create form');
   if (crear) sugerir(crear, true);
