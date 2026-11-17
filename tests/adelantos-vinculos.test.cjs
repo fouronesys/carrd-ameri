@@ -60,6 +60,15 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
     };
     const admin = await login('admin-aislado');
     const assistant = await login('asistente-aislado');
+    assert.equal((await request('/admin/usuarios', admin, {
+      usuario: 'operador', nombre: 'Operador de prueba', rol: 'admin', password: 'operador-aislado',
+    })).status, 200);
+    const namedLogin = await request('/admin/login', '', { usuario: 'operador', password: 'operador-aislado' });
+    assert.equal(namedLogin.status, 302);
+    const namedAdmin = namedLogin.headers.get('set-cookie').split(';')[0];
+    const operador = await db.obtenerUsuarioAdmin('operador');
+    const actor = { usuario: 'prueba', usuario_id: 'fixture', rol: 'admin', password: 'no-guardar', cookie: 'no-guardar' };
+    const vincular = (ref, servicio, anterior) => db.vincularAdelanto(ref, servicio, anterior, actor);
     const base = { estado: 'agendado', cliente_id: 'COMPRADOR', cliente_nombre: 'Comprador de prueba',
       precio_cop: 30000, pedido_total_cop: 65432, metodo: 'wompi', pagado_en: '2026-11-01' };
     const datos = [
@@ -105,11 +114,14 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
         assert.equal((await guardar('S1')).status, 400);
         await db.actualizarPorRef('A', { trabajo_hecho: false, eliminado_en: null });
       }
-      await assert.rejects(db.vincularAdelanto('INV-A', 'INV-OTRO', ''), /mismo comprador/);
-      await assert.rejects(db.vincularAdelanto('SIN-ID-A', 'SIN-ID-S', ''), /mismo comprador/);
-      await db.vincularAdelanto('INV-A', 'INV-S', '');
-      await db.vincularAdelanto('INV-A', '', 'INV-S');
+      await assert.rejects(vincular('INV-A', 'INV-OTRO', ''), /mismo comprador/);
+      await assert.rejects(vincular('SIN-ID-A', 'SIN-ID-S', ''), /mismo comprador/);
+      await assert.rejects(db.vincularAdelanto('A', 'S1', ''), { status: 403 });
+      await assert.rejects(db.vincularAdelanto('A', 'S1', '', { usuario: 'asistente', rol: 'asistente' }), { status: 403 });
+      await vincular('INV-A', 'INV-S', '');
+      await vincular('INV-A', '', 'INV-S');
       assert.equal(await db.obtenerVinculoAdelanto('A'), '');
+      assert.equal((await db.obtenerPorRef('A')).adelanto_historial, undefined);
     });
 
     await t.test('Formulario real, asignación, cambio entre tipos y desvinculación', async () => {
@@ -123,6 +135,7 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
       assert.equal(d.querySelectorAll('segura').length, 0);
       const vistaLector = await db.listarAgendaPanel({ tipo: 'trabajo', sesion: 'otro-administrador' });
       assert.equal(vistaLector.cambios, false);
+      assert.match(d.body.textContent, /No hay cambios de vinculación registrados/);
       res = await guardar('S1');
       assert.equal(res.status, 302);
       assert.deepEqual(await db.listarAgendaPanel({
@@ -140,7 +153,11 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
       d = parseHTML(await res.text()).document;
       assert.equal(d.querySelector('input[name=anterior]').value, 'S1');
       assert.ok(d.querySelector('option[value=S1]').hasAttribute('selected'));
-      assert.equal((await guardar('S2', 'S1')).status, 302);
+      const cambio = await request('/admin/adelanto/A', namedAdmin, {
+        servicio_ref: 'S2', anterior: 'S1', usuario: 'falsificado', usuario_id: 'falso',
+        actor: 'falsificado', fecha: '1900-01-01', password: 'no-guardar',
+      });
+      assert.equal(cambio.status, 302);
       assert.equal((await guardar('S1', 'S1')).status, 409, 'No sobrescribe un formulario obsoleto');
       agenda = await db.listarAgendaPanel({ tipo: 'lectura', buscar: 'urgencia' });
       assert.deepEqual(agenda.registros.map(r => r.ref), ['S2'], 'Búsqueda funciona aunque el adelanto sea de otro tipo');
@@ -148,32 +165,84 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
       assert.equal((await guardar('', 'S2')).status, 302);
       assert.equal(await db.obtenerVinculoAdelanto('A'), '');
       assert.equal((await db.listarAgendaPanel({ tipo: 'lectura', buscar: 'urgencia' })).personas, 0);
+      const historial = (await db.obtenerPorRef('A')).adelanto_historial;
+      assert.deepEqual(historial.map(h => h.accion), ['asignacion', 'cambio', 'desvinculacion']);
+      assert.deepEqual(historial.map(h => [h.anterior?.ref || null, h.nuevo?.ref || null]),
+        [[null, 'S1'], ['S1', 'S2'], ['S2', null]]);
+      assert.deepEqual(historial[0].actor, { usuario: 'administrador', usuario_id: '', rol: 'admin' });
+      assert.deepEqual(historial[1].actor, { usuario: 'operador', usuario_id: operador.id, rol: 'admin' });
+      assert.ok(historial.every(h => Number.isFinite(Date.parse(h.fecha)) && h.fecha.startsWith(new Date().toISOString().slice(0, 10))));
+      assert.doesNotMatch(JSON.stringify(historial), /falsificado|no-guardar|password|cookie|precio_cop|SESSION_SECRET/);
+      assert.equal((await guardar('')).status, 302, 'Reenviar sin cambios es inocuo');
+      assert.deepEqual((await db.obtenerPorRef('A')).adelanto_historial, historial);
+      await db.actualizarPorRef('S2', { producto: 'Renombrado después' });
+      d = parseHTML(await (await request('/admin/adelanto/A', admin)).text()).document;
+      const entradas = [...d.querySelectorAll('.historial li')];
+      assert.equal(entradas.length, 3);
+      assert.match(entradas[0].textContent, /Desvinculación.*S2/s);
+      assert.match(entradas[0].textContent, /Lectura <segura>/);
+      assert.doesNotMatch(d.querySelector('.historial').textContent, /Renombrado después/);
+      assert.match(entradas[1].textContent, /operador/);
+      assert.equal(d.querySelectorAll('segura').length, 0);
+      await db.actualizarPorRef('S2', { producto: 'Lectura <segura>' });
+    });
+
+    await t.test('Auditoría y asociación se revierten juntas si falla la escritura o el commit', async () => {
+      const original = await db.obtenerPorRef('A');
+      await db.pool.query(`CREATE FUNCTION rechazar_auditoria_adelanto() RETURNS trigger LANGUAGE plpgsql AS
+        $$ BEGIN RAISE EXCEPTION 'fallo de auditoria simulado'; END $$;
+        CREATE TRIGGER fallo_auditoria_adelanto BEFORE UPDATE ON agendamientos
+        FOR EACH ROW WHEN (NEW.data->'adelanto_historial' IS DISTINCT FROM OLD.data->'adelanto_historial')
+        EXECUTE FUNCTION rechazar_auditoria_adelanto()`);
+      try {
+        await assert.rejects(vincular('A', 'S1', ''), /fallo de auditoria simulado/);
+        assert.deepEqual(await db.obtenerPorRef('A'), original);
+      } finally {
+        await db.pool.query('DROP TRIGGER fallo_auditoria_adelanto ON agendamientos');
+      }
+      await db.pool.query(`CREATE CONSTRAINT TRIGGER fallo_commit_adelanto AFTER UPDATE ON agendamientos
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+        EXECUTE FUNCTION rechazar_auditoria_adelanto()`);
+      try {
+        await assert.rejects(vincular('A', 'S1', ''), /fallo de auditoria simulado/);
+        assert.deepEqual(await db.obtenerPorRef('A'), original);
+      } finally {
+        await db.pool.query('DROP TRIGGER fallo_commit_adelanto ON agendamientos; DROP FUNCTION rechazar_auditoria_adelanto()');
+      }
     });
 
     await t.test('Asociación única incluso con dos asignaciones simultáneas', async () => {
-      const resultados = await Promise.allSettled([db.vincularAdelanto('A', 'S1', ''), db.vincularAdelanto('B', 'S1', '')]);
+      const contar = async () => {
+        const registros = await Promise.all(['A', 'B'].map(ref => db.obtenerPorRef(ref)));
+        return registros.reduce((n, r) => n + (r.adelanto_historial || []).length, 0);
+      };
+      const antes = await contar();
+      const resultados = await Promise.allSettled([vincular('A', 'S1', ''), vincular('B', 'S1', '')]);
       assert.equal(resultados.filter(r => r.status === 'fulfilled').length, 1);
+      assert.equal(await contar(), antes + 1, 'Solo el ganador registra auditoría');
       assert.equal(resultados.find(r => r.status === 'rejected').reason.status, 409);
       const ganador = (await db.obtenerVinculoAdelanto('A')) ? 'A' : 'B';
       const perdedor = ganador === 'A' ? 'B' : 'A';
       assert.ok(!(await db.candidatosAdelanto(perdedor)).some(r => r.ref === 'S1'));
-      await db.vincularAdelanto(perdedor, 'S2', '');
-      await assert.rejects(db.vincularAdelanto(perdedor, 'S1', 'S2'), { status: 409 });
+      await vincular(perdedor, 'S2', '');
+      const previo = await db.obtenerPorRef(perdedor);
+      await assert.rejects(vincular(perdedor, 'S1', 'S2'), { status: 409 });
+      assert.deepEqual(await db.obtenerPorRef(perdedor), previo);
       assert.equal(await db.obtenerVinculoAdelanto(perdedor), 'S2', 'El conflicto no pierde la asociación anterior');
-      await db.vincularAdelanto(ganador, '', 'S1');
-      await db.vincularAdelanto(perdedor, '', 'S2');
+      await vincular(ganador, '', 'S1');
+      await vincular(perdedor, '', 'S2');
       // Preview comparte base pero no migra: no depende de un índice nuevo.
       await db.pool.query('DROP INDEX agendamientos_adelanto_servicio_idx');
-      const sinIndice = await Promise.allSettled([db.vincularAdelanto('A', 'S1', ''), db.vincularAdelanto('B', 'S1', '')]);
+      const sinIndice = await Promise.allSettled([vincular('A', 'S1', ''), vincular('B', 'S1', '')]);
       assert.equal(sinIndice.filter(r => r.status === 'fulfilled').length, 1);
       assert.equal(sinIndice.find(r => r.status === 'rejected').reason.status, 409);
       const unico = (await db.obtenerVinculoAdelanto('A')) ? 'A' : 'B';
-      await db.vincularAdelanto(unico, '', 'S1');
+      await vincular(unico, '', 'S1');
       await db.init();
     });
 
     await t.test('Pago, entrega, borrado y restauración recalculan prioridad sin duplicados', async () => {
-      await db.vincularAdelanto('A', 'S1', '');
+      await vincular('A', 'S1', '');
       const prioridad = async () => (await db.listarAgendaPanel({ buscar: 'S1' })).registros.find(r => r.ref === 'S1');
       const { esAdelantoPrioritario } = require('../lib/agenda-panel');
       assert.ok(esAdelantoPrioritario(await prioridad()));
@@ -195,12 +264,12 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
       const actuales = await db.pool.query('SELECT ref,data FROM agendamientos ORDER BY ref');
       for (let i = 0; i < originales.rows.length; i++) {
         const limpiar = r => {
-          const { trabajo_hecho, trabajo_hecho_en, eliminado_en, adelanto_servicio_ref, ...resto } = r.data;
+          const { trabajo_hecho, trabajo_hecho_en, eliminado_en, adelanto_servicio_ref, adelanto_historial, ...resto } = r.data;
           return { ref: r.ref, data: resto };
         };
         assert.deepEqual(limpiar(actuales.rows[i]), limpiar(originales.rows[i]));
       }
-      await db.vincularAdelanto('A', '', 'S1');
+      await vincular('A', '', 'S1');
       // El nuevo comprador urgente debe entrar antes de paginar.
       await db.actualizarPorRef('INCLUIDO', { estado: 'rechazado' });
       for (let i = 0; i < 18; i++) await db.crearAgendamiento({
@@ -209,7 +278,7 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
       const sesion = 'recorrido-adelantos-aislado';
       const recorrido = await db.listarAgendaPanel({ sesion });
       assert.ok(!recorrido.registros.some(r => r.cliente_id === 'COMPRADOR'));
-      await db.vincularAdelanto('A', 'S2', '');
+      await vincular('A', 'S2', '');
       const conservada = await db.listarAgendaPanel({ sesion, vista: recorrido.vista });
       assert.deepEqual(conservada.registros.map(r => r.ref), recorrido.registros.map(r => r.ref),
         'Vincular no mueve compradores entre páginas de un recorrido abierto');

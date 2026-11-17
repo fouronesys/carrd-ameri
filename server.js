@@ -1869,9 +1869,9 @@ app.get('/admin/adelanto/:ref', requiereAdmin, soloAdmin, async function (req, r
   const adelanto = await db.obtenerPorRef(req.params.ref);
   if (!adelanto) return res.status(404).send('Adelanto no encontrado.');
   if (adelanto.adelanto !== 'solo') return res.status(400).send('Este registro no es un adelanto independiente.');
-  const [actual, candidatos] = await Promise.all([
-    db.obtenerVinculoAdelanto(adelanto.ref), db.candidatosAdelanto(adelanto.ref),
-  ]);
+  // Asociación e historial provienen de la misma lectura, incluso con otra sesión activa.
+  const actual = adelanto.adelanto_servicio_ref || '';
+  const candidatos = await db.candidatosAdelanto(adelanto.ref);
   const servicioActual = actual ? await db.obtenerPorRef(actual) : null;
   res.set('Cache-Control', 'no-store');
   res.send(templates.panelAdelanto({ adelanto, actual, candidatos, servicioActual }));
@@ -1884,7 +1884,9 @@ app.post('/admin/adelanto/:ref', mismoOrigen, requiereAdmin, soloAdmin, async fu
     return res.status(400).send('Selecciona un servicio o la opción para desvincular.');
   }
   try {
-    await db.vincularAdelanto(req.params.ref, b.servicio_ref.trim(), b.anterior);
+    await db.vincularAdelanto(req.params.ref, b.servicio_ref.trim(), b.anterior, {
+      usuario: req.session.usuario, usuario_id: req.session.usuario_id, rol: req.session.rol,
+    });
     res.redirect('/admin?tab=agenda&tipo=todos&buscar=' + encodeURIComponent(req.params.ref) +
       '&ok=' + encodeURIComponent(b.servicio_ref ? 'Vinculación guardada' : 'Adelanto desvinculado'));
   } catch (e) {
