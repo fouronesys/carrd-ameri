@@ -74,10 +74,10 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     servidor = app.listen(0, '127.0.0.1');
     await once(servidor, 'listening');
     const base = 'http://127.0.0.1:' + servidor.address().port;
-    async function login(password) {
+    async function login(password, usuario = '') {
       const r = await fetch(base + '/admin/login', {
         method: 'POST', redirect: 'manual', headers: { Origin: base },
-        body: new URLSearchParams({ password }),
+        body: new URLSearchParams({ password, usuario }),
       });
       assert.equal(r.status, 302);
       return r.headers.get('set-cookie').split(';')[0];
@@ -179,7 +179,9 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.deepEqual(new Set(pendientes.operaciones.map(op => op.ref)), new Set(['ERROR', 'ESTADO']));
     assert.equal(pendientes.hayMas, false);
     for (const op of pendientes.operaciones) {
-      assert.deepEqual(Object.keys(op).sort(), ['correo', 'creado_en', 'ref']);
+      assert.deepEqual(Object.keys(op).sort(), ['clave', 'correo', 'creado_en', 'recepcion_verificada_en', 'recepcion_verificada_por', 'ref']);
+      assert.equal(op.recepcion_verificada_en, null);
+      assert.equal(op.recepcion_verificada_por, null);
       assert.ok(op.creado_en instanceof Date);
     }
     const { parseHTML } = require('linkedom');
@@ -199,7 +201,14 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
       assert.match(panel.textContent, /no_confirmado/);
       assert.match(panel.textContent, /verifica la recepción/);
       assert.equal(panel.querySelectorAll('tbody tr').length, 2);
-      assert.equal(panel.querySelector('form, img, input[type=file]'), null);
+      assert.equal(panel.querySelector('img, input[type=file]'), null);
+      assert.equal(panel.querySelectorAll('form').length, 2);
+      for (const form of panel.querySelectorAll('form')) {
+        assert.equal(form.getAttribute('method').toLowerCase(), 'post');
+        assert.ok(form.querySelector('input[name=operacion]').value);
+        assert.ok(form.querySelector('input[type=checkbox][required]'));
+        assert.match(form.getAttribute('action'), /\/verificar-recepcion$/);
+      }
     }
     for (const headers of [{}, { Cookie: asistente }]) {
       const r = await fetch(base + consulta, { headers });
@@ -233,6 +242,99 @@ test('Evidencia HTTP y PostgreSQL: respuesta perdida, concurrencia y correo sin 
     assert.equal(paginaDos.querySelectorAll('tbody tr').length, 4);
     assert.match(paginaDos.textContent, /Página 2/);
     assert.ok(paginaDos.querySelector('a[href$="ev_pagina=1"]'));
+    // Migración de operaciones históricas: no fabricar fecha ni autor.
+    await db.pool.query(`ALTER TABLE evidencia_operaciones
+      DROP COLUMN recepcion_verificada_en, DROP COLUMN recepcion_verificada_por`);
+    // init se ejecuta una vez por proceso: cargar otra instancia simula
+    // un arranque nuevo contra un esquema anterior.
+    const moduloDb = require.cache[require.resolve('../lib/db')];
+    delete require.cache[require.resolve('../lib/db')];
+    const migracion = require('../lib/db');
+    try {
+      await migracion.init();
+      await migracion.init();
+    } finally {
+      await migracion.cerrar();
+      require.cache[require.resolve('../lib/db')] = moduloDb;
+    }
+    assert.equal((await db.listarCorreosEvidenciaPendientes()).operaciones[0].recepcion_verificada_en, null);
+    const verificar = (ref, clave, opciones = {}) => fetch(base + '/admin/evidencia/' + encodeURIComponent(ref) + '/verificar-recepcion', {
+      method: 'POST', redirect: 'manual',
+      headers: { Cookie: cookie, Origin: base, ...opciones.headers },
+      body: new URLSearchParams({ operacion: clave, recepcion_confirmada: 'si', ...opciones.body }),
+    });
+    const snapshot = (await db.pool.query('SELECT * FROM evidencia_operaciones WHERE ref = $1 AND clave = $2', ['ERROR', errorClave])).rows[0];
+    const registroAntes = await db.obtenerPorRef('ERROR');
+    const sinEfectos = { correos: correos.length, archivos: cantidad() };
+    await assert.rejects(db.verificarRecepcionEvidencia('ERROR', errorClave, { rol: 'asistente', usuario: 'asistente' }), { status: 403 });
+    for (const headers of [{ Cookie: '' }, { Cookie: asistente }, { Origin: 'https://otro.example.invalid' }, { Origin: '' }]) {
+      assert.ok([302, 403].includes((await verificar('ERROR', errorClave, { headers })).status));
+    }
+    for (const body of [{ recepcion_confirmada: '' }, { operacion: 'invalida' }, { operacion: '' }]) {
+      assert.equal((await verificar('ERROR', errorClave, { body })).status, 400);
+    }
+    assert.equal((await verificar('NO-EXISTE', errorClave)).status, 404);
+    assert.equal((await verificar('ERROR', randomUUID())).status, 404);
+    assert.equal((await verificar('PERDIDA', clave)).status, 409);
+    assert.equal((await db.pool.query('SELECT recepcion_verificada_en FROM evidencia_operaciones WHERE ref=$1 AND clave=$2', ['ERROR', errorClave])).rows[0].recepcion_verificada_en, null);
+    const confirmaciones = await Promise.all([verificar('ERROR', errorClave), verificar('ERROR', errorClave)]);
+    for (const r of confirmaciones) {
+      assert.equal(r.status, 303);
+      assert.match(r.headers.get('location'), /ev_vista=verificadas/);
+    }
+    const opVerificada = (await db.pool.query('SELECT * FROM evidencia_operaciones WHERE ref=$1 AND clave=$2', ['ERROR', errorClave])).rows[0];
+    assert.ok(opVerificada.recepcion_verificada_en instanceof Date);
+    assert.ok(opVerificada.recepcion_verificada_en >= snapshot.creado_en);
+    assert.deepEqual(opVerificada.recepcion_verificada_por, { usuario: 'administrador', usuario_id: null, rol: 'admin' });
+    for (const campo of Object.keys(snapshot).filter(campo => !campo.startsWith('recepcion_'))) {
+      assert.deepEqual(opVerificada[campo], snapshot[campo], campo + ' se conserva');
+    }
+    // Identidad derivada de sesión, no de campos enviados; autor nominal
+    // persistido aun después de renombrar o eliminar la cuenta.
+    const { scryptSync } = require('node:crypto');
+    await db.crearUsuarioAdmin({ id: 'admin-verificador', usuario: 'verificador', rol: 'admin',
+      salt: 'sal-sintetica', hash: scryptSync('clave-sintetica', 'sal-sintetica', 64).toString('hex') });
+    const nominal = await login('clave-sintetica', 'verificador');
+    assert.equal((await verificar('ESTADO', estadoClave, { headers: { Cookie: nominal },
+      body: { usuario: 'impostor', usuario_id: 'otro', recepcion_verificada_en: '2000-01-01' } })).status, 303);
+    await db.eliminarUsuarioAdmin('admin-verificador');
+    // Un SMTP tardío puede terminar después de la verificación, sin borrarla.
+    await db.finalizarCorreoEvidencia('ESTADO', estadoClave, 'no_confirmado');
+    assert.equal((await verificar('ERROR', errorClave, { headers: { Cookie: nominal } })).status, 303);
+    assert.deepEqual((await db.pool.query('SELECT * FROM evidencia_operaciones WHERE ref=$1 AND clave=$2', ['ERROR', errorClave])).rows[0], opVerificada);
+    assert.deepEqual(await db.obtenerPorRef('ERROR'), registroAntes);
+    assert.deepEqual({ correos: correos.length, archivos: cantidad() }, sinEfectos);
+    // Leer desde una conexión nueva prueba persistencia, no estado en memoria.
+    const { Pool } = require('pg');
+    const lectura = new Pool({ connectionString: `postgresql://test@127.0.0.1:${port}/postgres`, ssl: false });
+    try {
+      assert.deepEqual((await lectura.query('SELECT * FROM evidencia_operaciones WHERE ref=$1 AND clave=$2', ['ERROR', errorClave])).rows[0], opVerificada);
+    } finally { await lectura.end(); }
+    for (let recarga = 0; recarga < 2; recarga++) {
+      const historial = seccion(await (await fetch(base + consulta + '&ev_vista=verificadas', { headers: { Cookie: cookie } })).text());
+      assert.equal(historial.querySelectorAll('tbody tr').length, 2);
+      assert.equal(historial.querySelector('form'), null);
+      assert.match(historial.textContent, /administrador|Administrador/);
+      assert.match(historial.textContent, /acceso general compartido/);
+      assert.match(historial.textContent, /verificador/);
+      assert.match(historial.textContent, /admin-verificador/);
+      assert.match(historial.textContent, /no_confirmado/);
+      assert.ok(historial.textContent.includes(errorClave));
+    }
+    assert.equal((await db.listarCorreosEvidenciaPendientes(1, 'verificadas')).operaciones.length, 2);
+    assert.equal((await db.listarCorreosEvidenciaPendientes()).operaciones.some(op => op.clave === errorClave), false);
+    for (const headers of [{}, { Cookie: asistente }]) {
+      const r = await fetch(base + consulta + '&ev_vista=verificadas', { headers });
+      assert.equal(seccion(await r.text()), null);
+    }
+    // Paginación independiente del historial, incluso para un mismo trabajo.
+    const resto = (await db.pool.query(`SELECT ref, clave FROM evidencia_operaciones WHERE recepcion_verificada_en IS NULL AND correo IN ('en_proceso','no_confirmado')`)).rows;
+    for (const op of resto) await verificar(op.ref, op.clave);
+    const historialDos = seccion(await (await fetch(base + consulta + '&ev_vista=verificadas&ev_pagina=2', { headers: { Cookie: cookie } })).text());
+    assert.equal(historialDos.querySelectorAll('tbody tr').length, 4);
+    assert.ok(historialDos.querySelector('a[href$="ev_vista=verificadas&ev_pagina=1"]'));
+    assert.equal(historialDos.querySelector('img'), null);
+    assert.deepEqual({ correos: correos.length, archivos: cantidad() }, sinEfectos);
     await db.pool.query('UPDATE evidencia_operaciones SET correo = $1', ['enviado']);
     const vacia = seccion(await (await fetch(base + consulta, { headers: { Cookie: cookie } })).text());
     assert.match(vacia.textContent, /No hay operaciones/);

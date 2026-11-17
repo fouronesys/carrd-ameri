@@ -1627,7 +1627,7 @@ app.get('/admin', async function (req, res) {
       db.resumenPanel(tipo),
       tab === 'usuarios' ? db.listarDestinatariosNotificaciones() : [],
       esAdmin && tab === 'catalogo' ? db.listarHistorialCatalogo(req.query) : null,
-      esAdmin && tab === 'correos_evidencia' ? db.listarCorreosEvidenciaPendientes(req.query.ev_pagina) : null,
+      esAdmin && tab === 'correos_evidencia' ? db.listarCorreosEvidenciaPendientes(req.query.ev_pagina, req.query.ev_vista) : null,
     ]);
     res.set('Cache-Control', 'no-store');
     return res.send(templates.adminDashboard({
@@ -2329,6 +2329,24 @@ app.get('/admin/foto/:nombre', requiereAdmin, function (req, res) {
 // registrado) se le envían por correo. Siempre queda un enlace público con token
 // para poder compartirlo también por WhatsApp.
 const subirEvidencia = cargaProtegida(upload.array('fotos', 10));
+app.post('/admin/evidencia/:ref/verificar-recepcion', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  res.set('Cache-Control', 'no-store');
+  const clave = req.body?.operacion;
+  if (typeof clave !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clave) ||
+      req.body?.recepcion_confirmada !== 'si') {
+    return res.status(400).send('Indica una operación válida y confirma que verificaste la recepción con el cliente.');
+  }
+  try {
+    const resultado = await db.verificarRecepcionEvidencia(req.params.ref, clave, actorCatalogo(req));
+    if (!resultado) return res.status(404).send('Operación de evidencia no encontrada.');
+    return res.redirect(303, '/admin?tab=correos_evidencia&ev_vista=verificadas&ok=' +
+      encodeURIComponent(resultado.repetida ? 'La recepción ya estaba verificada; se conservó la confirmación original.' : 'Recepción verificada con el cliente. No se reenvió ningún correo ni foto.'));
+  } catch (e) {
+    console.error('[evidencia] No se pudo registrar la verificación:', e.message);
+    return res.status(e.status || 500).send(e.status ? e.message : 'No se pudo guardar la verificación. Consulta la lista antes de volver a intentarlo.');
+  }
+});
+
 app.post('/admin/evidencia/:ref', mismoOrigen, requiereAdmin, soloAdmin, function (req, res) {
   subirEvidencia(req, res, async function (err) {
     const archivos = req.files || [];
