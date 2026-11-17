@@ -56,7 +56,8 @@ test('Vencimientos con PostgreSQL aislado, reloj y correo simulados', { timeout:
       ahora = fecha; fallo = false; lanzarError = false; mensajes = []; seguimientos = []; errores = [];
     }
     const refs = () => mensajes.map(m => m.reg.ref);
-    const vincular = (destino, anterior = '') => db.vincularAdelanto('A', destino, anterior);
+    const actor = { usuario: 'admin-prueba-recordatorios', usuario_id: 'admin-prueba', rol: 'admin' };
+    const vincular = (destino, anterior = '') => db.vincularAdelanto('A', destino, anterior, actor);
 
     await t.test('No infiere urgencia por cuenta o pedido; incluido conserva frontera exacta de dos días', async () => {
       await preparar([{ ref: 'A', adelanto: 'solo' }, { ref: 'S' },
