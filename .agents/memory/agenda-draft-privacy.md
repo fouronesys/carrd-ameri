@@ -1,9 +1,15 @@
 ---
 name: Privacidad de borradores de agenda
-description: Decisión de proteger borradores mediante advertencias, sin persistir notas ni archivos de clientes.
+description: Proteger borradores administrativos sin persistir notas, archivos, contraseñas ni otros datos sensibles.
 ---
 
 Proteger los borradores de evidencia y edición de agenda mediante confirmación antes de descartarlos, sin guardarlos de forma permanente ni reenviar evidencia automáticamente.
+
+La misma restricción de privacidad se aplica a catálogo, precios y usuarios: proteger cambios pendientes sin persistir contraseñas ni otros datos sensibles, y sin sustituir el guardado por lotes de precios.
+
+**Why:** El usuario pidió extender la protección de agenda a estos formularios manteniendo esas restricciones.
+
+**How to apply:** Conservar los formularios abiertos en memoria de la página; guardar uno no autoriza a descartar otros borradores.
 
 **Why:** El usuario permite advertir o restaurar por referencia, pero exige incluir la selección de archivos, respetar el cierre de sesión y evitar persistir datos sensibles de clientes. Se eligieron advertencias para no crear un nuevo depósito de esos datos.
 

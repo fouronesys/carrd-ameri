@@ -7,6 +7,14 @@
   // Memoria de la sesión de página: sobrevive a la destrucción/recreación del panel.
   var memoria = { borrador: {}, invalidos: {}, f: null, orden: null };
   function vaciar(o) { Object.keys(o).forEach(function (k) { delete o[k]; }); }
+  window.adminPreciosBorradores = {
+    hay: function (root) {
+      return (!root || !!root.querySelector('[data-panel-precios]')) &&
+        (Object.keys(memoria.borrador).length > 0 || Object.keys(memoria.invalidos).length > 0 ||
+          instancias.some(function (i) { return i.pendiente(); }));
+    },
+    limpiar: function () { vaciar(memoria.borrador); vaciar(memoria.invalidos); instancias.forEach(function (i) { i.limpiar(); }); }
+  };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function norm(s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
@@ -140,6 +148,7 @@
       if (cop === it.precio_cop && usd === it.precio_usd) delete st.borrador[id];
       else st.borrador[id] = { precio_cop: cop, precio_usd: usd, revision: it.revision, nombre: it.nombre };
       st.version++;
+      document.dispatchEvent(new CustomEvent('catalogo:precios-editados'));
     }
     function nBorrador() { return Object.keys(st.borrador).length; }
     function nInvalidos() { return Object.keys(st.invalidos).length; }
@@ -228,6 +237,7 @@
       var clave = it.id + '|' + campo;
       if (!ok) {
         st.invalidos[clave] = { id: it.id, campo: campo, texto: inp.value, revision: it.revision, nombre: it.nombre };
+        document.dispatchEvent(new CustomEvent('catalogo:precios-editados'));
         inp.setAttribute('aria-invalid', 'true');
         if (!err) { err = document.createElement('small'); err.className = 'pp-row-err'; err.id = 'pp-err-' + campo + '-' + it.id.replace(/\W/g, '_'); td.appendChild(err); inp.setAttribute('aria-describedby', err.id); }
         err.textContent = textoError(campo);
@@ -252,6 +262,7 @@
     }
     function cerrar() {
       var ov = q('[data-pp-overlay]'); if (!ov || ov.hidden) return;
+      if (masivoPendiente() && !window.confirm('Hay un ajuste masivo sin aplicar. ¿Cerrar y descartarlo?')) return;
       ov.hidden = true; ov.innerHTML = ''; st.dialogo = null;
       if (st.volverFoco && st.volverFoco.isConnected) st.volverFoco.focus();
     }
@@ -298,6 +309,7 @@
       }
       plan.forEach(function (p) { fijar(p[0], p[1], p[2]); delete st.invalidos[p[0] + '|' + campo]; });
       st.preview = null;
+      f.removeAttribute('data-editado');
       cerrar(); render();
       alerta('ok', esc(plan.length + ' precios actualizados en el borrador.'));
     }
@@ -352,10 +364,15 @@
     var temp = null;
     function onInput(e) {
       var t = e.target;
+      if (t.matches('[data-campo]')) editar(t);
+      var masivo = t.closest('[data-pp-masivo]');
+      if (masivo) { masivo.setAttribute('data-editado', ''); document.dispatchEvent(new CustomEvent('catalogo:precios-editados')); }
       if (t.matches('[data-f="q"]')) { clearTimeout(temp); temp = setTimeout(function () { st.f.q = t.value; st.pagina = 1; render(); }, 160); }
     }
     function onChange(e) {
       var t = e.target;
+      var masivo = t.closest('[data-pp-masivo]');
+      if (masivo) { masivo.setAttribute('data-editado', ''); document.dispatchEvent(new CustomEvent('catalogo:precios-editados')); }
       if (t.dataset.f && t.dataset.f !== 'q') { st.f[t.dataset.f] = t.value; st.pagina = 1; render(); }
       else if (t.matches('[data-pp-orden]')) { var p = t.value.split(':'); st.orden = p[0]; st.dir = Number(p[1]); memoria.orden = [st.orden, st.dir]; render(); }
       else if (t.matches('[data-pp-sel]')) { var id = t.closest('tr').dataset.id; if (t.checked) st.sel[id] = 1; else delete st.sel[id]; contadores(); }
@@ -381,18 +398,21 @@
       else if (a === 'descartar') { if (window.confirm('¿Descartar ' + nBorrador() + ' cambios sin guardar' + (nInvalidos() ? ' y ' + nInvalidos() + ' valores inválidos' : '') + '?')) { vaciar(st.borrador); vaciar(st.invalidos); st.version++; st.preview = null; render(); alerta(null); } }
       else if (a === 'revisar') revisar();
       else if (a === 'confirmar') confirmar();
-      else if (a === 'recargar') { alerta('ok', 'Recargando…'); cargar(true).then(function (n) { informarMerge(n, 'Lista actualizada. Tu borrador se conserva.'); }, function (er) { if (er.name !== 'AbortError') fallo(er); }); }
+      else if (a === 'recargar') {
+        if ((nBorrador() || nInvalidos()) && !window.confirm('Al recargar, los borradores de servicios modificados en el servidor pueden perderse. ¿Continuar?')) return;
+        alerta('ok', 'Recargando…');
+        cargar(true).then(function (n) { informarMerge(n, 'Lista actualizada. Tu borrador se conserva.'); }, function (er) { if (er.name !== 'AbortError') fallo(er); });
+      }
       else if (a === 'reintentar-carga') iniciar();
     }
     function onSubmit(e) { e.preventDefault(); e.stopPropagation(); if (e.target.matches('[data-pp-masivo]') && !st.ocupado) aplicarMasivo(); }
-    function antesDeSalir(e) { if (nBorrador() || nInvalidos()) { e.preventDefault(); e.returnValue = ''; } }
+    function masivoPendiente() { return !!(st.dialogo && st.dialogo.querySelector('[data-pp-masivo][data-editado]')); }
 
     root.addEventListener('input', onInput);
     root.addEventListener('change', onChange);
     root.addEventListener('keydown', onKey);
     root.addEventListener('click', onClick);
     root.addEventListener('submit', onSubmit);
-    window.addEventListener('beforeunload', antesDeSalir);
 
     function iniciar() {
       var habia = nBorrador() + nInvalidos();
@@ -405,6 +425,13 @@
 
     return {
       root: root,
+      pendiente: masivoPendiente,
+      limpiar: function () {
+        var f = st.dialogo && st.dialogo.querySelector('[data-pp-masivo]');
+        if (f) f.removeAttribute('data-editado');
+        cerrar();
+        root.querySelectorAll('[data-campo]').forEach(function (campo) { campo.value = ''; });
+      },
       destruir: function () {
         ctrl.abort(); clearTimeout(temp);
         root.removeEventListener('input', onInput);
@@ -412,7 +439,6 @@
         root.removeEventListener('keydown', onKey);
         root.removeEventListener('click', onClick);
         root.removeEventListener('submit', onSubmit);
-        window.removeEventListener('beforeunload', antesDeSalir);
       }
     };
   }

@@ -8,7 +8,7 @@ const { parseHTML } = require('linkedom');
 const { adminDashboard } = require('../lib/templates');
 
 // Plantillas reales, datos sintéticos y fetch en memoria: sin DB, SMTP ni archivos de clientes.
-function fixture() {
+function fixture(opciones = {}) {
   const registros = [{
     ref: 'BORRADOR-A', cliente_id: 'CLIENTE-A', cliente_nombre: 'Cliente sintético',
     producto: 'Servicio sintético', estado: 'agendado', evidencia_notas: 'Nota guardada',
@@ -18,7 +18,7 @@ function fixture() {
   function render(url = '/admin') {
     const p = new URL(url, 'http://fixture').searchParams;
     return adminDashboard({
-      tabActiva: p.get('tab') || 'agenda', cargaPorPestana: true, registros,
+      ...opciones, tabActiva: p.get('tab') || 'agenda', cargaPorPestana: true, registros,
       agenda: { pagina: Number(p.get('pagina') || 1), paginas: 2, personas: 16, trabajos: 16,
         vista: 'vista-sintetica', buscar: p.get('buscar') || '', estado: p.get('estado') || '' },
     });
@@ -36,6 +36,11 @@ function fixture() {
     historial.push(url);
   };
   document.defaultView.HTMLElement.prototype.scrollIntoView = function () {};
+  Object.defineProperty(document.defaultView.HTMLElement.prototype, 'elements', {
+    configurable: true,
+    get() { return Object.fromEntries([...this.querySelectorAll('[name]')].map(c => [c.name, c])); },
+  });
+  document.defaultView.HTMLElement.prototype.setCustomValidity = function () {};
   // linkedom no implementa reset() ni FileList. El navegador real cubre ambos.
   document.defaultView.HTMLElement.prototype.reset = function () {
     this.querySelectorAll('textarea').forEach(c => { c.value = valoresIniciales.get(c) || ''; });
@@ -135,6 +140,92 @@ test('Buscar, enviar búsqueda y Atrás cancelados conservan borradores e histor
   assert.equal(f.location.search, url);
   assert.equal(f.document.querySelector('.ev-form textarea').value, 'Nota privada sin guardar');
   assert.equal(f.salida().prevented, true, 'La salida nativa también pide confirmación');
+});
+
+for (const tab of ['catalogo', 'usuarios']) {
+  test('Cancelar navegación y Atrás protege formularios de ' + tab, async () => {
+    const f = fixture();
+    await f.click('[data-tab=' + tab + ']');
+    const selector = tab === 'catalogo' ? '.catalog-create [name=nombre]' : '[name=password]';
+    const campo = f.editar(selector, 'Dato sintético pendiente');
+    const n = f.solicitudes.length;
+    await f.click('[data-tab=agenda]');
+    assert.equal(f.solicitudes.length, n);
+    assert.equal(campo.isConnected, true);
+    assert.equal(campo.value, 'Dato sintético pendiente');
+    assert.equal(f.salida().prevented, true);
+    f.location.search = '?tab=agenda';
+    await f.eventos.popstate();
+    assert.match(f.location.search, new RegExp('tab=' + tab));
+    assert.equal(campo.value, 'Dato sintético pendiente');
+  });
+}
+
+test('Guardar un correo conserva la creación de usuario y su contraseña solo en su formulario', async () => {
+  const f = fixture({ usuarios: [{ id: 'U-1', usuario: 'sintetico', rol: 'asistente' }] });
+  await f.click('[data-tab=usuarios]');
+  const password = f.editar('[name=password]', 'Contraseña sintética');
+  f.editar('form[action="/admin/usuarios/U-1/correo"] input', 'sintetico@example.invalid');
+  await f.submit('form[action="/admin/usuarios/U-1/correo"]');
+  assert.equal(password.isConnected, true);
+  assert.equal(password.value, 'Contraseña sintética');
+  assert.equal(f.document.querySelector('form[action="/admin/usuarios"]').hasAttribute('data-agenda-editado'), true);
+  assert.equal(f.document.querySelector('form[action="/admin/usuarios/U-1/correo"]').hasAttribute('data-agenda-editado'), false);
+  assert.equal(f.confirmaciones.length, 0);
+});
+
+test('Guardar catálogo conserva el formulario nuevo pendiente sin copiar sus valores', async () => {
+  const f = fixture({ catalogo: [{ id: 'servicio-1', tipo: 'hechizo', nombre: 'Sintético', precio_cop: 10000 }] });
+  await f.click('[data-tab=catalogo]');
+  const nombre = f.editar('.catalog-create [name=nombre]', 'Servicio pendiente');
+  f.editar('form[action="/admin/catalogo/servicio-1"] [name=nombre]', 'Nombre editado');
+  await f.submit('form[action="/admin/catalogo/servicio-1"]');
+  assert.equal(nombre.isConnected, true);
+  assert.equal(nombre.value, 'Servicio pendiente');
+  assert.equal(f.document.querySelector('form[action="/admin/catalogo/servicio-1"]').hasAttribute('data-agenda-editado'), false);
+  assert.equal(f.salida().prevented, true);
+});
+
+test('Guardar usuario limpia su contraseña; un fallo mantiene el formulario para reintentar', async () => {
+  const f = fixture();
+  await f.click('[data-tab=usuarios]');
+  const password = f.editar('[name=password]', 'Contraseña sintética');
+  f.estado.postOk = false;
+  await f.submit('form[action="/admin/usuarios"]');
+  assert.equal(password.value, 'Contraseña sintética');
+  assert.equal(f.salida().prevented, true);
+  f.estado.postOk = true;
+  await f.submit('form[action="/admin/usuarios"]');
+  assert.equal(password.value, '');
+  assert.equal(f.document.querySelector('[name=password]').value, '');
+  assert.equal(f.salida().prevented, false);
+});
+
+test('Editar usuario durante un envío conserva el dato nuevo como pendiente', async () => {
+  const f = fixture();
+  await f.click('[data-tab=usuarios]');
+  f.editar('[name=password]', 'Primer valor sintético');
+  let terminar;
+  f.estado.pausa = new Promise(r => { terminar = r; });
+  await f.submit('form[action="/admin/usuarios"]');
+  const password = f.editar('[name=password]', 'Segundo valor sintético');
+  terminar();
+  await f.fin();
+  assert.equal(password.isConnected, true);
+  assert.equal(password.value, 'Segundo valor sintético');
+  assert.equal(f.salida().prevented, true);
+});
+
+test('Cerrar sesión cancelado conserva contraseña; salir la limpia sin persistirla', async () => {
+  const f = fixture();
+  await f.click('[data-tab=usuarios]');
+  const password = f.editar('[name=password]', 'Contraseña sintética');
+  assert.equal((await f.submit('form[action="/admin/logout"]')).defaultPrevented, true);
+  assert.equal(password.value, 'Contraseña sintética');
+  f.estado.aceptar = true;
+  assert.equal((await f.submit('form[action="/admin/logout"]')).defaultPrevented, false);
+  assert.equal(password.value, '');
+  assert.equal(f.salida().prevented, false);
 });
 
 test('Aceptar descarte navega solo por GET y nunca envía evidencia', async () => {

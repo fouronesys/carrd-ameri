@@ -15,14 +15,17 @@
   var saliendo = false;
   var urlVisible = location.pathname + location.search;
   function borradores(root) {
-    return (root || document).querySelectorAll('form[data-agenda-borrador][data-agenda-editado]');
+    return (root || document).querySelectorAll('form[data-agenda-editado]');
+  }
+  function preciosPendientes(root) {
+    return window.adminPreciosBorradores && window.adminPreciosBorradores.hay(root);
   }
   function confirmarBorradores(root) {
-    return !borradores(root).length || window.confirm(
+    return (!borradores(root).length && !preciosPendientes(root)) || window.confirm(
       'Hay notas, archivos seleccionados o cambios sin guardar. Al continuar pueden perderse. ¿Continuar?');
   }
   function marcarBorrador(campo) {
-    var form = campo.closest('form[data-agenda-borrador]');
+    var form = campo.closest('form[data-agenda-borrador], form[data-admin-borrador], form[data-usuarios-form]');
     if (!form) return;
     form.setAttribute('data-agenda-editado', '');
     revisionBorradores++;
@@ -37,9 +40,16 @@
       form.removeAttribute('data-agenda-editado');
       enviosEvidencia.delete(form);
     });
+    if (window.adminPreciosBorradores) window.adminPreciosBorradores.limpiar();
   }
+  window.adminConfirmarBorradores = confirmarBorradores;
+  document.addEventListener('catalogo:precios-editados', function () {
+    revisionBorradores++;
+    ++navegacion;
+    clearTimeout(busquedaTimer);
+  });
   window.addEventListener('beforeunload', function (e) {
-    if (saliendo || !borradores().length) return;
+    if (saliendo || (!borradores().length && !preciosPendientes())) return;
     e.preventDefault();
     e.returnValue = '';
   });
@@ -152,16 +162,38 @@
       // Sin destruir el editor activo: actualizar también tarjetas e historial.
       ['catalogo-lista', 'historial-catalogo'].forEach(function (id) {
         var actual = document.getElementById(id), nuevo = doc.getElementById(id);
-        if (actual && nuevo) actual.replaceWith(nuevo);
+        if (actual && nuevo) {
+          nuevo = document.importNode(nuevo, true);
+          conservarFormularios(actual, nuevo);
+          actual.replaceWith(nuevo);
+        }
       });
       filtrar();
     } catch (e) { mostrarToast('Precios guardados. Recarga el catálogo para actualizar su historial.', 'error'); }
   });
-  function reemplazar(tab, doc, confirmado) {
+  // Mover los nodos originales conserva también contraseña, foco y revisiones,
+  // sin serializar ni copiar los datos privados del formulario a otro almacén.
+  function conservarFormularios(anterior, nuevo) {
+    var pares = Array.from(borradores(anterior)).map(function (form) {
+      var destino = Array.from(nuevo.querySelectorAll('form[action]')).find(function (f) {
+        return f.getAttribute('action') === form.getAttribute('action');
+      });
+      if (!destino) throw new Error('Se conservó la vista porque un formulario pendiente ya no existe.');
+      return [form, destino];
+    });
+    pares.forEach(function (par) {
+      var form = par[0], destino = par[1];
+      destino.replaceWith(form);
+      var editor = form.closest('.catalog-edit');
+      if (editor) editor.classList.add('activo');
+    });
+  }
+  function reemplazar(tab, doc, confirmado, conservar) {
     var anterior = seccion(tab), nuevo = seccion(tab, doc);
     if (anterior && nuevo) {
+      nuevo = document.importNode(nuevo, true);
       // Guardar una fila también refresca las demás: proteger sus borradores.
-      if (!confirmado && !confirmarBorradores(anterior)) {
+      if (!conservar && !confirmado && !confirmarBorradores(anterior)) {
         throw new Error('Se conservaron los formularios sin guardar.');
       }
       var visible = anterior.classList.contains('activo');
@@ -173,7 +205,13 @@
         var form = el.querySelector('form[action]');
         return form && form.getAttribute('action');
       }).filter(Boolean);
-      anterior.innerHTML = nuevo.innerHTML;
+      if (conservar) {
+        conservarFormularios(anterior, nuevo);
+        var precios = anterior.querySelector('[data-panel-precios]');
+        var nuevosPrecios = nuevo.querySelector('[data-panel-precios]');
+        if (precios && nuevosPrecios) nuevosPrecios.replaceWith(precios);
+      }
+      anterior.replaceChildren.apply(anterior, Array.from(nuevo.childNodes));
       anterior.querySelectorAll('details').forEach(function (el) {
         var form = el.querySelector('form[action]');
         if (form && abiertos.includes(form.getAttribute('action'))) el.open = true;
@@ -398,6 +436,10 @@
       if (revisionEnvio === revisionesFormulario.get(form)) {
         form.removeAttribute('data-agenda-editado');
         form.querySelectorAll('input[type=file]').forEach(function (campo) { campo.value = ''; });
+        if (catalogo || usuarios) {
+          form.reset();
+          form.querySelectorAll('input[type=password]').forEach(function (campo) { campo.value = ''; });
+        }
       }
       if (trabajo) {
         var docs = await Promise.all([cargar('agenda'), cargar('realizados')]);
@@ -405,10 +447,10 @@
         if (activa() === 'agenda') history.replaceState(null, '', agendaUrl);
         mostrarToast(d.realizado ? 'Trabajo marcado como entregado' : 'Trabajo devuelto a la agenda');
       } else if (usuarios) {
-        reemplazar('usuarios', await cargar('usuarios'));
+        reemplazar('usuarios', await cargar('usuarios'), false, true);
         mostrarToast(d.mensaje || 'Usuarios y notificaciones actualizados');
       } else if (catalogo) {
-        reemplazar('catalogo', await cargar('catalogo'));
+        reemplazar('catalogo', await cargar('catalogo'), false, true);
         mostrarToast(d.mensaje || 'Catálogo actualizado');
       } else {
         reemplazar(tabActual, await cargar(tabActual));
