@@ -1858,6 +1858,34 @@ async function recalcularTotalPedido(pedidoRef) {
 }
 
 // El administrador puede corregir el servicio, su precio y el estado de pago.
+app.get('/admin/adelanto/:ref', requiereAdmin, soloAdmin, async function (req, res) {
+  const adelanto = await db.obtenerPorRef(req.params.ref);
+  if (!adelanto) return res.status(404).send('Adelanto no encontrado.');
+  if (adelanto.adelanto !== 'solo') return res.status(400).send('Este registro no es un adelanto independiente.');
+  const [actual, candidatos] = await Promise.all([
+    db.obtenerVinculoAdelanto(adelanto.ref), db.candidatosAdelanto(adelanto.ref),
+  ]);
+  const servicioActual = actual ? await db.obtenerPorRef(actual) : null;
+  res.set('Cache-Control', 'no-store');
+  res.send(templates.panelAdelanto({ adelanto, actual, candidatos, servicioActual }));
+});
+
+app.post('/admin/adelanto/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
+  const b = req.body || {};
+  if (typeof b.servicio_ref !== 'string' || typeof b.anterior !== 'string' ||
+      b.servicio_ref.length > 200 || b.anterior.length > 200) {
+    return res.status(400).send('Selecciona un servicio o la opción para desvincular.');
+  }
+  try {
+    await db.vincularAdelanto(req.params.ref, b.servicio_ref.trim(), b.anterior);
+    res.redirect('/admin?tab=agenda&tipo=todos&buscar=' + encodeURIComponent(req.params.ref) +
+      '&ok=' + encodeURIComponent(b.servicio_ref ? 'Vinculación guardada' : 'Adelanto desvinculado'));
+  } catch (e) {
+    if (e.status) return res.status(e.status).type('text').send(e.message);
+    throw e;
+  }
+});
+
 app.post('/admin/editar/:ref', mismoOrigen, requiereAdmin, soloAdmin, async function (req, res) {
   const reg = await db.obtenerPorRef(req.params.ref);
   if (!reg) return res.status(404).send('Agendamiento no encontrado.');
