@@ -11,6 +11,20 @@ const { spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 const { parseHTML } = require('linkedom');
 
+test('Compatibilidad de adelantos extra distingue otros extras y no crea plazos de entrega', () => {
+  const { esAdelantoIndependiente } = require('../lib/adelanto-independiente');
+  const { plazoEntrega } = require('../lib/seguimientos');
+  const legado = { adelanto: 'extra', producto: ' Adelanto (urgencia) ', estado: 'agendado', creado_en: '2026-01-01' };
+  assert.equal(esAdelantoIndependiente(legado), true);
+  assert.equal(plazoEntrega(legado), null);
+  for (const r of [
+    { adelanto: 'extra', producto: 'Velación nocturna' },
+    { adelanto: 'extra', producto: 'Ocultamiento' },
+    { adelanto: 'incluido', producto: 'Trabajo' },
+    { producto: 'Adelanto (urgencia)' },
+  ]) assert.equal(esAdelantoIndependiente(r), false);
+});
+
 test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y agenda real', { timeout: 60000 }, async t => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adelantos-'));
   const pgdir = path.join(tmp, 'pg');
@@ -293,6 +307,45 @@ test('Adelantos: asignación, cambio, desvinculación, permisos, concurrencia y 
       assert.equal(refs.length, (await db.listarAgendamientos()).length);
       await db.eliminarDefinitivamentePorRef('S2');
       assert.equal(await db.obtenerVinculoAdelanto('A'), '', 'Eliminar definitivamente libera la asociación');
+    });
+    await t.test('Adelantos antiguos extra: filtro, zona, contadores y vinculación sin reescribir pagos', async () => {
+      // Aislado: reproduce ambos pedidos aportados sin datos de clientes reales.
+      await db.pool.query('DELETE FROM agendamientos');
+      const registros = [
+        { ref: 'LEGADO-1', pedido_ref: 'LEGADO-P1', adelanto: 'extra', producto: 'Adelanto (urgencia)' },
+        { ref: 'LEGADO-2', pedido_ref: 'LEGADO-P2', adelanto: 'extra', producto: 'Adelanto (urgencia)' },
+        { ref: 'SERVICIO-LEGADO', pedido_ref: 'LEGADO-P1', producto: 'Trabajo real' },
+        { ref: 'OTRO-EXTRA', pedido_ref: 'LEGADO-P1', adelanto: 'extra', producto: 'Velación nocturna' },
+        { ref: 'LEGADO-PENDIENTE', pedido_ref: 'LEGADO-P3', adelanto: 'extra', producto: 'Adelanto (urgencia)', estado: 'pendiente_pago' },
+      ].map(r => ({ estado: 'agendado', precio_cop: 28000, tipo_servicio: 'trabajo', ...r }));
+      for (const r of registros) await db.crearAgendamiento(r);
+      const resumen = await db.resumenPanel();
+      assert.equal(resumen.agendados, 2, 'Los recargos no suman trabajos');
+      assert.equal(resumen.personas_agendadas, 1, 'El pedido de solo recargo no suma una persona');
+      const filtro = await db.listarAgendaPanel({ adelanto: 'si', buscar: 'adelantos' });
+      assert.deepEqual(filtro.registros.map(r => r.ref).sort(), ['LEGADO-1', 'LEGADO-2']);
+      assert.ok(filtro.registros.every(r => !r.adelanto_vinculado_activo));
+      const html = await request('/admin?adelanto=si&buscar=adelantos', admin);
+      const d = parseHTML(await html.text()).document;
+      for (const ref of ['LEGADO-1', 'LEGADO-2']) {
+        const fila = d.querySelector('[data-ref="' + ref + '"]');
+        assert.ok(fila);
+        assert.match(fila.textContent, /sin servicio asociado/);
+        assert.ok(fila.querySelector('a[href="/admin/adelanto/' + ref + '"]'));
+        assert.equal(fila.querySelector('.trabajo-form'), null);
+        assert.equal((await request('/admin/adelanto/' + ref, admin)).status, 200);
+        const intento = await request('/admin/trabajo/' + ref, admin, { accion: 'marcar' });
+        assert.equal(intento.status, 400);
+      }
+      assert.ok((await db.candidatosAdelanto('LEGADO-1')).some(r => r.ref === 'SERVICIO-LEGADO'));
+      assert.ok(!(await db.candidatosAdelanto('LEGADO-1')).some(r => r.ref === 'LEGADO-2'));
+      await db.vincularAdelanto('LEGADO-1', 'SERVICIO-LEGADO', '', actor);
+      const vinculado = await db.obtenerParaSeguimiento('SERVICIO-LEGADO');
+      assert.equal(vinculado.adelanto_vinculado_activo, true);
+      assert.equal((await db.obtenerPorRef('LEGADO-1')).adelanto, 'extra', 'No se migra el pago histórico');
+      const nuevoFiltro = await db.listarAgendaPanel({ adelanto: 'si' });
+      assert.ok(nuevoFiltro.registros.some(r => r.ref === 'SERVICIO-LEGADO'));
+      assert.ok(!nuevoFiltro.registros.some(r => r.ref === 'OTRO-EXTRA'));
     });
   } finally {
     if (server) await new Promise(r => server.close(r));

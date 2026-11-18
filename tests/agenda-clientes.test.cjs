@@ -238,7 +238,7 @@ test('Buscar adelanto incluido encuentra el pedido y separa esos trabajos en la 
   assert.match(d.querySelector('[data-ref="CLIENTE-A-1"]').textContent, /Incluye adelanto/);
 });
 
-test('Con adelanto es un filtro visible que excluye servicios normales, recargos y pagos sin confirmar', async () => {
+test('Con adelanto incluye recargos en su zona y excluye servicios normales y pagos sin confirmar', async () => {
   fixture.sembrarAgendaAgrupada();
   fixture.trabajos.get('CLIENTE-A-1').adelanto = 'incluido';
   fixture.trabajos.get('CLIENTE-A-3').adelanto = 'incluido';
@@ -253,7 +253,7 @@ test('Con adelanto es un filtro visible que excluye servicios normales, recargos
   const inicial = await consultar('tipo=todos');
   assert.equal(inicial.querySelector('[data-adelanto]').textContent, 'Con adelanto');
   for (const [tipo, refs] of [
-    ['trabajo', ['CLIENTE-A-1']], ['lectura', ['LECTURA-URGENTE']], ['todos', ['CLIENTE-A-1', 'LECTURA-URGENTE']],
+    ['trabajo', ['CLIENTE-A-1', 'RECARGO-FILTRO']], ['lectura', ['LECTURA-URGENTE']], ['todos', ['CLIENTE-A-1', 'LECTURA-URGENTE', 'RECARGO-FILTRO']],
   ]) {
     const d = await consultar(new URLSearchParams({ tipo, estado: 'agendado', adelanto: 'si' }));
     assert.deepEqual([...d.querySelectorAll('#cuerpo-tabla tr[data-ref]')].map(r => r.dataset.ref).sort(), refs);

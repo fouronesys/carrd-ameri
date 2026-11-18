@@ -19,6 +19,12 @@ Los servicios comprados con adelanto incluido (`adelanto: "incluido"`) se buscan
 
 Además de esa zona debe existir un filtro visible «Con adelanto» para los servicios con urgencia pagada, incluida o vinculada. La zona separada no sustituye al filtro.
 
+El filtro también incluye los adelantos independientes pagados, incluso sin vincular, en su propia zona. Los históricos `extra` con producto «Adelanto (urgencia)» representan recargos independientes, no servicios entregables ni otros extras.
+
+**Why:** El usuario aportó pagos reales que no aparecían: el carrito antiguo los había registrado como `extra`, y el filtro además excluía recargos sin asociación.
+
+**How to apply:** Reconocerlos al leer, sin migrar pagos ni generalizar a todos los extras. Mostrar la acción de vinculación y conservar los límites de identidad; no promover otro servicio automáticamente.
+
 **Why:** El usuario indicó que los adelantos incluidos en el servicio deben encontrarse al buscarlos y que esos trabajos requieren una zona aparte. Reiteró que faltaba el filtro que había pedido, aunque ya existiera esa zona.
 
 **How to apply:** No confundirlos con el adelanto vendido como artículo separado (`adelanto: "solo"`); conserva el servicio como un solo trabajo con su marca de urgencia.

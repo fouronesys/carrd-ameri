@@ -24,6 +24,7 @@ const { crearDivisas } = require('./lib/divisas');
 const { crearCotizaciones, datosBooking, huellaCotizacion } = require('./lib/cotizaciones');
 const { tipoServicio, tipoPanel } = require('./lib/tipo-servicio');
 const ingresos = require('./lib/ingresos');
+const { esAdelantoIndependiente: esRecargoAdelanto } = require('./lib/adelanto-independiente');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -1053,7 +1054,7 @@ app.post('/api/booking', function (req, res) {
           objetivo_foto: '',
           comprobante: comprobanteFile ? comprobanteFile.filename : '',
           info_extra: hechizosTexto.slice(0, 2000),
-          adelanto: esAdelantoSolo ? 'solo' : 'extra',
+          adelanto: esAdelantoSolo || nombreExtra === 'Adelanto (urgencia)' ? 'solo' : 'extra',
           estado: esManual ? 'pendiente_verificacion' : 'pendiente_pago',
           wompi_tx: '',
           correo_enviado: false,
@@ -1429,7 +1430,7 @@ app.post('/api/checkout', function (req, res) {
           // El comprobante (uno por pedido) se guarda en el primer servicio.
           comprobante: (i === 0 && comprobanteFile) ? comprobanteFile.filename : '',
           info_extra: p.infoExtra,
-          adelanto: p.esAdelanto ? 'solo' : (p.esExtra ? 'extra' : ''),
+          adelanto: p.esAdelanto || (p.esExtra && p.nombre === 'Adelanto (urgencia)') ? 'solo' : (p.esExtra ? 'extra' : ''),
           estado: esManual ? 'pendiente_verificacion' : 'pendiente_pago',
           wompi_tx: '',
           correo_enviado: false,
@@ -1779,7 +1780,7 @@ app.post('/admin/trabajo/:ref', mismoOrigen, requiereAdmin, async function (req,
   const marcarComoHecho = accion === 'marcar';
 
   if (marcarComoHecho) {
-    if (reg.adelanto === 'solo') {
+    if (esRecargoAdelanto(reg)) {
       const error = 'El adelanto independiente es un recargo, no un trabajo por entregar. Vincúlalo al servicio correspondiente.';
       return req.get('accept') === 'application/json'
         ? res.status(400).json({ ok: false, error }) : res.status(400).send(error);
@@ -1933,7 +1934,7 @@ async function recalcularTotalPedido(pedidoRef) {
 app.get('/admin/adelanto/:ref', requiereAdmin, soloAdmin, async function (req, res) {
   const adelanto = await db.obtenerPorRef(req.params.ref);
   if (!adelanto) return res.status(404).send('Adelanto no encontrado.');
-  if (adelanto.adelanto !== 'solo') return res.status(400).send('Este registro no es un adelanto independiente.');
+  if (!esRecargoAdelanto(adelanto)) return res.status(400).send('Este registro no es un adelanto independiente.');
   // Asociación e historial provienen de la misma lectura, incluso con otra sesión activa.
   const actual = adelanto.adelanto_servicio_ref || '';
   const candidatos = await db.candidatosAdelanto(adelanto.ref);

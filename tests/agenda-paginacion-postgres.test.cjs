@@ -356,8 +356,8 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       assert.ok(primera.registros.findIndex(r => r.ref === 'CONT-S') <
         primera.registros.findIndex(r => r.ref === 'CONT-A'), 'El servicio vinculado aparece antes de su recargo');
       const prioridad = await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado', adelanto: 'si' });
-      assert.deepEqual(prioridad.registros.map(r => r.ref).sort(), ['CONT-I', 'CONT-S']);
-      assert.equal(prioridad.trabajos, 2);
+      assert.deepEqual(prioridad.registros.map(r => r.ref).sort(), ['CONT-A', 'CONT-H', 'CONT-I', 'CONT-O', 'CONT-S']);
+      assert.equal(prioridad.trabajos, 5, 'La vista cuenta sus registros, incluidos tres recargos; los contadores de trabajos siguen separados');
       assert.equal((await db.listarAgendaPanel({ adelanto: 'si', estado: 'pendiente_verificacion' })).registros.length, 0);
       assert.deepEqual(await db.listarAgendaPanel({ tipo: 'trabajo', estado: 'agendado', adelanto: 'todos',
         vista: prioridad.vista, comprobar: true }), { cambios: true, caducada: true });
@@ -369,8 +369,8 @@ test('Agenda PostgreSQL: grupos íntegros, prioridad, búsqueda global, entrega 
       assert.equal(await db.marcarTrabajoRealizado('CONT-A'), null);
       assert.equal((await db.listarRealizados()).length, 0, 'Recargos históricos no reaparecen como entregas');
       await db.marcarTrabajoRealizado('CONT-S');
-      assert.deepEqual((await db.listarAgendaPanel({ tipo: 'trabajo', adelanto: 'si', vista: prioridad.vista })).registros.map(r => r.ref),
-        ['CONT-I'], 'El filtro no conserva una entrega ni su recargo al reutilizar una vista');
+      assert.deepEqual((await db.listarAgendaPanel({ tipo: 'trabajo', adelanto: 'si', vista: prioridad.vista })).registros.map(r => r.ref).sort(),
+        ['CONT-A', 'CONT-H', 'CONT-I', 'CONT-O'], 'La entrega sale del filtro; los recargos siguen gestionables en su zona');
       await verificar(2, 2, 8, 1);
       assert.equal((await db.resumenPanel('trabajo')).personas_agendadas, 1, 'C solo conserva una lectura, no otro trabajo');
       await db.marcarTrabajoRealizado('CONT-L');

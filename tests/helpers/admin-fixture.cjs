@@ -101,7 +101,7 @@ const db = {
     const grupos = require('../../lib/agenda-clientes').agruparClientes(
        [...trabajos.values()].filter(r => estaEnAgenda(r) && (filtros.tipo === 'todos' || tipoServicio(r) === filtros.tipo) &&
          (filtros.estado === 'todos' || r.estado === filtros.estado) &&
-         (filtros.adelanto !== 'si' || require('../../lib/agenda-panel').esAdelantoPrioritario(r)))
+         (filtros.adelanto !== 'si' || require('../../lib/agenda-panel').coincideFiltroAdelanto(r)))
         .map(r => ({ ...r, tipo_servicio: tipoServicio(r) }))
      ).filter(g => (!filtros.buscar || g.registros.some(r => [r.ref, r.pedido_ref, r.cliente_nombre, r.contacto, r.producto, r.objetivo_nombre, r.cliente_email]
         .join(' ').toLowerCase().includes(filtros.buscar.toLowerCase())) ||
