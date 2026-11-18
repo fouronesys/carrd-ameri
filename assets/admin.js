@@ -153,7 +153,7 @@
     // Los resumenes viven fuera de las secciones que se reemplazan por AJAX.
     // Sin sincronizarlos, la tabla se actualiza pero el conteo queda obsoleto.
     ['stat-personas', 'stat-agendados', 'stat-total', 'stat-verificar', 'stat-ingresos',
-      'stat-comisiones', 'stat-cobrado', 'stat-sin-desglose'].forEach(function (id) {
+      'stat-servicios', 'stat-comisiones', 'stat-cobrado', 'stat-sin-desglose'].forEach(function (id) {
       var actual = document.getElementById(id), nuevo = doc.getElementById(id);
       if (!actual || !nuevo) return;
       actual.textContent = nuevo.textContent;

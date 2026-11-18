@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const { parseHTML } = require('linkedom');
 
 const base = { personas_agendadas: 2, agendados: 3, total: 5, verificar: 1, realizados: 4,
-  catalogo: 9, ingresos: 5000, comisiones: 1000, cobrado: 6000, ingresos_sin_desglose: 2 };
+  catalogo: 9, ingresos: 0, ingresos_registrados: 5000, comisiones: 1000, cobrado: 6000, ingresos_sin_desglose: 2 };
 function respuesta(resumen = base, status = 200) {
   return { status, ok: status === 200, headers: { get: () => 'application/json' },
     json: async () => ({ ok: true, tipo: 'trabajo', resumen }) };
@@ -14,7 +14,7 @@ function respuesta(resumen = base, status = 200) {
 function diferida() { let resolver; const promesa = new Promise(r => { resolver = r; }); return { promesa, resolver }; }
 function fixture() {
   const { document } = parseHTML('<html><body>' +
-    ['personas', 'agendados', 'total', 'verificar', 'ingresos', 'comisiones', 'cobrado', 'sin-desglose']
+    ['personas', 'agendados', 'total', 'verificar', 'ingresos', 'servicios', 'comisiones', 'cobrado', 'sin-desglose']
       .map(id => '<div><span id="stat-' + id + '">99</span></div>').join('') +
     ['agenda', 'realizados', 'catalogo'].map(tab => '<a data-tab="' + tab + '"><span class="tab-count">99</span></a>').join('') +
     '<p id="contadores-estado" hidden></p><p id="agenda-cambios" hidden></p>' +
@@ -39,7 +39,7 @@ test('Los totales se actualizan solos sin descargar tablas, mover filas ni borra
   const f = fixture(), form = f.document.querySelector('form'), tabla = f.document.querySelector('table');
   await f.tick();
   for (const [id, valor] of [['stat-personas', '2'], ['stat-agendados', '3'], ['stat-total', '5'],
-    ['stat-verificar', '1'], ['stat-ingresos', '$5.000'], ['stat-comisiones', '$1.000'],
+    ['stat-verificar', '1'], ['stat-ingresos', '$5.000'], ['stat-servicios', '$0'], ['stat-comisiones', '$1.000'],
     ['stat-cobrado', '$6.000'], ['stat-sin-desglose', '2']]) assert.equal(f.valor(id), valor);
   assert.equal(f.document.querySelector('[data-tab=realizados] .tab-count').textContent, '4');
   assert.equal(f.document.querySelector('[data-tab=agenda] .tab-count').textContent, '2');

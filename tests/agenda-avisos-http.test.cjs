@@ -12,7 +12,7 @@ test('El resumen ligero exige sesión y solo consulta los totales globales del t
   const db = require('../lib/db');
   const previas = { resumenPanel: db.resumenPanel, listarAgendaPanel: db.listarAgendaPanel, listarRealizados: db.listarRealizados };
   const consultas = [], resumen = { total: 5, agendados: 3, personas_agendadas: 2, verificar: 1,
-    realizados: 4, catalogo: 9, ingresos: 5000, comisiones: 1000, cobrado: 6000, ingresos_sin_desglose: 2 };
+    realizados: 4, catalogo: 9, ingresos: 5000, ingresos_registrados: 6000, comisiones: 1000, cobrado: 6000, ingresos_sin_desglose: 2 };
   db.resumenPanel = async tipo => { consultas.push(tipo); return resumen; };
   db.listarAgendaPanel = db.listarRealizados = async () => assert.fail('El resumen no debe consultar tablas ni vistas');
   const servidor = app.listen(0, '127.0.0.1');

@@ -126,7 +126,7 @@ test('Ingresos HTTP y PostgreSQL aislados: cotización, desglose, confirmación 
       assert.equal(a.q.total_cop, 3442);
       assert.equal((await resumen()).ingresos, 0);
       for (const c of [a, b]) await confirmar(c);
-      assert.deepEqual(await resumen(), { ingresos: 5000, comisiones: 1884, cobrado: 6884, ingresos_sin_desglose: 0 });
+      assert.deepEqual(await resumen(), { ingresos: 5000, ingresos_registrados: 5942, comisiones: 1884, cobrado: 6884, ingresos_sin_desglose: 0 });
     });
     await t.test('Descuentos, urgencia incluida, adelanto independiente, transferencia y tipos mixtos', async () => {
       await db.crearPromo({ id: 'promo-ingresos', activa: true, porcentaje: 20, objetivo: ['ing-trabajo'] });
@@ -153,7 +153,8 @@ test('Ingresos HTTP y PostgreSQL aislados: cotización, desglose, confirmación 
         for (const estado of ['agendado', 'rechazado']) {
           const d = parseHTML(await (await global.fetch(url + '/admin?tipo=' + tipo + '&estado=' + estado,
             { headers: { Cookie: cookie } })).text()).document;
-          assert.equal(d.querySelector('#stat-ingresos').textContent, '$' + esperado.ingresos.toLocaleString('es-CO'));
+          assert.equal(d.querySelector('#stat-ingresos').textContent, '$' + esperado.ingresos_registrados.toLocaleString('es-CO'));
+          assert.equal(d.querySelector('#stat-servicios').textContent, '$' + esperado.ingresos.toLocaleString('es-CO'));
         }
       }
     });
@@ -188,11 +189,30 @@ test('Ingresos HTTP y PostgreSQL aislados: cotización, desglose, confirmación 
       const despues = await resumen();
       assert.equal(despues.ingresos, antes.ingresos);
       assert.equal(despues.ingresos_sin_desglose, 5);
+      assert.equal(despues.ingresos_registrados - antes.ingresos_registrados, 5 * 3442);
       const d = parseHTML(await (await global.fetch(url + '/admin?tipo=todos', { headers: { Cookie: cookie } })).text()).document;
       assert.equal(d.querySelector('#stat-sin-desglose').textContent, '5');
+      assert.equal(d.querySelector('#stat-ingresos').textContent, '$' + despues.ingresos_registrados.toLocaleString('es-CO'));
       assert.match(d.body.textContent, /Ingresos de servicios/);
       assert.match(d.body.textContent, /Total cobrado desglosado/);
       assert.match(d.body.textContent, /no se deduce la comisión/);
+    });
+    await t.test('Una base solo histórica conserva el total anterior en HTML y al actualizar contadores', async () => {
+      // Solo el PostgreSQL desechable de esta prueba, sin tocar datos reales.
+        await db.pool.query('DELETE FROM agendamientos');
+        await db.crearAgendamiento({ ref: 'SOLO-HISTORICO', producto: 'Histórico sintético',
+          estado: 'agendado', precio_cop: 106194754, trabajo_hecho: true });
+        const antes = (await db.pool.query('SELECT data FROM agendamientos')).rows;
+        const r = await db.resumenPanel('todos');
+        assert.equal(Number(r.ingresos_registrados), 106194754);
+        assert.equal(Number(r.ingresos), 0);
+        const respuesta = await global.fetch(url + '/admin/resumen?tipo=todos', { headers: { Cookie: cookie } });
+        assert.equal(Number((await respuesta.json()).resumen.ingresos_registrados), 106194754);
+        const html = await global.fetch(url + '/admin?tipo=todos', { headers: { Cookie: cookie } });
+        const d = parseHTML(await html.text()).document;
+        assert.equal(d.querySelector('#stat-ingresos').textContent, '$106.194.754');
+        assert.equal(d.querySelector('#stat-servicios').textContent, '$0');
+        assert.deepEqual((await db.pool.query('SELECT data FROM agendamientos')).rows, antes);
     });
   } finally {
     global.fetch = realFetch;

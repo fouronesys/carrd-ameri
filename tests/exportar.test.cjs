@@ -176,7 +176,9 @@ test('Panel identifica históricos sin desglose, explica tarifas en todas las vi
   const antes = structuredClone([...fixture.trabajos.values()]);
   const panel = await (await fetch(url + '/admin?tipo=todos', { headers: { Cookie: cookie } })).text();
   const d = parseHTML(panel).document;
-  assert.equal(d.querySelector('#stat-ingresos').textContent, '$0');
+  const totalHistorico = registros.filter(r => r.estado === 'agendado').reduce((s, r) => s + r.precio_cop, 0);
+  assert.equal(d.querySelector('#stat-ingresos').textContent, '$' + totalHistorico.toLocaleString('es-CO'));
+  assert.equal(d.querySelector('#stat-servicios').textContent, '$0');
   assert.equal(Number(d.querySelector('#stat-sin-desglose').textContent), registros.filter(r => r.estado === 'agendado').length);
   assert.ok(d.body.textContent.includes('Tarifas COP y USD independientes'));
   for (const r of registros.filter(r => !r.trabajo_hecho && !r.eliminado_en)) {

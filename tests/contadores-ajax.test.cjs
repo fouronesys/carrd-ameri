@@ -17,7 +17,7 @@ test('Los contadores cambian antes de recibir la tabla lenta y entregar no desca
     const entregables = activos().filter(r => r.adelanto !== 'solo');
     return { total: activos().length, agendados: entregables.length,
       personas_agendadas: agruparClientes(entregables).length, realizados: filas.filter(r => r.trabajo_hecho).length,
-      verificar: 0, catalogo: 0, ingresos: 20000, comisiones: 0, cobrado: 20000, ingresos_sin_desglose: 0 };
+      verificar: 0, catalogo: 0, ingresos: 20000, ingresos_registrados: 20000, comisiones: 0, cobrado: 20000, ingresos_sin_desglose: 0 };
   }
   const render = () => adminDashboard({ registros: activos(), resumen: resumen(),
     realizados: filas.filter(r => r.trabajo_hecho), tipoPanel: 'trabajo', cargaPorPestana: true });

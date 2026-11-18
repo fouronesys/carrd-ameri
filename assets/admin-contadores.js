@@ -4,7 +4,8 @@
   var pendiente = null, fallos = 0, canal;
   var campos = {
     'stat-personas': 'personas_agendadas', 'stat-agendados': 'agendados',
-    'stat-total': 'total', 'stat-verificar': 'verificar', 'stat-ingresos': 'ingresos',
+    'stat-total': 'total', 'stat-verificar': 'verificar', 'stat-ingresos': 'ingresos_registrados',
+    'stat-servicios': 'ingresos',
     'stat-comisiones': 'comisiones', 'stat-cobrado': 'cobrado',
     'stat-sin-desglose': 'ingresos_sin_desglose',
   };
@@ -31,7 +32,7 @@
     Object.keys(campos).forEach(function (id) {
       var el = document.getElementById(id), n = Number(resumen[campos[id]]);
       if (!el) return;
-      var texto = ['stat-ingresos', 'stat-comisiones', 'stat-cobrado'].includes(id)
+      var texto = ['stat-ingresos', 'stat-servicios', 'stat-comisiones', 'stat-cobrado'].includes(id)
         ? '$' + n.toLocaleString('es-CO') : String(n);
       if (el.textContent !== texto) cambiaron = true;
       el.textContent = texto;
