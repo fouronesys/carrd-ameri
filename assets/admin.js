@@ -134,14 +134,17 @@
     return '/admin?' + params.toString();
   }
   async function cargar(tab, url) {
+    var turno = window.adminContadores && window.adminContadores.consulta();
     var r = await fetch(url || urlTab(tab), { credentials: 'same-origin', cache: 'no-store' });
     if (!r.ok) throw new Error('No se pudo cargar el panel. Inténtalo nuevamente.');
     var doc = new DOMParser().parseFromString(await r.text(), 'text/html');
     if (!doc.querySelector('.admin-nav')) throw new Error('Tu sesión caducó. Recarga la página e inicia sesión.');
     if (!seccion(tab, doc)) throw new Error('No tienes acceso a esta sección.');
+    doc.contadoresTurno = turno;
     return doc;
   }
   function contadores(doc) {
+    if (window.adminContadores && !window.adminContadores.aceptarDocumento(doc)) return;
     doc.querySelectorAll('.admin-tab').forEach(function (btn) {
       var actual = document.querySelector('[data-tab="' + btn.dataset.tab + '"] .tab-count');
       var nuevo = btn.querySelector('.tab-count');
@@ -389,6 +392,7 @@
     e.preventDefault();
     if (mutando) return;
     mutando = true;
+    if (window.adminContadores) window.adminContadores.pausar();
     clearTimeout(busquedaTimer);
     ++navegacion;
     var tabActual = activa(), y = window.scrollY;
@@ -427,6 +431,11 @@
         errorFormulario(form, errorEnvio, d.campos); return;
       }
       guardado = true;
+      // Independiente de la tabla y de borradores: no esperar a descargar HTML.
+      if (window.adminContadores) {
+        window.adminContadores.actualizar();
+        window.adminContadores.avisar();
+      }
       if (evidencia) {
         enviosEvidencia.delete(form);
         form.querySelector('[name=operacion]').value = window.crypto.randomUUID();
@@ -443,8 +452,9 @@
         }
       }
       if (trabajo) {
-        var docs = await Promise.all([cargar('agenda'), cargar('realizados')]);
-        reemplazar('agenda', docs[0]); reemplazar('realizados', docs[1]);
+        // Las pestañas ocultas ya se consultan al abrirlas. No descargar todas
+        // las entregas para actualizar un contador de la agenda (ni viceversa).
+        reemplazar(tabActual, await cargar(tabActual));
         if (activa() === 'agenda') history.replaceState(null, '', agendaUrl);
         mostrarToast(d.realizado ? 'Trabajo marcado como entregado' : 'Trabajo devuelto a la agenda');
       } else if (usuarios) {
@@ -470,6 +480,10 @@
       if (evidencia && enviosEvidencia.has(form)) errorFormulario(form,
         errorEnvio + ' Pulsa «Reintentar envío original» para consultar o completar esa misma operación sin duplicarla. Los cambios posteriores no se enviarán hasta resolverla. No se reintentará automáticamente.');
       form.removeAttribute('aria-busy'); mutando = false;
+      if (window.adminContadores) {
+        window.adminContadores.reanudar();
+        if (!guardado) window.adminContadores.actualizar();
+      }
     }
   });
   window.addEventListener('popstate', async function () {

@@ -91,7 +91,8 @@ test('Navegación AJAX conserva vista e historial; entregar no desplaza páginas
   assert.match(document.querySelector('#sin-resultados').textContent, /ya no tienen servicios activos/);
   await click('[aria-label="Páginas de la agenda"] a');
   assert.equal(document.querySelectorAll('#cuerpo-tabla tr[data-ref]').length, 15);
-  assert.ok(solicitudes.some(u => u.includes('tab=realizados')));
+  assert.equal(solicitudes.some(u => u.includes('tab=realizados')), false,
+    'Entregar desde Agenda no debe descargar todos los entregados de la pestaña oculta');
   await click('[data-tab="realizados"]');
   await click('[data-tab="agenda"]');
   assert.equal(new URLSearchParams(location.search).get('pagina'), '2');

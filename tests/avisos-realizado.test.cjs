@@ -369,6 +369,9 @@ test('Cola durable: transacciones, concurrencia, caída forzada, reintentos y SM
         ...Array.from({ length: 4 }, () => db.restaurarPorRef('REST-CANCELANDO')),
         ...Array.from({ length: 3 }, () => db.procesarSiguienteAvisoRealizado(enviar)),
       ]);
+      // SKIP LOCKED puede omitir legítimamente la fila mientras las
+      // restauraciones la bloquean. El siguiente ciclo debe recuperarla.
+      await db.procesarSiguienteAvisoRealizado(enviar);
       assert.equal(smtp.mensajes.length, antes + 1);
       assert.equal((await aviso('REST-CANCELANDO')).estado, 'enviado');
       assert.equal((await aviso('REST-CANCELANDO')).intentos, 1);

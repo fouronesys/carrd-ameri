@@ -37,6 +37,8 @@ Durante un recorrido paginado se conserva la selección y el orden de compradore
 
 Las novedades de pagos y prioridad deben avisarse sin renovar automáticamente el recorrido ni cerrar formularios. La renovación es voluntaria.
 
-**Why:** Un urgente confirmado por otro administrador puede quedar fuera del recorrido conservado durante 30 minutos; reordenarlo automáticamente interrumpe la revisión y puede descartar una edición.
+La renovación voluntaria se refiere a las filas, no a los contadores: estos deben actualizarse al guardar sin esperar a recargar las tablas ni requerir un clic.
+
+**Why:** Un urgente confirmado por otro administrador puede quedar fuera del recorrido conservado durante 30 minutos; reordenarlo automáticamente interrumpe la revisión y puede descartar una edición. El usuario reiteró que los contadores no se actualizan correctamente y «tarda demasiado».
 
 **How to apply:** Separar la comprobación de novedades de la navegación. No prolongar la caducidad al comprobar y advertir de cambios sin guardar antes de una renovación voluntaria.

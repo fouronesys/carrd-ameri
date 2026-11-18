@@ -1608,6 +1608,15 @@ async function registrarYalertarAcceso(req, info) {
   return evento;
 }
 
+// Solo totales: no generar tablas, recuperar entregados ni crear vistas paginadas.
+app.get('/admin/resumen', async function (req, res) {
+  res.set('Cache-Control', 'no-store');
+  res.vary('Cookie');
+  if (!req.session?.admin) return res.status(401).json({ ok: false, error: 'Sesión caducada' });
+  const tipo = tipoPanel(req.query.tipo || 'trabajo');
+  res.json({ ok: true, tipo, resumen: await db.resumenPanel(tipo) });
+});
+
 app.get('/admin', async function (req, res) {
   if (req.query.comprobar_agenda === '1') {
     res.set('Cache-Control', 'no-store');
